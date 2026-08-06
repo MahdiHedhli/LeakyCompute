@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Leaky Compute – Ollama Exposure Check</title>
+  <style>
+    body {font-family:Arial,Helvetica,sans-serif; max-width:600px; margin:2rem auto; line-height:1.5;}
+    input, button {padding:0.5rem; font-size:1rem;}
+    pre {background:#f4f4f4; padding:1rem; border:1px solid #ddd;}
+  </style>
+</head>
+<body>
+  <h1>Leaky Compute – Ollama Exposure Check</h1>
+  <p>Enter the IP address (or CIDR) of the Ollama server you want to test.</p>
+
+  <input id="ipInput" placeholder="e.g. 203.0.113.5" />
+  <button id="checkBtn">Check</button>
+
+  <h2>Result</h2>
+  <pre id="result">-- loading --</pre>
+
+  <script src="script.js"></script>
+</body>
+</html>
