@@ -1,0 +1,183 @@
+# LeakyCompute discovery query profiles
+# Passive Shodan first; active probes only with slow caps (see discover.py).
+#
+# Severity context (for the post — cite primary sources, not this file):
+# - NadMesh (mid-2026): bot harvests Shodan for ComfyUI/Ollama/n8n/Open WebUI/Langflow/Gradio → exploit queue
+# - ShadowRay / ShadowRay 2.0 (Oligo): self-propagating abuse of open Ray dashboards
+# - GreyNoise LLM endpoint campaigns (late 2025–early 2026)
+# - SentinelOne/Censys Ollama exposure study (~175k class figures)
+#
+# Line vs NadMesh: we stop at discovery + safe read-only probes on capped sets.
+# We do not exploit, harvest cloud creds, or feed RCE queues.
+
+version: 1
+
+# Technique: negative-banner filters convert "open port" → "likely unauth"
+# Example: Jupyter with title minus token HTML is the clincher.
+
+profiles:
+
+  # --- Flagship three ---
+  ollama:
+    name: Ollama
+    priority: 1
+    shodan:
+      - product:Ollama
+      - 'port:11434 "Ollama"'
+      - '"Ollama is running"'
+    default_port: 11434
+    safe_probe:
+      method: GET
+      path: /api/ps
+      # alternate: /api/tags
+    notes: >
+      Exposure is the vulnerability for unauth list/pull/generate.
+      Prefer product:Ollama for signal; banner string alone under-indexes on some plans.
+
+  ray:
+    name: Ray Dashboard
+    priority: 1
+    shodan:
+      - port:8265
+      - 'http.title:"Ray" port:8265'
+    default_port: 8265
+    safe_probe:
+      method: GET
+      path: /api/version
+    notes: >
+      Jobs API often lacks auth if dashboard is reachable.
+      "Shadow" exposure class (open-ports-checker pattern) — scanners that only
+      check CVEs miss "dashboard reachable => job submission".
+
+  jupyter_open:
+    name: Jupyter (likely unauthenticated)
+    priority: 1
+    shodan:
+      - 'http.title:"Jupyter" port:8888 -http.html:"token"'
+      - 'http.title:"Jupyter" port:8888 -http.html:"login"'
+    contrast_query: 'http.title:"Jupyter" port:8888'  # includes auth walls
+    default_port: 8888
+    safe_probe:
+      method: GET
+      path: /
+    notes: >
+      Negative filter is the technique: raw port:8888 is millions of services;
+      title+Jupyter minus token HTML surfaces notebooks you land into.
+
+  # --- Broader AI / automation stack ---
+  open_webui:
+    name: Open WebUI
+    priority: 2
+    shodan:
+      - 'http.title:"Open WebUI"'
+      - 'http.html:"Open WebUI"'
+    default_port: 8080
+    safe_probe:
+      method: GET
+      path: /
+    notes: Often front door to Ollama / OpenAI-compatible backends.
+
+  comfyui:
+    name: ComfyUI
+    priority: 2
+    shodan:
+      - 'http.title:"ComfyUI"'
+      - 'port:8188 http.title:"ComfyUI"'
+    default_port: 8188
+    safe_probe:
+      method: GET
+      path: /system_stats
+    notes: GPU compute exposure; NadMesh harvests this class.
+
+  gradio:
+    name: Gradio
+    priority: 2
+    shodan:
+      - 'http.title:"Gradio"'
+      - port:7860
+    default_port: 7860
+    safe_probe:
+      method: GET
+      path: /
+    notes: Demo UIs; avoid invoking predict endpoints.
+
+  localai:
+    name: LocalAI
+    priority: 2
+    shodan:
+      - 'http.html:"LocalAI"'
+      - 'http.title:"LocalAI"'
+    default_port: 8080
+    safe_probe:
+      method: GET
+      path: /v1/models
+
+  litellm:
+    name: LiteLLM
+    priority: 2
+    shodan:
+      - 'http.html:"LiteLLM"'
+    default_port: 4000
+    safe_probe:
+      method: GET
+      path: /health
+
+  vllm:
+    name: vLLM
+    priority: 2
+    shodan:
+      - 'http.html:"vLLM"'
+      - 'port:8000 http.html:"/v1/models"'
+    default_port: 8000
+    safe_probe:
+      method: GET
+      path: /v1/models
+    notes: Prefer /version or /v1/models over bare port:8000.
+
+  openai_compat:
+    name: OpenAI-compatible generic
+    priority: 3
+    shodan:
+      - 'http.html:"/v1/models"'
+      - 'http.html:"/v1/chat/completions"'
+      - 'port:8080 http.html:"/v1/models"'
+      - 'port:8000 http.html:"/v1/models"'
+    default_port: 8000
+    safe_probe:
+      method: GET
+      path: /v1/models
+
+  mlflow:
+    name: MLflow
+    priority: 3
+    shodan:
+      - 'http.title:"MLflow"'
+    default_port: 5000
+    safe_probe:
+      method: GET
+      path: /
+
+  tensorboard:
+    name: TensorBoard
+    priority: 3
+    shodan:
+      - 'http.title:"TensorBoard"'
+    default_port: 6006
+    safe_probe:
+      method: GET
+      path: /
+
+  # --- Do not use as primary seeds (noise) ---
+noise_ports:
+  - port:8000 http
+  - port:8080 http
+  - port:5000 http
+  - port:8888
+  - port:1234
+
+# Suggested first active calibration set (slow)
+calibration_lanes:
+  - ollama
+  - jupyter_open
+  - ray
+  - open_webui
