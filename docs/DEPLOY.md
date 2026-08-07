@@ -1,33 +1,36 @@
 # Deploy guide (free tier)
 
+## Live endpoints (bootstrap deploy)
+
+| Resource | URL |
+|----------|-----|
+| API Worker | `https://leakycompute-api.mhedhli.workers.dev` |
+| Public pulse (GitHub Pages) | `https://mahdihedhli.github.io/LeakyCompute/` |
+| Researcher lab (CF Pages) | `https://leakycompute-lab.pages.dev` |
+| KV prod | `432febf1abd64e9995e33d6081dfd3c7` (`leakycompute-KV`) |
+
+**Still manual:** Cloudflare Access (GitHub SSO) on the lab hostname, Turnstile site keys (optional).
+
 ## 1. Cloudflare Worker API
+
+Already deployed as `leakycompute-api`. To redeploy from this repo:
 
 ```bash
 npm i -g wrangler   # or use npx
 wrangler login
-
-# Create KV
-wrangler kv namespace create LEAKY_KV
-wrangler kv namespace create LEAKY_KV --preview
-```
-
-Paste the ids into `wrangler.toml` (`id` / `preview_id`).
-
-```bash
-# Secrets
-wrangler secret put ADMIN_SYNC_TOKEN    # long random; also GH secret LEAKY_ADMIN_SYNC_TOKEN
-wrangler secret put ABUSE_LOG_SALT      # random salt for IP hashing
+# wrangler.toml already has KV ids
+wrangler secret put ADMIN_SYNC_TOKEN
+wrangler secret put ABUSE_LOG_SALT
 # optional:
 wrangler secret put TURNSTILE_SECRET_KEY
-
 wrangler deploy
 ```
 
-Note the `*.workers.dev` URL → set in:
+URLs are set in:
 
 - `public/js/config.js` → `API_BASE`
 - `lab/js/config.js` → `API_BASE`
-- GitHub secrets: `LEAKY_API_BASE`
+- GitHub secrets: `LEAKY_API_BASE`, `LEAKY_ADMIN_SYNC_TOKEN`, `LEAKY_LAB_URL`
 
 Update `ALLOWED_ORIGINS` in `wrangler.toml` / dashboard vars to include:
 
