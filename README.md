@@ -100,6 +100,30 @@ cp data/seed-models.json lab/data/seed-models.json
 # keep SNAPSHOT_* vars in wrangler.toml in sync with seed snapshot
 ```
 
+**Note:** the archive seed is **model names + counts only** (no IPs). ASN/hosting-provider
+candidates for active re-probes come from **Shodan facets** and prior hits — see [docs/DISCOVERY.md](docs/DISCOVERY.md).
+
+## Discovery (passive Shodan → slow re-probe)
+
+Active scanning runs **on your machine**, not inside the free Worker:
+
+```bash
+export SHODAN_API_KEY=...
+export LEAKY_ADMIN_TOKEN=...   # Worker ADMIN_SYNC_TOKEN
+
+# Top hosting ASNs for Ollama-like exposure (passive)
+python3 scripts/discovery/discover.py --asn-report
+
+# Slow capped run: top ASNs + prior hits + optional /30 neighbors
+python3 scripts/discovery/discover.py \
+  --from-top-asns 10 --hosts-per-asn 8 \
+  --from-prior --expand-prefix 30 --max-expand-per-seed 4 \
+  --max-total 48 --rate 0.2 --workers 1 \
+  --ingest
+```
+
+Defaults are intentionally slow (≈1 probe / 4–5s) to stay polite and free-tier safe.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

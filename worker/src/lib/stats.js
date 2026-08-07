@@ -52,6 +52,7 @@ export async function recordCheckResult(env, { exposed, models }) {
   }
 }
 
+
 export async function getValidatedCatalog(env) {
   if (!env.KV) return { models: [], updated_at: null };
   try {
@@ -89,7 +90,10 @@ export function publicStatsPayload(env, live) {
       exposed_total: live.exposed_total || 0,
       last_check_at: live.last_check_at,
       models_top: live.models_top || [],
-      note: "Counts from voluntary self-checks and researcher-owned scans only.",
+      note:
+        "Counts from voluntary self-checks, researcher-owned scans, and capped discovery re-probes (Shodan-seeded + prior-hit neighborhoods). Not a full internet census.",
+      discovery_runs: live.discovery_runs || 0,
+      last_discovery_at: live.last_discovery_at || null,
     },
     updated_at: live.updated_at || new Date().toISOString(),
   };

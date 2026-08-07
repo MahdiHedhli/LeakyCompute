@@ -29,10 +29,15 @@ import {
   revokeResearcher,
 } from "./lib/allowlist.js";
 import { verifyTurnstile } from "./lib/turnstile.js";
+import {
+  recordExposedHost,
+  listHits,
+  ingestDiscoveryBatch,
+} from "./lib/discovery.js";
 
 // Embedded compact snapshot meta (full catalog served from Pages/lab static seed)
 const SNAPSHOT_NOTE =
-  "Research snapshot is a filtered archive-era seed, not a live global scan.";
+  "Research snapshot is a filtered archive-era seed, not a live internet census. Live counts include voluntary checks and capped Shodan-seeded discovery re-probes.";
 
 export default {
   async fetch(request, env, ctx) {
@@ -76,6 +81,14 @@ export default {
 
       if (path === "/v1/admin/allowlist" && request.method === "POST") {
         return handleAdminAllowlist(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/hits" && request.method === "GET") {
+        return handleDiscoveryHits(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/ingest" && request.method === "POST") {
+        return handleDiscoveryIngest(request, env);
       }
 
       return json({ error: "not_found" }, 404, request, env);
@@ -239,28 +252,38 @@ async function handleCheck(request, env, ctx) {
 
   const result = await probeOllama(targetHost, vp.port, timeoutMs);
 
-  // Record aggregates asynchronously where possible
-  ctx.waitUntil(
-    Promise.all([
-      recordCheckResult(env, {
-        exposed: result.exposed,
+  // Record aggregates + private hit list (for discovery neighborhood expansion)
+  const tasks = [
+    recordCheckResult(env, {
+      exposed: result.exposed,
+      models: result.models,
+    }),
+    logAbuse(env, {
+      action: "check",
+      result: result.exposed ? "exposed" : "not_exposed",
+      clientIp: ip,
+      target: mode === "override" ? targetHost : null,
+      override: mode === "override",
+      meta: {
+        mode,
+        port: vp.port,
+        status: result.status,
+        latency_ms: result.latency_ms,
+      },
+    }),
+  ];
+  if (result.exposed) {
+    // Store the probed host (client IP for own mode, target for override)
+    tasks.push(
+      recordExposedHost(env, {
+        ip: targetHost,
+        port: vp.port,
         models: result.models,
-      }),
-      logAbuse(env, {
-        action: "check",
-        result: result.exposed ? "exposed" : "not_exposed",
-        clientIp: ip,
-        target: mode === "override" ? targetHost : null,
-        override: mode === "override",
-        meta: {
-          mode,
-          port: vp.port,
-          status: result.status,
-          latency_ms: result.latency_ms,
-        },
-      }),
-    ])
-  );
+        source: mode === "override" ? "public_override" : "public_self_check",
+      })
+    );
+  }
+  ctx.waitUntil(Promise.all(tasks));
 
   return json(
     {
@@ -353,10 +376,14 @@ async function handleResearchCatalog(request, env) {
   );
 }
 
-async function handleAdminAllowlist(request, env) {
+function requireAdmin(request, env) {
   const token = request.headers.get("X-Admin-Token") || "";
   const expected = env.ADMIN_SYNC_TOKEN || "";
-  if (!expected || token !== expected) {
+  return !!(expected && token && token === expected);
+}
+
+async function handleAdminAllowlist(request, env) {
+  if (!requireAdmin(request, env)) {
     await logAbuse(env, {
       action: "admin_allowlist",
       result: "unauthorized",
@@ -389,4 +416,65 @@ async function handleAdminAllowlist(request, env) {
     meta: body.meta || null,
   });
   return json({ ok: true, entry }, 200, request, env);
+}
+
+async function handleDiscoveryHits(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10) || 500, 2000);
+  const hits = await listHits(env, { limit });
+  return json(
+    {
+      count: hits.length,
+      hits: hits.map((h) => ({
+        ip: h.ip,
+        port: h.port,
+        last_seen: h.last_seen,
+        first_seen: h.first_seen,
+        times_seen: h.times_seen,
+        models: h.models,
+        source: h.source,
+      })),
+    },
+    200,
+    request,
+    env
+  );
+}
+
+async function handleDiscoveryIngest(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  // Free-tier guard: few discovery ingests per hour (active scan runs off-Worker)
+  const rl = await consume(env, "admin:discovery_ingest", 10, 3600);
+  if (!rl.ok) {
+    return json(
+      { error: "rate_limited", scope: "discovery_ingest", reset: rl.reset, limit: 10 },
+      429,
+      request,
+      env
+    );
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400, request, env);
+  }
+  const results = body.results || [];
+  if (!Array.isArray(results) || results.length === 0) {
+    return json({ error: "results_required" }, 400, request, env);
+  }
+  // Keep batches small: KV write budget + Worker CPU on free tier
+  if (results.length > 150) {
+    return json({ error: "batch_too_large", max: 150 }, 400, request, env);
+  }
+  const summary = await ingestDiscoveryBatch(env, {
+    results,
+    run_meta: body.run_meta || null,
+  });
+  return json({ ok: true, ...summary }, 200, request, env);
 }
