@@ -25,7 +25,10 @@ Defensive research instrument for **internet-exposed AI inference** (especially 
 
 ### Safety rails
 
-- Probe = `GET /api/ps` only (no `/api/pull` or generate with traversal)  
+- Every probe is a **read-only `GET`** against a version / health / listing endpoint —
+  never `/api/pull`, `/api/generate`, a Ray job submission, or a traversal payload
+- Tier-1 coverage: **Ollama** (11434), **Ray** (8265), **Jupyter** (8888)
+- Ports are validated per service against a known-AI-port list — not a general port prober
 - Default check target = visitor egress IP; override requires attestation  
 - Strict per-IP + global rate limits; optional Turnstile  
 - Private abuse logs (hashed) in Worker KV — **not** in this repo  

@@ -9,6 +9,7 @@ export async function getLiveStats(env) {
     exposed_total: 0,
     last_check_at: null,
     models_top: [],
+    by_service: {},
     updated_at: null,
   };
   if (!env.KV) return defaults;
@@ -20,7 +21,7 @@ export async function getLiveStats(env) {
   }
 }
 
-export async function recordCheckResult(env, { exposed, models }) {
+export async function recordCheckResult(env, { exposed, models, services }) {
   if (!env.KV) return;
   try {
     const stats = await getLiveStats(env);
@@ -28,6 +29,20 @@ export async function recordCheckResult(env, { exposed, models }) {
     if (exposed) stats.exposed_total = (stats.exposed_total || 0) + 1;
     stats.last_check_at = new Date().toISOString();
     stats.updated_at = stats.last_check_at;
+
+    // Per-service tallies: one check now covers several services, so
+    // exposed_total alone no longer says which stack was open.
+    if (Array.isArray(services) && services.length) {
+      const by = { ...(stats.by_service || {}) };
+      for (const s of services) {
+        const row = by[s.service] || { checks: 0, detected: 0, exposed: 0 };
+        row.checks += 1;
+        if (s.detected) row.detected += 1;
+        if (s.exposed) row.exposed += 1;
+        by[s.service] = row;
+      }
+      stats.by_service = by;
+    }
 
     // top models (rough counts from exposed responses)
     if (exposed && Array.isArray(models)) {
@@ -93,6 +108,7 @@ export async function publicStatsPayload(env, live) {
       exposed_total: live.exposed_total || 0,
       last_check_at: live.last_check_at,
       models_top: live.models_top || [],
+      by_service: live.by_service || {},
       note:
         "Counts from voluntary self-checks and capped multi-lane discovery (Shodan fingerprints + prior-hit neighborhoods). Not a full internet census.",
       discovery_runs: live.discovery_runs || 0,

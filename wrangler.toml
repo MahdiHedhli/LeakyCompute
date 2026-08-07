@@ -22,8 +22,12 @@ RL_OVERRIDE_WINDOW_SEC = "900"
 RL_OVERRIDE_MAX = "1"
 RL_OVERRIDE_DAY_MAX = "3"
 RL_GLOBAL_DAY_MAX = "800"
+# Per-probe timeout. Tier-1 services are probed in parallel, so worst-case
+# wall clock is roughly 2x this (confirm + exposure), not 3x this.
 CHECK_TIMEOUT_MS = "2500"
-DEFAULT_PORT = "11434"
+# Tier-1 services and their permitted ports are defined in
+# worker/src/lib/services.js. Ports are validated against that per-service
+# list, so /v1/check cannot be used as a general-purpose port prober.
 # Cloudflare Access (lab JWT validation)
 ACCESS_TEAM_DOMAIN = "odd-night-42c2.cloudflareaccess.com"
 ACCESS_AUD = "9685fd55b36c22b9011104742338688425e32decfb7a9ffb6962d29efe829427"

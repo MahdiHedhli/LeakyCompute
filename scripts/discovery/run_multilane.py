@@ -55,7 +55,7 @@ LANES: list[dict[str, Any]] = [
         "max_hosts": 48,
     },
     {
-        "id": "jupyter_open",
+        "id": "jupyter",
         "query": 'http.title:"Jupyter" port:8888 -http.html:"token"',
         "port_default": 8888,
         "probe_path": "/",

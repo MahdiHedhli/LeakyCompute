@@ -168,3 +168,62 @@ label.check input { margin-top: 3px; }
     0deg, transparent, transparent 2px, #000 3px
   );
 }
+
+/* ---------- structured check report (tier-1: ollama / ray / jupyter) ---------- */
+.verdict {
+  margin-top: 14px; padding: 14px 16px;
+  background: var(--panel2); border: 1px solid var(--line2);
+  border-left-width: 4px; border-radius: 10px;
+}
+.verdict-line { font-weight: 700; letter-spacing: 0.02em; }
+.verdict-sub { margin-top: 4px; font-size: 12px; color: var(--dim); }
+.verdict.sev-critical, .verdict.sev-high { border-left-color: var(--red); }
+.verdict.sev-medium { border-left-color: var(--amber); }
+.verdict.sev-low, .verdict.sev-info { border-left-color: var(--cyan); }
+.verdict.sev-none { border-left-color: var(--green); }
+
+.report { display: grid; gap: 10px; margin-top: 12px; }
+.svc {
+  padding: 12px 14px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel);
+}
+.svc.exposed { border-color: var(--red); }
+.svc.detected { border-color: var(--amber); }
+.svc.clear { opacity: 0.72; }
+
+.svc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.svc-name { font-weight: 700; color: var(--cyan); }
+.svc-port { color: var(--dim); font-size: 12px; }
+.svc-state {
+  margin-left: auto; font-size: 11px; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line2); color: var(--dim);
+}
+.svc-state.exposed { color: var(--red); border-color: var(--red); }
+.svc-state.detected { color: var(--amber); border-color: var(--amber); }
+.svc-state.clear { color: var(--green); border-color: var(--line2); }
+
+.svc-meta { margin-top: 8px; font-size: 12px; color: var(--dim); }
+.svc-meta.dim { opacity: 0.8; }
+.svc-meta .models { margin: 4px 0 0 16px; }
+
+.finding { margin-top: 10px; padding-left: 10px; border-left: 2px solid var(--line2); }
+.finding.sev-critical, .finding.sev-high { border-left-color: var(--red); }
+.finding.sev-medium { border-left-color: var(--amber); }
+.finding.sev-low, .finding.sev-info { border-left-color: var(--cyan); }
+.finding-head { font-size: 13px; font-weight: 600; }
+.finding-head .sev {
+  font-size: 10px; letter-spacing: 0.1em; padding: 1px 6px;
+  border-radius: 4px; background: var(--panel2); color: var(--amber);
+  margin-right: 6px;
+}
+.finding.sev-critical .sev, .finding.sev-high .sev { color: var(--red); }
+.finding-detail { margin-top: 4px; font-size: 12px; color: var(--dim); }
+.finding-ep { margin-top: 4px; font-size: 11px; color: var(--dim); }
+
+.remediation { margin-top: 10px; font-size: 12px; }
+.remediation strong {
+  display: block; margin-bottom: 4px; color: var(--amber);
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.remediation ul { margin-left: 16px; color: var(--dim); }

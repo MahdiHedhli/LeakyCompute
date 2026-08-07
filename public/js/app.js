@@ -81,19 +81,132 @@
     }
   }
 
+  // Report content includes strings echoed from the probed host (versions,
+  // model names). In override mode that host is attacker-controlled, so
+  // everything interpolated into markup goes through here first.
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[c]);
+  }
+
+  const SEV_LABEL = {
+    critical: "CRITICAL",
+    high: "HIGH",
+    medium: "MEDIUM",
+    low: "LOW",
+    info: "INFO",
+    none: "CLEAR",
+  };
+
+  function renderServiceCard(s) {
+    const state = s.exposed
+      ? "exposed"
+      : s.detected
+      ? "detected"
+      : "clear";
+    const stateText = s.exposed
+      ? "EXPOSED"
+      : s.detected
+      ? s.authenticated
+        ? "reachable · auth enforced"
+        : "reachable"
+      : "not detected";
+
+    const rows = [];
+    rows.push(
+      `<div class="svc-head"><span class="svc-name">${esc(s.label || s.service)}</span>` +
+        `<span class="svc-port">:${esc(s.port)}</span>` +
+        `<span class="svc-state ${state}">${esc(stateText)}</span></div>`
+    );
+    if (s.version) {
+      rows.push(`<div class="svc-meta">version ${esc(s.version)}</div>`);
+    }
+    if (!s.detected) {
+      rows.push(
+        `<div class="svc-meta dim">No response on this port (${esc(
+          s.error || "no service"
+        )}).</div>`
+      );
+      return `<div class="svc ${state}">${rows.join("")}</div>`;
+    }
+
+    for (const f of s.findings || []) {
+      rows.push(
+        `<div class="finding sev-${esc(f.severity)}">` +
+          `<div class="finding-head"><span class="sev">${esc(
+            SEV_LABEL[f.severity] || f.severity
+          )}</span> ${esc(f.title)}</div>` +
+          `<div class="finding-detail">${esc(f.detail)}</div>` +
+          (f.endpoint
+            ? `<div class="finding-ep">evidence: <code>GET ${esc(f.endpoint)}</code></div>`
+            : "") +
+          `</div>`
+      );
+    }
+
+    if (s.models?.length) {
+      const names = s.models.slice(0, 10).map((m) => `<li>${esc(m.name)}</li>`).join("");
+      rows.push(
+        `<div class="svc-meta">models visible (${s.models.length}):<ul class="models">${names}</ul></div>`
+      );
+    }
+    if (typeof s.jobs_visible === "number") {
+      rows.push(`<div class="svc-meta">jobs visible: ${esc(s.jobs_visible)}</div>`);
+    }
+
+    if (s.exposed && s.remediation?.length) {
+      const items = s.remediation.map((r) => `<li>${esc(r)}</li>`).join("");
+      rows.push(`<div class="remediation"><strong>Fix</strong><ul>${items}</ul></div>`);
+    }
+
+    return `<div class="svc ${state}">${rows.join("")}</div>`;
+  }
+
+  function renderReport(data) {
+    const verdict = $("verdict");
+    const report = $("report");
+    const sev = data.overall_severity || "none";
+
+    verdict.hidden = false;
+    verdict.className = `verdict sev-${sev}`;
+    verdict.innerHTML =
+      `<div class="verdict-line">${
+        data.any_exposed
+          ? "&#9888; EXPOSED — an AI service answered an unauthenticated read"
+          : "&#10003; No exposed AI service observed"
+      }</div>` +
+      `<div class="verdict-sub">target ${esc(data.target)} · severity ${esc(
+        SEV_LABEL[sev] || sev
+      )} · ${esc(data.checked_at || "")}</div>`;
+
+    report.innerHTML = (data.services || []).map(renderServiceCard).join("");
+
+    const out = $("result");
+    out.className = "result";
+    out.textContent = [data.guidance, "", data.limitations]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   async function runCheck() {
     const out = $("result");
     const btn = $("check-btn");
     const override = $("override-toggle").checked;
     const target = $("target-input").value.trim();
-    const port = $("port-input").value.trim() || "11434";
     const authorized = $("auth-check").checked;
 
+    $("verdict").hidden = true;
+    $("report").innerHTML = "";
     out.className = "result";
-    out.textContent = "probing…";
+    out.textContent = "probing Ollama, Ray and Jupyter…";
     btn.disabled = true;
 
-    const body = { port: Number(port) };
+    const body = {};
     if (override) {
       body.target = target;
       body.authorized = authorized;
@@ -110,22 +223,12 @@
       const data = await res.json();
       if (!res.ok) {
         out.classList.add("exposed");
-        out.textContent = JSON.stringify(data, null, 2);
+        out.textContent = `${data.error || "request failed"}${
+          data.message ? `\n${data.message}` : ""
+        }`;
         return;
       }
-      out.classList.add(data.exposed ? "exposed" : "safe");
-      const lines = [
-        data.exposed ? "⚠ EXPOSED — unauthenticated /api/ps responded" : "✓ No open /api/ps observed",
-        `mode: ${data.mode}`,
-        `target: ${data.target}:${data.port}`,
-        `latency: ${data.latency_ms}ms`,
-        data.guidance || "",
-      ];
-      if (data.models?.length) {
-        lines.push("models:");
-        data.models.slice(0, 10).forEach((m) => lines.push(`  · ${m.name}`));
-      }
-      out.textContent = lines.filter(Boolean).join("\n");
+      renderReport(data);
       loadStats();
     } catch (err) {
       out.classList.add("exposed");

@@ -9,12 +9,13 @@
 import { json, noContent } from "./lib/cors.js";
 import { consume, intEnv } from "./lib/ratelimit.js";
 import { logAbuse } from "./lib/abuse.js";
+import { validateTarget, isPrivateOrLocal } from "./lib/check.js";
 import {
-  validateTarget,
-  validatePort,
-  isPrivateOrLocal,
-  probeOllama,
-} from "./lib/check.js";
+  runChecks,
+  overallSeverity,
+  SERVICES,
+  TIER1,
+} from "./lib/services.js";
 import {
   getLiveStats,
   recordCheckResult,
@@ -140,7 +141,6 @@ async function handleCheck(request, env, ctx) {
     return json({ error: "turnstile_failed" }, 403, request, env);
   }
 
-  const defaultPort = intEnv(env, "DEFAULT_PORT", 11434);
   const timeoutMs = intEnv(env, "CHECK_TIMEOUT_MS", 3000);
 
   const override = !!(body.target && String(body.target).trim());
@@ -191,8 +191,33 @@ async function handleCheck(request, env, ctx) {
     mode = "override";
   }
 
-  const vp = validatePort(body.port, defaultPort);
-  if (!vp.ok) return json({ error: vp.error }, 400, request, env);
+  // Which tier-1 services to check. Default: all of them.
+  let services = TIER1;
+  if (Array.isArray(body.services) && body.services.length) {
+    services = body.services
+      .map((s) => String(s).toLowerCase().trim())
+      .filter((s) => SERVICES[s]);
+    if (!services.length) {
+      return json(
+        { error: "unknown_service", supported: TIER1 },
+        400,
+        request,
+        env
+      );
+    }
+  }
+
+  // Per-service port overrides, validated against each service's known ports.
+  // Legacy clients send a bare `port` — treat it as the Ollama port.
+  const ports = {};
+  if (body.ports && typeof body.ports === "object") {
+    for (const [k, v] of Object.entries(body.ports)) {
+      if (SERVICES[k]) ports[k] = v;
+    }
+  }
+  if (body.port != null && body.port !== "" && ports.ollama == null) {
+    ports.ollama = body.port;
+  }
 
   // Rate limits
   const ownWin = intEnv(env, "RL_OWN_WINDOW_SEC", 900);
@@ -250,35 +275,72 @@ async function handleCheck(request, env, ctx) {
     }
   }
 
-  const result = await probeOllama(targetHost, vp.port, timeoutMs);
+  const run = await runChecks(targetHost, { services, ports, timeoutMs });
+  if (!run.ok) {
+    return json(
+      {
+        error: run.error,
+        service: run.service,
+        allowed_ports: run.allowed,
+        message:
+          "Only the known AI service ports are accepted. This checker is not a general-purpose port prober.",
+      },
+      400,
+      request,
+      env
+    );
+  }
+
+  const results = run.results;
+  const anyExposed = results.some((r) => r.exposed);
+  const severity = overallSeverity(results);
+  const ollama = results.find((r) => r.service === "ollama");
 
   // Record aggregates + private hit list (for discovery neighborhood expansion)
   const tasks = [
     recordCheckResult(env, {
-      exposed: result.exposed,
-      models: result.models,
+      exposed: anyExposed,
+      models: ollama?.models || [],
+      services: results.map((r) => ({
+        service: r.service,
+        detected: r.detected,
+        exposed: r.exposed,
+      })),
     }),
     logAbuse(env, {
       action: "check",
-      result: result.exposed ? "exposed" : "not_exposed",
+      result: anyExposed ? "exposed" : "not_exposed",
       clientIp: ip,
       target: mode === "override" ? targetHost : null,
       override: mode === "override",
       meta: {
         mode,
-        port: vp.port,
-        status: result.status,
-        latency_ms: result.latency_ms,
+        severity,
+        services: results.map((r) => ({
+          s: r.service,
+          port: r.port,
+          detected: r.detected,
+          exposed: r.exposed,
+          status: r.status,
+          latency_ms: r.latency_ms,
+        })),
       },
     }),
   ];
-  if (result.exposed) {
+  // One record per host, not per service: the hit store is keyed by IP, so
+  // parallel writes for the same host would read the same `prev` and clobber
+  // each other. Collapse every exposed service into a single write.
+  const exposedServices = results.filter((r) => r.exposed);
+  if (exposedServices.length) {
     // Store the probed host (client IP for own mode, target for override)
     tasks.push(
       recordExposedHost(env, {
         ip: targetHost,
-        port: vp.port,
-        models: result.models,
+        port: exposedServices[0].port,
+        ports: exposedServices.map((r) => r.port),
+        stack: exposedServices[0].service,
+        stacks: exposedServices.map((r) => r.service),
+        models: exposedServices.flatMap((r) => r.models || []),
         source: mode === "override" ? "public_override" : "public_self_check",
       })
     );
@@ -289,17 +351,28 @@ async function handleCheck(request, env, ctx) {
     {
       ok: true,
       mode,
-      // Never echo full client IP for own mode in detail beyond confirmation
+      // Never echo full client IP for own mode beyond confirmation
       target: mode === "override" ? targetHost : "your_egress_ip",
-      port: vp.port,
-      exposed: result.exposed,
-      auth_required: result.auth_required,
-      latency_ms: result.latency_ms,
-      models: result.exposed ? result.models : [],
-      error: result.error || null,
-      guidance: result.exposed
-        ? "This host answered /api/ps without auth. Bind to localhost, put a reverse proxy with auth in front, and review the defensive checklist."
-        : "No unauthenticated Ollama /api/ps response observed (filtered, down, or authenticated).",
+      checked_at: new Date().toISOString(),
+      overall_severity: severity,
+      any_exposed: anyExposed,
+      services: results,
+      guidance: anyExposed
+        ? "At least one AI service answered an unauthenticated read from the public internet. Work through the per-service remediation below."
+        : "No unauthenticated AI service responded from our vantage point.",
+      limitations:
+        "A clean result is not proof of safety. Probes originate from Cloudflare's network and cover only " +
+        "the listed services on their known ports, so a filtered, rate-limited, or geo-blocked host looks " +
+        "identical to one that is not running the service — and anything bound to another port, or reachable " +
+        "only from inside your network, is out of scope.",
+
+      // --- legacy fields (pre-tier-1 clients read these) ---------------
+      port: ollama?.port ?? SERVICES.ollama.defaultPort,
+      exposed: !!ollama?.exposed,
+      auth_required: !!ollama?.authenticated,
+      latency_ms: ollama?.latency_ms ?? null,
+      models: ollama?.exposed ? ollama.models || [] : [],
+      error: ollama?.error || null,
     },
     200,
     request,
