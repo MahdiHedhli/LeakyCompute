@@ -35,6 +35,7 @@ import {
   listHits,
   ingestDiscoveryBatch,
 } from "./lib/discovery.js";
+import { enrichServicesWithOsv } from "./lib/osv.js";
 
 // Embedded compact snapshot meta (full catalog served from Pages/lab static seed)
 const SNAPSHOT_NOTE =
@@ -291,7 +292,10 @@ async function handleCheck(request, env, ctx) {
     );
   }
 
-  const results = run.results;
+  // Tier-2: attach OSV.dev vulns when we have a confirmed version string.
+  // enrichServicesWithOsv also merges top hits into svc.findings, so
+  // overallSeverity() already reflects version-aware CVE/GHSA severity.
+  const results = await enrichServicesWithOsv(run.results, env);
   const anyExposed = results.some((r) => r.exposed);
   const severity = overallSeverity(results);
   const ollama = results.find((r) => r.service === "ollama");
