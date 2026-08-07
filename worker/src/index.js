@@ -105,7 +105,7 @@ export default {
 
 async function handleStats(request, env) {
   const live = await getLiveStats(env);
-  const payload = publicStatsPayload(env, live);
+  const payload = await publicStatsPayload(env, live);
   payload.methodology = SNAPSHOT_NOTE;
   return json(payload, 200, request, env, {
     "Cache-Control": "public, max-age=30",
@@ -424,10 +424,12 @@ async function handleDiscoveryHits(request, env) {
   }
   const url = new URL(request.url);
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10) || 500, 2000);
-  const hits = await listHits(env, { limit });
+  const sort = url.searchParams.get("sort") || "last_seen"; // last_seen | country | asn
+  const hits = await listHits(env, { limit, sort });
   return json(
     {
       count: hits.length,
+      sort,
       hits: hits.map((h) => ({
         ip: h.ip,
         port: h.port,
@@ -436,6 +438,14 @@ async function handleDiscoveryHits(request, env) {
         times_seen: h.times_seen,
         models: h.models,
         source: h.source,
+        stack: h.stack || null,
+        country: h.country || null,
+        country_code: h.country_code || null,
+        city: h.city || null,
+        asn: h.asn || null,
+        org: h.org || null,
+        product: h.product || null,
+        vulns: h.vulns || [],
       })),
     },
     200,

@@ -7,6 +7,40 @@
     return Number(n || 0).toLocaleString("en-US");
   }
 
+  let lastGeo = [];
+
+  function renderGeo(rows, sortMode) {
+    const el = $("geo-list");
+    if (!rows || !rows.length) {
+      el.textContent = "No geo data yet — run multi-lane discovery ingest.";
+      return;
+    }
+    const sorted = rows.slice();
+    if (sortMode === "name") {
+      sorted.sort((a, b) =>
+        String(a.country || "").localeCompare(String(b.country || ""))
+      );
+    } else {
+      sorted.sort((a, b) => (b.count || 0) - (a.count || 0));
+    }
+    const max = Math.max(...sorted.map((r) => r.count || 0), 1);
+    el.innerHTML = sorted
+      .slice(0, 40)
+      .map((r) => {
+        const cc = r.country || "??";
+        const n = r.count || 0;
+        const pct = ((n / max) * 100).toFixed(0);
+        return (
+          `<div style="display:grid;grid-template-columns:48px 1fr 40px;gap:8px;align-items:center;margin:4px 0;font-size:12px">` +
+          `<span style="color:var(--cyan)">${cc}</span>` +
+          `<span style="background:var(--panel2);border-radius:4px;height:8px;overflow:hidden">` +
+          `<span style="display:block;height:100%;width:${pct}%;background:linear-gradient(90deg,var(--cyan),var(--amber))"></span></span>` +
+          `<span style="text-align:right;color:var(--dim)">${fmt(n)}</span></div>`
+        );
+      })
+      .join("");
+  }
+
   async function loadStats() {
     const snapVal = $("snap-hosts");
     const liveVal = $("live-exposed");
@@ -30,9 +64,14 @@
         data.research_snapshot?.note || "Archive-era filtered seed.";
       liveSub.textContent =
         data.live_instrumented?.note ||
-        "Voluntary self-checks + researcher-owned scans.";
+        "Voluntary self-checks + multi-lane discovery.";
       apiNote.textContent = `API ok · updated ${data.updated_at || "—"}`;
       apiNote.dataset.state = "ok";
+      lastGeo = data.geography?.by_country || [];
+      $("geo-note").textContent =
+        data.geography?.note ||
+        "Unique re-verified hosts · sorted · no raw IPs";
+      renderGeo(lastGeo, $("geo-sort").value);
     } catch (err) {
       apiNote.textContent =
         "API offline or not configured — showing snapshot fallback. Set public/js/config.js API_BASE after deploy.";
@@ -109,6 +148,9 @@
 
     $("check-btn").addEventListener("click", runCheck);
     $("refresh-stats").addEventListener("click", loadStats);
+    $("geo-sort").addEventListener("change", () =>
+      renderGeo(lastGeo, $("geo-sort").value)
+    );
   }
 
   wireUi();

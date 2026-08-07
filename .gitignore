@@ -42,3 +42,5 @@ ollama_scan_results.json
 data/discovery-last-run.json
 data/asn-candidates.json
 data/discovery-dry-run.json
+data/discovery-multilane.json
+data/vuln-findings.json

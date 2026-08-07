@@ -51,6 +51,20 @@
       <div class="row" style="margin-top:10px">
         <button type="button" class="secondary" id="refresh-stats">Refresh stats</button>
       </div>
+      <div class="geo-block" style="margin-top:20px">
+        <h3 style="font-size:12px;letter-spacing:0.1em;color:var(--amber);text-transform:uppercase;margin-bottom:10px">
+          Exposure by country
+        </h3>
+        <p class="hint" id="geo-note">Unique re-verified hosts · sorted by count · no raw IPs</p>
+        <div class="row" style="margin:8px 0;gap:8px;align-items:center">
+          <label class="hint" for="geo-sort">Sort</label>
+          <select id="geo-sort" style="background:var(--panel2);color:var(--txt);border:1px solid var(--line2);border-radius:8px;padding:6px 10px;font-family:inherit">
+            <option value="count">by count</option>
+            <option value="name">by country code</option>
+          </select>
+        </div>
+        <div id="geo-list" class="result" style="min-height:2rem">—</div>
+      </div>
     </section>
 
     <section class="panel">
