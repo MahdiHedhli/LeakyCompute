@@ -10,6 +10,7 @@ window.LEAKY_CONFIG = {
   TURNSTILE_SITE_KEY: "",
   LAB_URL: "https://leakycompute-lab.pages.dev",
   REPO_URL: "https://github.com/MahdiHedhli/LeakyCompute",
+  DONT_PANIC_URL: "https://mahdihedhli.com/dont-panic/",
   ACCESS_ISSUE_URL:
     "https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_research_access.yml",
   // Static fallback snapshot (matches seed) if API unreachable
