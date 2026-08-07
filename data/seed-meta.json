@@ -43,5 +43,22 @@
     "leer_tmp_pwned",
     "leer_shadow",
     "leer_pwn_test"
-  ]
+  ],
+  "multilane": {
+    "candidates": 320,
+    "exposed": 168,
+    "source": "discovery-multilane.json (local, gitignored)",
+    "note": "Live Worker KV already holds 168 exposed / 321 checks from multilane ingest",
+    "by_stack": {
+      "ollama": 47,
+      "jupyter_open": 35,
+      "open_webui": 28,
+      "localai": 24,
+      "openai_compat_8000": 11,
+      "litellm": 10,
+      "comfyui": 9,
+      "vllm": 2,
+      "openai_compat_8080": 2
+    }
+  }
 }
