@@ -1,0 +1,93 @@
+name: Approve research access
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  approve:
+    if: github.event.label.name == 'access-approved'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Resolve GitHub login
+        id: user
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body || '';
+            // Prefer form field "GitHub username to allowlist"
+            let login = null;
+            const m = body.match(/### GitHub username to allowlist\s*\n\s*([@A-Za-z0-9-]+)/i);
+            if (m) login = m[1].replace(/^@/, '');
+            if (!login) login = issue.user.login;
+            login = login.toLowerCase();
+            if (!/^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/.test(login)) {
+              core.setFailed(`Invalid GitHub login: ${login}`);
+            }
+            core.setOutput('login', login);
+            core.setOutput('issue_number', String(issue.number));
+
+      - name: Sync allowlist to Cloudflare Worker
+        env:
+          API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+          LOGIN: ${{ steps.user.outputs.login }}
+          ISSUE: ${{ steps.user.outputs.issue_number }}
+          APPROVER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE:-}" ] || [ -z "${ADMIN_TOKEN:-}" ]; then
+            echo "Missing LEAKY_API_BASE or LEAKY_ADMIN_SYNC_TOKEN secrets."
+            exit 1
+          fi
+          API_BASE="${API_BASE%/}"
+          curl -fsS -X POST "$API_BASE/v1/admin/allowlist" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Token: $ADMIN_TOKEN" \
+            -d "{\"op\":\"approve\",\"login\":\"$LOGIN\",\"issue_number\":$ISSUE,\"approved_by\":\"$APPROVER\"}"
+
+      - name: Comment and relabel
+        uses: actions/github-script@v7
+        env:
+          LOGIN: ${{ steps.user.outputs.login }}
+          LAB_URL: ${{ secrets.LEAKY_LAB_URL }}
+        with:
+          script: |
+            const login = process.env.LOGIN;
+            const lab = process.env.LAB_URL || 'https://leakycompute-lab.pages.dev';
+            const issue_number = context.issue.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body: [
+                `### Access approved for \`@${login}\``,
+                '',
+                `Lab: ${lab}`,
+                '',
+                'Sign in with **GitHub** using **this same account** (Cloudflare Access).',
+                'If you see “authenticated but not allowlisted”, wait ~1 minute and hard-refresh.',
+                '',
+                '_LeakyCompute · evidence first · panic never_',
+              ].join('\n'),
+            });
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                name: 'needs-review',
+              });
+            } catch (_) {}
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                labels: ['access-active'],
+              });
+            } catch (_) {}
