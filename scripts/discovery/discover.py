@@ -57,9 +57,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 DEFAULT_API = "https://leakycompute-api.mhedhli.workers.dev"
-DEFAULT_QUERY = 'port:11434 "Ollama is running"'
-# Fallback broader query if exact banner is rare
-FALLBACK_QUERY = "port:11434 product:Ollama"
+# product:Ollama is the high-signal Shodan fingerprint (~12k hosts).
+# Banner-only queries often return 0 depending on how banners are indexed.
+DEFAULT_QUERY = "product:Ollama"
+FALLBACK_QUERY = 'port:11434 http.html:"Ollama is running"'
 USER_AGENT = "LeakyCompute-Discovery/1.0 (+defensive research; safe GET /api/ps only)"
 
 # Hard safety rails (cannot be overridden above these without editing code)
