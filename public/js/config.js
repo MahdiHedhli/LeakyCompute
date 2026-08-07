@@ -5,7 +5,7 @@
  */
 window.LEAKY_CONFIG = {
   // Replace after `wrangler deploy`
-  API_BASE: "https://leakycompute-api.<your-subdomain>.workers.dev",
+  API_BASE: "https://leakycompute-api.mhedhli.workers.dev",
   // Optional free Turnstile site key; leave empty to skip client widget
   TURNSTILE_SITE_KEY: "",
   LAB_URL: "https://leakycompute-lab.pages.dev",

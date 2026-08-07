@@ -8,9 +8,9 @@ workers_dev = true
 
 # Public site CORS + domain-ready: set CUSTOM_ORIGINS later to include your domain
 [vars]
-ENVIRONMENT = "development"
+ENVIRONMENT = "production"
 # Comma-separated allowed browser origins (GitHub Pages + Pages lab + localhost)
-ALLOWED_ORIGINS = "http://localhost:8787,http://127.0.0.1:8787,http://localhost:5500,http://127.0.0.1:5500,https://mahdihedhli.github.io"
+ALLOWED_ORIGINS = "http://localhost:8787,http://127.0.0.1:8787,http://localhost:5500,http://127.0.0.1:5500,https://mahdihedhli.github.io,https://leakycompute-lab.pages.dev"
 # Research snapshot (archive seed) — dual counter "C"
 SNAPSHOT_MODELS = "1864"
 SNAPSHOT_HOSTS = "19348"
@@ -30,8 +30,8 @@ DEFAULT_PORT = "11434"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "00000000000000000000000000000000"
-preview_id = "00000000000000000000000000000000"
+id = "432febf1abd64e9995e33d6081dfd3c7"
+preview_id = "32c933f498d646afae8eb1e617063f8b"
 
 # Secrets (set via wrangler secret put — never commit):
 #   TURNSTILE_SECRET_KEY   optional; if unset, Turnstile check is skipped (dev only)
