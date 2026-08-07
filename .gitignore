@@ -16,6 +16,10 @@ __pycache__/
 !.env.example
 .dev.vars
 *.pem
+.secrets.local.json
+.deploy_tmp/
+.deploy_code_tmp.js
+worker/dist/
 
 # OS / IDE
 .DS_Store

@@ -1,5 +1,5 @@
 window.LEAKY_LAB_CONFIG = {
-  API_BASE: "https://leakycompute-api.<your-subdomain>.workers.dev",
+  API_BASE: "https://leakycompute-api.mhedhli.workers.dev",
   SEED_URL: "data/seed-models.json",
   PUBLIC_URL: "https://mahdihedhli.github.io/LeakyCompute/",
   REPO_URL: "https://github.com/MahdiHedhli/LeakyCompute",
