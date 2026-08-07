@@ -1,101 +1,219 @@
+#!/usr/bin/env python3
+"""
+LeakyCompute defensive CLI — audit YOUR infrastructure only.
+
+Modes:
+  --check-url URL     Probe a single Ollama base URL (GET /api/ps only)
+  --scan-local        Scan common AI ports on localhost
+  --scan-cidr CIDR    Scan a CIDR you own (requires --i-own-this-range)
+  --demo-local        Local Docker path-traversal demo (localhost-bound)
+  --output-json PATH  Write machine-readable results
+
+Never use against systems without authorization.
+"""
+
+from __future__ import annotations
+
 import argparse
+import ipaddress
 import json
-import os
+import socket
 import subprocess
-import shlex
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
+from urllib import error, request
 
-USE_MCP = False
-MCP_CMD = "mcp"
+DEFAULT_PORT = 11434
+AI_PORTS = [
+    (8000, "vLLM / FastAPI"),
+    (11434, "Ollama"),
+    (5000, "HuggingFace TGI"),
+    (7497, "LMStudio"),
+    (8080, "common API"),
+]
+DOCKER_IMAGE = "ollama/ollama:latest"
+DEMO_NAME = "ollama-poc-demo"
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Check whether an Ollama instance is exposed.")
-    parser.add_argument("--scan-cidr", help="CIDR block to scan (e.g. 10.0.0.0/8).")
-    parser.add_argument("--use-mcp", action="store_true", help="Run the check via the MCP browser‑bridge instead of a direct HTTP request.")
-    parser.add_argument("--mcp-cmd", default=MCP_CMD, help="Path to the MCP executable (default: %(default)s).")
-    parser.add_argument("--output-json", help="Write JSON results here.")
-    return parser.parse_args()
 
-def run_mcp_check(ip: str, mcp_exe: str) -> dict:
-    url = f"http://{ip}:11434/api/ps"
-    cmd = [mcp_exe, "run", url, "--json"]
+def http_json(url: str, method: str = "GET", data: dict | None = None, timeout: float = 5.0):
+    body = json.dumps(data).encode() if data is not None else None
+    req = request.Request(
+        url,
+        data=body,
+        method=method,
+        headers={"Content-Type": "application/json", "User-Agent": "LeakyCompute-CLI/1.0"},
+    )
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-    except FileNotFoundError:
-        print(f"[!] MCP executable not found: {mcp_exe}", file=sys.stderr)
-        return {"ip": ip, "exposed": False, "models": []}
-    except subprocess.TimeoutExpired:
-        print(f"[!] MCP timed out while checking {ip}", file=sys.stderr)
-        return {"ip": ip, "exposed": False, "models": []}
-    if result.returncode != 0:
-        print(f"[!] MCP returned error for {ip}: {result.stderr}", file=sys.stderr)
-        return {"ip": ip, "exposed": False, "models": []}
-    try:
-        data = json.loads(result.stdout)
-        models = data.get("models", []) if isinstance(data, dict) else []
-        return {"ip": ip, "exposed": True, "models": models}
-    except json.JSONDecodeError:
-        print(f"[!] Could not decode MCP JSON for {ip}", file=sys.stderr)
-        return {"ip": ip, "exposed": False, "models": []}
-
-def probe(ip: str) -> dict:
-    global USE_MCP, MCP_CMD
-    if USE_MCP:
-        return run_mcp_check(ip, MCP_CMD)
-    else:
+        with request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                return resp.status, json.loads(raw)
+            except json.JSONDecodeError:
+                return resp.status, raw
+    except error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace") if e.fp else ""
         try:
-            import requests
-            resp = requests.get(f"http://{ip}:11434/api/ps", timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                models = data.get("models", []) if isinstance(data, dict) else []
-                return {"ip": ip, "exposed": True, "models": models}
+            return e.code, json.loads(raw)
         except Exception:
-            pass
-        return {"ip": ip, "exposed": False, "models": []}
+            return e.code, raw
+    except Exception as e:
+        return None, str(e)
 
-def scan_cidr(cidr: str, timeout: int = 5):
-    import ipaddress
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
+def probe_ollama(base: str, timeout: float = 3.0) -> dict[str, Any]:
+    base = base.rstrip("/")
+    status, payload = http_json(f"{base}/api/ps", timeout=timeout)
+    if status == 200 and isinstance(payload, dict):
+        models = payload.get("models") or []
+        return {
+            "url": base,
+            "exposed": True,
+            "status": status,
+            "models": [
+                {"name": m.get("name") or m.get("model"), "size": m.get("size")}
+                for m in models[:25]
+            ],
+        }
+    if status in (401, 403):
+        return {"url": base, "exposed": False, "auth_required": True, "status": status, "models": []}
+    return {
+        "url": base,
+        "exposed": False,
+        "status": status,
+        "models": [],
+        "error": payload if status is None else None,
+    }
+
+
+def scan_local(host: str = "127.0.0.1") -> list[dict]:
+    found = []
+    for port, desc in AI_PORTS:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.8)
+        open_ = sock.connect_ex((host, port)) == 0
+        sock.close()
+        if not open_:
+            continue
+        row = {"host": host, "port": port, "desc": desc}
+        if port == DEFAULT_PORT:
+            row["probe"] = probe_ollama(f"http://{host}:{port}")
+        found.append(row)
+    return found
+
+
+def scan_cidr(cidr: str, port: int, max_hosts: int, workers: int, timeout: float) -> list[dict]:
     net = ipaddress.ip_network(cidr, strict=False)
-    live = []
+    hosts = list(net.hosts()) if net.num_addresses > 1 else [net.network_address]
+    if len(hosts) > max_hosts:
+        raise SystemExit(
+            f"CIDR expands to {len(hosts)} hosts; max allowed is {max_hosts}. "
+            "Narrow the range or raise --max-hosts deliberately."
+        )
+    results: list[dict] = []
 
-    def probe_ip(ip):
-        return probe(ip)
+    def one(ip: str):
+        return probe_ollama(f"http://{ip}:{port}", timeout=timeout)
 
-    with ThreadPoolExecutor(max_workers=200) as pool:
-        futures = {pool.submit(probe_ip, str(ip)): ip for ip in net.hosts()}
-        for fut in as_completed(futures):
-            res = fut.result()
-            if res:
-                live.append(res)
-    return live
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futs = {pool.submit(one, str(ip)): str(ip) for ip in hosts}
+        for fut in as_completed(futs):
+            results.append(fut.result())
+    return results
+
+
+def demo_local():
+    print("Starting localhost-only Docker demo (port 14000)…")
+    try:
+        subprocess.run(["docker", "version"], capture_output=True, check=True, timeout=10)
+    except Exception:
+        print("Docker not available.", file=sys.stderr)
+        return 1
+    subprocess.run(["docker", "rm", "-f", DEMO_NAME], capture_output=True)
+    r = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            DEMO_NAME,
+            "-p",
+            "127.0.0.1:14000:11434",
+            DOCKER_IMAGE,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        print(r.stderr, file=sys.stderr)
+        return 1
+    try:
+        for _ in range(30):
+            st, _ = http_json("http://127.0.0.1:14000/api/ps", timeout=2)
+            if st == 200:
+                break
+            time.sleep(1)
+        else:
+            print("Ollama did not become ready.", file=sys.stderr)
+            return 1
+        secret = "SECRET_TOKEN=poc_demo_value_12345\n"
+        subprocess.run(
+            ["docker", "exec", DEMO_NAME, "sh", "-c", f"printf '%s' '{secret}' > /tmp/ollama_poc_test_secret.txt"],
+            check=False,
+        )
+        print("Container ready. Exposure probe:")
+        print(json.dumps(probe_ollama("http://127.0.0.1:14000"), indent=2))
+        print(
+            "\nPath-traversal demos against third-party hosts are intentionally not automated.\n"
+            "Use this container only on localhost to study model-name handling safely."
+        )
+        return 0
+    finally:
+        subprocess.run(["docker", "rm", "-f", DEMO_NAME], capture_output=True)
+
 
 def main():
-    args = parse_args()
+    p = argparse.ArgumentParser(description="LeakyCompute defensive Ollama exposure CLI")
+    p.add_argument("--check-url", help="Base URL e.g. http://127.0.0.1:11434")
+    p.add_argument("--scan-local", action="store_true")
+    p.add_argument("--scan-cidr", help="CIDR you own, e.g. 203.0.113.0/28")
+    p.add_argument(
+        "--i-own-this-range",
+        action="store_true",
+        help="Required with --scan-cidr; attests authorization",
+    )
+    p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--max-hosts", type=int, default=256)
+    p.add_argument("--workers", type=int, default=32)
+    p.add_argument("--timeout", type=float, default=3.0)
+    p.add_argument("--demo-local", action="store_true")
+    p.add_argument("--output-json", help="Write results JSON to path")
+    args = p.parse_args()
 
-    # Determine CIDR
-    if args.scan_cidr:
-        cidr_to_scan = args.scan_cidr
+    out: Any = None
+    if args.demo_local:
+        return demo_local()
+    if args.check_url:
+        out = probe_ollama(args.check_url, timeout=args.timeout)
+    elif args.scan_local:
+        out = scan_local()
+    elif args.scan_cidr:
+        if not args.i_own_this_range:
+            raise SystemExit("Refusing CIDR scan without --i-own-this-range")
+        out = scan_cidr(args.scan_cidr, args.port, args.max_hosts, args.workers, args.timeout)
     else:
-        cidr_to_scan = os.getenv("CIDR")
-        if not cidr_to_scan:
-            raise SystemExit("Either --scan-cidr or CIDR env‑var required")
+        p.print_help()
+        return 2
 
-    # Choose backend (direct HTTP vs MCP)
-    global USE_MCP
-    if args.use_mcp:
-        USE_MCP = True
-        MCP_CMD = args.mcp_cmd
-
-    hits = scan_cidr(cidr_to_scan)
-
+    text = json.dumps(out, indent=2)
+    print(text)
     if args.output_json:
         with open(args.output_json, "w") as f:
-            json.dump(hits, f, indent=2)
-    else:
-        print(json.dumps(hits, indent=2))
+            f.write(text)
+            f.write("\n")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

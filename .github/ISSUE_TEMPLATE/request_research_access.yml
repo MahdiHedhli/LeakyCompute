@@ -1,0 +1,63 @@
+name: Request research lab access
+description: Apply for GitHub-SSO access to the gated LeakyCompute researcher lab.
+title: "[access] Research lab access for @"
+labels:
+  - access-request
+  - needs-review
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## LeakyCompute lab access
+
+        Approvals grant **Cloudflare Access + allowlist** entry for **this GitHub account**.
+        You will sign in with **GitHub SSO** (same user).
+
+        Public self-check does **not** require access.
+  - type: input
+    id: github_login
+    attributes:
+      label: GitHub username to allowlist
+      description: Must match the account you will use for Cloudflare GitHub SSO. Defaults to issue author if identical.
+      placeholder: "octocat"
+    validations:
+      required: true
+  - type: input
+    id: affiliation
+    attributes:
+      label: Affiliation
+      description: Company, university, independent researcher, etc.
+      placeholder: "Independent / Acme Research"
+    validations:
+      required: true
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Research purpose
+      description: What will you use the lab catalog/stats for? (No third-party weaponization.)
+      placeholder: "Studying exposure trends for a defensive write-up…"
+    validations:
+      required: true
+  - type: textarea
+    id: repos
+    attributes:
+      label: Relevant public work
+      description: Links to repos, papers, or prior research we can use while vetting.
+    validations:
+      required: true
+  - type: checkboxes
+    id: ethics
+    attributes:
+      label: Attestations
+      options:
+        - label: I will only probe systems I own or have explicit authorization to test.
+          required: true
+        - label: I will not use LeakyCompute to proxy abuse, mass-scan the public internet, or exploit third parties.
+          required: true
+        - label: I understand chat/proxy to random internet hosts is intentionally not provided.
+          required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Optional context for the maintainer.

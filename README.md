@@ -1,125 +1,111 @@
-# Leaky Compute
+# LeakyCompute
 
-**Leaky Compute** is a research project that provides a simple way for anyone to test whether their Ollama deployment is exposed to the public Internet, and a private Cloudflare‑based sandbox where vetted researchers can run full‑scale scans and publish aggregated statistics.
+**DON'T PANIC // Threat Research**
 
-## Table of Contents
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [Installation & Local Testing](#installation--local-testing)
-- [Deploying the Private Cloudflare Sandbox](#deploying-the-private-cloudflare-sandbox)
-- [Deploying the Public UI (GitHub Pages)](#deploying-the-public-ui-github-pages)
-- [Defensive Checklist](#defensive-checklist)
-- [License](#license)
+Defensive research instrument for **internet-exposed AI inference** (especially unauthenticated Ollama). Inspired by the UX of [STOLEN COMPUTE](https://web.archive.org/web/20260727203031/https://stolencompute.com/) — rebuilt with a **Don't Panic cyberpunk-noir** skin, safe probes only, hard rate limits, and a **GitHub-SSO gated researcher lab**.
 
-## Overview
-The project consists of three main components:
+> Evidence first. Panic never.  
+> We measure exposure. We do **not** proxy chat through strangers' GPUs.
 
-1. **Public “self‑check” UI** – a static web page (hosted on GitHub Pages) that lets any user enter an IP address or CIDR and instantly see whether their Ollama instance is exposed. The UI calls a Cloudflare Worker that performs the actual check via direct HTTP request or via the MCP browser‑bridge (optional).
+![LeakyCompute](public/assets/logo.svg)
 
-2. **Private research sandbox** – a Cloudflare Worker (protected by Cloudflare Access) that can run bulk scans over CIDR blocks owned by vetted researchers, store results in a private KV namespace, and expose aggregated statistics via a `/stats` endpoint.
+## What you get
 
-3. **GitHub Action** – a scheduled GitHub Action that reads the aggregated statistics from the private worker, converts them to a markdown file, and commits the file to a dedicated *stats* repository. The public Leaky Compute site can render this markdown to show live counts.
+| Surface | Host (free) | Audience |
+|---------|-------------|---------|
+| **Public pulse** | GitHub Pages (`public/`) | Anyone — dual counters + safe self-check + checklist |
+| **API** | Cloudflare Worker (`worker/`) | Stats, rate-limited checks, allowlist admin, lab APIs |
+| **Researcher lab** | Cloudflare Pages (`lab/`) | Allowlisted GitHub users after issue approval |
+| **CLI** | `src/check_ollama_exposure.py` | Local / owned-range audits |
 
-## Prerequisites
-- **Git** and **Node.js (>=18)** installed locally.
-- **Cloudflare account** with Access enabled (for the private sandbox).
-- **Ollama token** (if your Ollama instance requires authentication).
-- **MCP binary** (optional, for the MCP‑enabled check).
+### Dual counters (public)
 
-## Installation & Local Testing
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/MahdiHedhli/LeakyCompute.git
-   cd LeakyCompute
-   ```
+1. **Research snapshot** — filtered archive-era catalog seed (~1.8k models / ~19k host-sum after exploit-like filtering).  
+2. **Live instrumented** — voluntary self-checks + researcher-owned scans only.
 
-2. Create a Python virtual environment (optional but recommended):
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
+### Safety rails
 
-3. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+- Probe = `GET /api/ps` only (no `/api/pull` or generate with traversal)  
+- Default check target = visitor egress IP; override requires attestation  
+- Strict per-IP + global rate limits; optional Turnstile  
+- Private abuse logs (hashed) in Worker KV — **not** in this repo  
+- Lab chat / third-party proxy **disabled at launch** (phase B later)  
+- Seed catalog strips path/SSRF-shaped “models”
 
-4. Verify the script works (direct request, no MCP):
-   ```bash
-   python src/check_ollama_exposure.py --help
-   ```
+## Repo layout
 
-5. (Optional) Install the MCP binary if you want to use the MCP path:
-   ```bash
-   git clone https://github.com/mahdihedhli/browserbridge.git
-   cd browserbridge
-   npm ci
-   npm run build   # produces ./mcp
-   sudo mv mcp /usr/local/bin/mcp   # or adjust PATH as needed
-   ```
+```
+public/           # GitHub Pages pulse UI
+lab/              # Gated researcher UI (STOLEN COMPUTE layout, noir skin)
+worker/src/       # Cloudflare Worker API
+data/             # seed-models.json (filtered)
+src/              # defensive Python CLI
+scripts/          # seed build helpers
+docs/             # DEPLOY, SECURITY, research notes
+.github/          # access issue template + approve/revoke Actions
+```
 
-6. Run a quick test on localhost (assuming Ollama is listening on 127.0.0.1:11434):
-   ```bash
-   python src/check_ollama_exposure.py --scan-cidr 127.0.0.1/32
-   ```
+## Quick start (local)
 
-## Deploying the Private Cloudflare Sandbox
-1. **Create a Cloudflare Account** and enable **Cloudflare Access** (requires an identity provider such as Azure AD, Google Workspace, etc.).
-2. **Create a KV namespace**:
-   ```bash
-   wrangler kv:namespace create research_exposure
-   ```
-3. **Bind the KV namespace** to the worker (edit `wrangler.toml`):
-   ```toml
-   [[kv_namespaces]]
-   binding = "research_exposure"
-   id = "YOUR_KV_ID"
-   ```
-4. **Add the Ollama token as a secret**:
-   ```bash
-   wrangler secret put OLLAMA_TOKEN
-   # paste the token and press Enter
-   ```
-5. **Deploy the worker** (the code lives in `private/worker.js` and `private/stats.js`):
-   ```bash
-   wrangler deploy
-   ```
-   The deployment will give you a URL such as `https://<worker-subdomain>.workers.dev`.
+```bash
+# CLI — localhost only
+python3 src/check_ollama_exposure.py --scan-local
+python3 src/check_ollama_exposure.py --check-url http://127.0.0.1:11434
 
-6. **Configure Cloudflare Access**:
-   - In the Cloudflare dashboard, go to **Access → Applications**.
-   - Create a new application for the worker subdomain.
-   - Add the “research‑team” group (or any group that should have access) as an allowed principal.
-   - Ensure the application is set to **Require Sign‑In**.
+# Worker (needs wrangler + KV ids in wrangler.toml)
+npx wrangler dev worker/src/index.js
+# Public UI: open public/index.html via any static server, ?api=http://127.0.0.1:8787
 
-7. **Test the endpoints**:
-   - Single IP check: `https://<worker-subdomain>.workers.dev/check?ip=127.0.0.1`
-   - Bulk scan (POST):
-     ```json
-     {
-       "cidrs": ["10.0.0.0/8"]
-     }
-     ```
-   - Stats (aggregated counts):
-     `https://<worker-subdomain>.workers.dev/stats`
+# Lab UI offline seed preview
+python3 -m http.server 5500 --directory lab
+# open http://127.0.0.1:5500/?dev_user=YOUR_GITHUB&api=http://127.0.0.1:8787
+# first: wrangler + approve yourself via admin API or KV
+```
 
-## Deploying the Public UI (GitHub Pages)
-1. The public UI lives in the `public/` directory.
-2. Push the folder to a GitHub repository (the same repo works). GitHub Pages will automatically serve static files from the `public/` folder (or you can create a separate `gh-pages` branch).
-3. Replace `<YOUR_WORKER_SUBDOMAIN>` in `public/script.js` with the actual subdomain of your Cloudflare worker (e.g., `leakycompute.workers.dev`).
+## Deploy
 
-## Defensive Checklist
-- **Network isolation** – Bind Ollama to `127.0.0.1` or a private subnet only. If a public endpoint is required, place it behind a reverse‑proxy that enforces TLS and adds an API‑key or mutual‑TLS.
-- **Authentication** – Enable Ollama’s built‑in username/password or front‑end it with a reverse‑proxy that requires a bearer token. Never run the service as root; run it in a non‑root Docker container with minimal capabilities.
-- **Input validation** – Reject model names containing characters outside `[A‑Z0‑9_.-]`. Whitelist allowed model names.
-- **Least‑privilege runtime** – Run the container with a read‑only filesystem, drop unnecessary Linux capabilities, and mount model directories read‑only.
-- **Logging & alerting** – Log every request to `/api/ps`, `/api/pull`, `/api/generate`. Alert on abnormal request rates or on payloads containing `..` or `/etc`.
-- **Patch & version hygiene** – Keep the Ollama server up‑to‑date. If the vendor does not fix the path‑traversal bug, consider forking or switching to a server with stricter input validation.
-- **Monitoring** – Deploy a network IDS rule that flags SSRF payloads targeting `127.0.0.1`, `169.254.*`, `metadata.google.internal`, etc. Correlate Ollama traffic with unusual user‑agents or geolocations.
+See **[docs/DEPLOY.md](docs/DEPLOY.md)** for free-tier Worker + Pages + Access + GitHub secrets.
+
+**Researcher access flow**
+
+1. Open issue with [Request research lab access](.github/ISSUE_TEMPLATE/request_research_access.yml)  
+2. Maintainer vets GitHub profile/repos  
+3. Add label **`access-approved`**  
+4. Action calls Worker admin API → KV allowlist  
+5. Researcher opens lab URL → Cloudflare Access → **GitHub SSO**
+
+Revoke with label **`access-revoked`**.
+
+## Configuration (domain-ready)
+
+| File | Purpose |
+|------|---------|
+| `public/js/config.js` | `API_BASE`, Turnstile site key, lab/repo URLs |
+| `lab/js/config.js` | Same for lab |
+| `wrangler.toml` `[vars]` | `ALLOWED_ORIGINS`, snapshot numbers, rate limits |
+
+When you buy a domain: point Pages/Worker custom hosts, extend `ALLOWED_ORIGINS`, update the two `config.js` files and GitHub secrets — no architectural rewrite.
+
+## Documentation
+
+- [Deploy](docs/DEPLOY.md)  
+- [Security policy](docs/SECURITY.md)  
+- [Research background](docs/research.md)  
+
+## Seed data
+
+```bash
+python3 scripts/build_seed.py path/to/models.json -o data/seed-models.json
+cp data/seed-models.json lab/data/seed-models.json
+# keep SNAPSHOT_* vars in wrangler.toml in sync with seed snapshot
+```
 
 ## License
-MIT License (or your preferred license).
 
----
+MIT — see [LICENSE](LICENSE).
 
-**Contact**: If you have questions or wish to contribute, open an issue in the repository or reach out via the project's discussion board.
+## Credits
+
+- UX structure studied from archived STOLEN COMPUTE (acidvegas) via Wayback Machine  
+- Brand voice: DON'T PANIC threat research / detective noir  
+- Built for free Cloudflare + GitHub tiers  

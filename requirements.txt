@@ -1,1 +1,2 @@
-requests>=2.31
+# CLI uses Python 3.10+ stdlib only.
+# No required third-party packages.

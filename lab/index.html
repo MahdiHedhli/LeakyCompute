@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeakyCompute Lab — DON'T PANIC // case files</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#0a0e17" />
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app" class="sb-hidden">
+    <button id="expand-btn" title="show sidebar">☰</button>
+    <div id="sb-backdrop"></div>
+
+    <aside id="sidebar">
+      <header id="brand">
+        <img class="mark" src="assets/logo.svg" alt="" />
+        <div>
+          <h1>LEAKY&nbsp;COMPUTE</h1>
+          <div class="sub">DON'T PANIC // LAB</div>
+        </div>
+        <div class="brand-actions">
+          <button id="stats-btn" title="statistics">STATS</button>
+          <button id="collapse-btn" title="hide sidebar">«</button>
+        </div>
+      </header>
+      <div id="tools">
+        <div class="search-wrap">
+          <span style="padding-left:10px;color:var(--dim)">⌕</span>
+          <input id="search" type="text" placeholder="search case files (models)" autocomplete="off" spellcheck="false" />
+          <button id="search-clear" hidden>✕</button>
+        </div>
+        <div class="sort-row">
+          <div class="seg" id="sort-key">
+            <button data-key="num" class="on">size</button>
+            <button data-key="hosts">nodes</button>
+            <button data-key="model">name</button>
+          </div>
+          <div class="seg" id="sort-dir">
+            <button data-dir="desc" class="on">▼</button>
+            <button data-dir="asc">▲</button>
+          </div>
+        </div>
+      </div>
+      <ul id="model-list"></ul>
+    </aside>
+
+    <main id="stage">
+      <div id="welcome">
+        <img class="flag" src="assets/logo.svg" alt="" />
+        <h2>LEAKY&nbsp;COMPUTE</h2>
+        <p class="tag">evidence first · panic never · catalog + stats (chat locked until phase B)</p>
+        <div class="counters">
+          <div class="counter"><span class="cnum" id="c-models">0</span><span class="clbl">models</span></div>
+          <div class="counter"><span class="cnum" id="c-nodes">0</span><span class="clbl">seed hosts</span></div>
+        </div>
+        <p class="hint">← pick a model from the case files · seed rows revalidate when live scans confirm them</p>
+        <div id="auth-box" class="auth-box">Checking access…</div>
+      </div>
+
+      <section id="session" hidden>
+        <header id="chat-head">
+          <div>
+            <span id="ch-name">—</span>
+            <span id="ch-size" class="chip"></span>
+            <span id="ch-valid" class="chip warn">seed</span>
+          </div>
+          <div>
+            <span class="chip" id="pool-info">lab mode · no third-party proxy</span>
+          </div>
+        </header>
+        <div id="detail"></div>
+      </section>
+    </main>
+
+    <div id="stats-modal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-box">
+        <header class="stats-head">
+          <h2>FIELD STATS // OPEN SOCKETS</h2>
+          <button id="stats-close">✕</button>
+        </header>
+        <div class="tiles" id="tiles"></div>
+        <div class="cards">
+          <div class="card">
+            <h3>seed hosts by model size (top)</h3>
+            <div id="donut-legend" class="legend"></div>
+          </div>
+          <div class="card">
+            <h3>busiest models <span style="color:var(--dim)">(seed hosts)</span></h3>
+            <div id="bars"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

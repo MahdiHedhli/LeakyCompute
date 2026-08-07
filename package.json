@@ -1,0 +1,13 @@
+{
+  "name": "leakycompute",
+  "private": true,
+  "description": "Defensive exposed-AI research instrument (Worker + static UIs)",
+  "scripts": {
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

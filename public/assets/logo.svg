@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="LeakyCompute">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5ce1ff"/>
+      <stop offset="55%" stop-color="#f5c542"/>
+      <stop offset="100%" stop-color="#ff6b6b"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- rack / case -->
+  <rect x="28" y="22" width="72" height="70" rx="8" fill="#121826" stroke="url(#g)" stroke-width="3"/>
+  <rect x="36" y="32" width="56" height="8" rx="2" fill="#1c2438"/>
+  <rect x="36" y="46" width="56" height="8" rx="2" fill="#1c2438"/>
+  <rect x="36" y="60" width="40" height="8" rx="2" fill="#1c2438"/>
+  <!-- amber status eye -->
+  <circle cx="84" cy="64" r="5" fill="#f5c542" filter="url(#glow)"/>
+  <!-- leak drip -->
+  <path d="M64 92 C64 92 52 104 52 112 C52 118 57 122 64 122 C71 122 76 118 76 112 C76 104 64 92 64 92Z"
+        fill="#5ce1ff" opacity="0.95" filter="url(#glow)"/>
+  <path d="M64 88 v8" stroke="#5ce1ff" stroke-width="3" stroke-linecap="round"/>
+</svg>

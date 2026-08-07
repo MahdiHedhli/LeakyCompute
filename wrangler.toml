@@ -1,0 +1,39 @@
+# LeakyCompute API Worker — free-tier friendly
+# Replace KV ids after: wrangler kv namespace create LEAKY_KV
+#                      wrangler kv namespace create LEAKY_KV --preview
+name = "leakycompute-api"
+main = "worker/src/index.js"
+compatibility_date = "2025-11-01"
+workers_dev = true
+
+# Public site CORS + domain-ready: set CUSTOM_ORIGINS later to include your domain
+[vars]
+ENVIRONMENT = "development"
+# Comma-separated allowed browser origins (GitHub Pages + Pages lab + localhost)
+ALLOWED_ORIGINS = "http://localhost:8787,http://127.0.0.1:8787,http://localhost:5500,http://127.0.0.1:5500,https://mahdihedhli.github.io"
+# Research snapshot (archive seed) — dual counter "C"
+SNAPSHOT_MODELS = "1864"
+SNAPSHOT_HOSTS = "19348"
+# Rate limits (public self-check)
+RL_OWN_WINDOW_SEC = "900"
+RL_OWN_MAX = "5"
+RL_OWN_DAY_MAX = "20"
+RL_OVERRIDE_WINDOW_SEC = "900"
+RL_OVERRIDE_MAX = "2"
+RL_OVERRIDE_DAY_MAX = "5"
+RL_GLOBAL_DAY_MAX = "2000"
+CHECK_TIMEOUT_MS = "3000"
+DEFAULT_PORT = "11434"
+# Cloudflare Access (lab routes) — set in dashboard / wrangler secret / prod vars
+# ACCESS_TEAM_DOMAIN = "yourteam.cloudflareaccess.com"
+# ACCESS_AUD = "your-access-application-aud"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+preview_id = "00000000000000000000000000000000"
+
+# Secrets (set via wrangler secret put — never commit):
+#   TURNSTILE_SECRET_KEY   optional; if unset, Turnstile check is skipped (dev only)
+#   ABUSE_LOG_SALT         salt for hashing client IPs in private abuse logs
+#   ADMIN_SYNC_TOKEN       GitHub Action uses this to write allowlist entries

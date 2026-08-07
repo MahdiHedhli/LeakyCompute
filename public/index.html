@@ -1,24 +1,117 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Leaky Compute – Ollama Exposure Check</title>
-  <style>
-    body {font-family:Arial,Helvetica,sans-serif; max-width:600px; margin:2rem auto; line-height:1.5;}
-    input, button {padding:0.5rem; font-size:1rem;}
-    pre {background:#f4f4f4; padding:1rem; border:1px solid #ddd;}
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeakyCompute — DON'T PANIC // exposed AI case file</title>
+  <meta name="description" content="Defensive research pulse for internet-exposed Ollama endpoints. Dual counters, safe self-check, and a gated researcher lab. Evidence first. Panic never." />
+  <meta name="theme-color" content="#0a0e17" />
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <h1>Leaky Compute – Ollama Exposure Check</h1>
-  <p>Enter the IP address (or CIDR) of the Ollama server you want to test.</p>
+  <div class="scanline" aria-hidden="true"></div>
+  <div class="wrap">
+    <header class="top">
+      <img src="assets/logo.svg" alt="LeakyCompute logo" />
+      <div class="brand">
+        <div class="eyebrow">DON'T PANIC // Threat Research</div>
+        <h1>LEAKY COMPUTE</h1>
+        <div class="tag">misconfigured AI is free real estate — measure it, don't weaponize it</div>
+      </div>
+      <nav class="nav">
+        <a id="repo-link" href="#" target="_blank" rel="noopener">Repo</a>
+        <a id="access-link" href="#" target="_blank" rel="noopener">Request lab access</a>
+        <a id="lab-link" class="primary" href="#" target="_blank" rel="noopener">Researcher lab</a>
+      </nav>
+    </header>
 
-  <input id="ipInput" placeholder="e.g. 203.0.113.5" />
-  <button id="checkBtn">Check</button>
+    <section class="hero">
+      <h2>FIELD PULSE // dual counters</h2>
+      <p>
+        Public instrument for defenders. We show an archive-era <strong>research snapshot</strong>
+        (filtered STOLEN COMPUTE catalog seed) alongside <strong>live instrumented</strong>
+        counts from voluntary self-checks and researcher-owned scans — never an open proxy to third-party GPUs.
+      </p>
+      <div class="counters">
+        <div class="card snapshot">
+          <div class="label">Research snapshot · hosts</div>
+          <div class="value" id="snap-hosts">—</div>
+          <div class="sub" id="snap-sub">Loading…</div>
+          <div class="badge">models: <span id="snap-models">—</span></div>
+        </div>
+        <div class="card">
+          <div class="label">Live instrumented · exposed</div>
+          <div class="value" id="live-exposed">—</div>
+          <div class="sub" id="live-sub">Loading…</div>
+          <div class="badge">checks: <span id="live-checks">—</span></div>
+        </div>
+      </div>
+      <p class="hint" id="api-note" style="margin-top:14px">Connecting to API…</p>
+      <div class="row" style="margin-top:10px">
+        <button type="button" class="secondary" id="refresh-stats">Refresh stats</button>
+      </div>
+    </section>
 
-  <h2>Result</h2>
-  <pre id="result">-- loading --</pre>
+    <section class="panel">
+      <h3>Safe self-check</h3>
+      <p class="hint" style="margin-bottom:12px">
+        Default target is <strong>your current egress IP</strong> (as seen by Cloudflare).
+        Probe is <code>GET /api/ps</code> only — no pull, no generate, no path traversal.
+        Strict rate limits apply. Override is logged privately for abuse review.
+      </p>
 
-  <script src="script.js"></script>
+      <label class="check">
+        <input type="checkbox" id="override-toggle" />
+        <span>Check a different host (I own it or have written authorization)</span>
+      </label>
+
+      <div id="override-fields" hidden>
+        <div class="row">
+          <input id="target-input" type="text" placeholder="hostname or public IP" autocomplete="off" spellcheck="false" />
+          <input id="port-input" type="number" value="11434" min="1" max="65535" style="max-width:120px" />
+        </div>
+        <label class="check">
+          <input type="checkbox" id="auth-check" />
+          <span>I confirm I am authorized to test this host. Unauthorized scanning is prohibited.</span>
+        </label>
+      </div>
+
+      <div class="row">
+        <button type="button" id="check-btn">Run safe probe</button>
+      </div>
+      <div id="result" class="result">— awaiting probe —</div>
+    </section>
+
+    <section class="panel">
+      <h3>Defensive checklist</h3>
+      <ul class="list">
+        <li><strong>Network isolation</strong>Bind Ollama to 127.0.0.1 or a private VPC. Never 0.0.0.0 on the public internet.</li>
+        <li><strong>Authentication</strong>Put a reverse proxy (TLS + API key / mTLS) in front. Do not rely on “security through obscurity.”</li>
+        <li><strong>Input validation</strong>Reject model names with path traversal, URLs, or absolute filesystem paths.</li>
+        <li><strong>Least privilege</strong>Non-root container, read-only rootfs where possible, no access to cloud metadata.</li>
+        <li><strong>Detect</strong>Alert on /api/pull spikes and model names containing <code>../</code>, <code>/etc</code>, or link-local metadata IPs.</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h3>Methodology &amp; ethics</h3>
+      <p class="hint">
+        LeakyCompute is a defensive research project. The public surface does not mass-scan the internet,
+        does not proxy chat through strangers' hosts, and does not ship exploit payloads.
+        Researchers request GitHub-SSO lab access via issue; approval writes an allowlist entry used by the gated lab.
+      </p>
+    </section>
+
+    <footer class="footer">
+      <div class="stamp">EVIDENCE FIRST · PANIC NEVER</div>
+      <p style="margin-top:8px">
+        LeakyCompute · DON'T PANIC threat research aesthetic · MIT License ·
+        Domain-ready config in <code>public/js/config.js</code>
+      </p>
+    </footer>
+  </div>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
