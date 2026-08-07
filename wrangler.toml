@@ -16,17 +16,17 @@ SNAPSHOT_MODELS = "1864"
 SNAPSHOT_HOSTS = "19348"
 # Rate limits (public self-check)
 RL_OWN_WINDOW_SEC = "900"
-RL_OWN_MAX = "5"
-RL_OWN_DAY_MAX = "20"
+RL_OWN_MAX = "3"
+RL_OWN_DAY_MAX = "12"
 RL_OVERRIDE_WINDOW_SEC = "900"
-RL_OVERRIDE_MAX = "2"
-RL_OVERRIDE_DAY_MAX = "5"
-RL_GLOBAL_DAY_MAX = "2000"
-CHECK_TIMEOUT_MS = "3000"
+RL_OVERRIDE_MAX = "1"
+RL_OVERRIDE_DAY_MAX = "3"
+RL_GLOBAL_DAY_MAX = "800"
+CHECK_TIMEOUT_MS = "2500"
 DEFAULT_PORT = "11434"
-# Cloudflare Access (lab routes) — set in dashboard / wrangler secret / prod vars
-# ACCESS_TEAM_DOMAIN = "yourteam.cloudflareaccess.com"
-# ACCESS_AUD = "your-access-application-aud"
+# Cloudflare Access (lab JWT validation)
+ACCESS_TEAM_DOMAIN = "odd-night-42c2.cloudflareaccess.com"
+ACCESS_AUD = "" # removed from public history
 
 [[kv_namespaces]]
 binding = "KV"

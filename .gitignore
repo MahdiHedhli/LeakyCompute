@@ -37,3 +37,7 @@ build/
 results.json
 ollama_scan_results.json
 *.local.json
+
+# discovery run outputs
+data/discovery-last-run.json
+data/asn-candidates.json
