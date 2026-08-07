@@ -183,6 +183,7 @@ def shodan_search(
                 asn = f"AS{asn_raw}"
             else:
                 asn = str(asn_raw)
+            loc = m.get("location") or {}
             out.append(
                 {
                     "ip": ip,
@@ -192,6 +193,12 @@ def shodan_search(
                     "isp": m.get("isp"),
                     "asn": asn,
                     "product": (m.get("product") or ""),
+                    "country": loc.get("country_name"),
+                    "country_code": loc.get("country_code"),
+                    "city": loc.get("city"),
+                    "lat": loc.get("latitude"),
+                    "lon": loc.get("longitude"),
+                    "location": loc,
                 }
             )
             if len(out) >= limit:

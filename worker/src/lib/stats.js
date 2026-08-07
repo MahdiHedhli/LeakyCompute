@@ -74,9 +74,12 @@ export async function putValidatedCatalog(env, catalog) {
   );
 }
 
-export function publicStatsPayload(env, live) {
+export async function publicStatsPayload(env, live) {
   const snapshot_models = parseInt(env.SNAPSHOT_MODELS || "0", 10) || 0;
   const snapshot_hosts = parseInt(env.SNAPSHOT_HOSTS || "0", 10) || 0;
+  // lazy import to avoid circular issues at module init
+  const { getGeoStats } = await import("./discovery.js");
+  const geo = await getGeoStats(env);
   return {
     research_snapshot: {
       label: "Research snapshot (archive seed)",
@@ -91,9 +94,16 @@ export function publicStatsPayload(env, live) {
       last_check_at: live.last_check_at,
       models_top: live.models_top || [],
       note:
-        "Counts from voluntary self-checks, researcher-owned scans, and capped discovery re-probes (Shodan-seeded + prior-hit neighborhoods). Not a full internet census.",
+        "Counts from voluntary self-checks and capped multi-lane discovery (Shodan fingerprints + prior-hit neighborhoods). Not a full internet census.",
       discovery_runs: live.discovery_runs || 0,
       last_discovery_at: live.last_discovery_at || null,
+    },
+    geography: {
+      label: "Exposure candidates by country",
+      note: "Unique exposed hosts we have re-verified (country from Shodan/geo metadata). No raw IPs.",
+      by_country: geo.by_country || [],
+      by_asn: (geo.by_asn || []).slice(0, 20),
+      by_stack: geo.by_stack || [],
     },
     updated_at: live.updated_at || new Date().toISOString(),
   };
