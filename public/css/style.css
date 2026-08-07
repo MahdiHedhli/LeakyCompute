@@ -43,9 +43,12 @@ a:hover { text-decoration: underline; color: var(--amber); }
 }
 .top img { width: 52px; height: 52px; }
 .brand .eyebrow {
+  display: inline-block;
   font-size: 11px; letter-spacing: 0.14em; color: var(--amber);
   text-transform: uppercase; font-weight: 700;
+  text-decoration: none;
 }
+.brand a.eyebrow:hover { color: var(--cyan); text-decoration: underline; }
 .brand h1 {
   font-size: 22px; letter-spacing: 0.08em; font-weight: 800;
   background: linear-gradient(90deg, var(--cyan), var(--amber));

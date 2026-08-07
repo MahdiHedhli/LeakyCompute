@@ -239,6 +239,9 @@
   }
 
   function wireUi() {
+    const dontPanic = cfg.DONT_PANIC_URL || "https://mahdihedhli.com/dont-panic/";
+    if ($("dont-panic-link")) $("dont-panic-link").href = dontPanic;
+    if ($("dont-panic-eyebrow")) $("dont-panic-eyebrow").href = dontPanic;
     $("repo-link").href = cfg.REPO_URL;
     $("lab-link").href = cfg.LAB_URL;
     $("access-link").href = cfg.ACCESS_ISSUE_URL;

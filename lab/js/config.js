@@ -3,6 +3,7 @@ window.LEAKY_LAB_CONFIG = {
   SEED_URL: "data/seed-models.json",
   PUBLIC_URL: "https://mahdihedhli.github.io/LeakyCompute/",
   REPO_URL: "https://github.com/MahdiHedhli/LeakyCompute",
+  DONT_PANIC_URL: "https://mahdihedhli.com/dont-panic/",
   ACCESS_ISSUE_URL:
     "https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_research_access.yml",
   // Optional: your GitHub login for local dev against wrangler (sends X-Dev-GitHub-Login)
