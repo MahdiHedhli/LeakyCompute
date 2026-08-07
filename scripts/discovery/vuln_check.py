@@ -43,10 +43,10 @@ ADVISORIES = [
     },
     {
         "id": "JUPYTER-NO-TOKEN",
-        "stack": "jupyter_open",
+        "stack": "jupyter",
         "title": "Jupyter exposed without token prompt in HTML",
         "severity": "critical",
-        "check": "jupyter_open",
+        "check": "jupyter",
         "remediation": "Require token/password; never publish 8888 to 0.0.0.0.",
     },
     {
@@ -70,7 +70,7 @@ def classify_result(r: dict) -> list[dict]:
             findings.append({**adv, "matched": True})
         elif adv["stack"] == "ray" and stack == "ray":
             findings.append({**adv, "matched": True})
-        elif adv["stack"] == "jupyter_open" and stack == "jupyter_open":
+        elif adv["stack"] == "jupyter" and stack in ("jupyter", "jupyter_open"):
             findings.append({**adv, "matched": True})
         elif adv["stack"] in ("openai_compat", "vllm", "localai", "litellm") and stack in (
             "openai_compat_8000",

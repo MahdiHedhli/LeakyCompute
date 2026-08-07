@@ -49,7 +49,7 @@ profiles:
       "Shadow" exposure class (open-ports-checker pattern) — scanners that only
       check CVEs miss "dashboard reachable => job submission".
 
-  jupyter_open:
+  jupyter:
     name: Jupyter (likely unauthenticated)
     priority: 1
     shodan:
@@ -61,8 +61,8 @@ profiles:
       method: GET
       path: /
     notes: >
-      Negative filter is the technique: raw port:8888 is millions of services;
-      title+Jupyter minus token HTML surfaces notebooks you land into.
+      Stack id is "jupyter" (matches worker services.js / tier-1 checker).
+      Negative filter: raw port:8888 is noise; title minus token HTML ≈ wide open.
 
   # --- Broader AI / automation stack ---
   open_webui:
@@ -178,6 +178,6 @@ noise_ports:
 # Suggested first active calibration set (slow)
 calibration_lanes:
   - ollama
-  - jupyter_open
+  - jupyter
   - ray
   - open_webui

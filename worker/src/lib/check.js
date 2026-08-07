@@ -1,6 +1,8 @@
 /**
- * Safe Ollama exposure probe.
- * ONLY GET /api/ps (and optional banner GET /).
+ * Target validation for the safe self-check.
+ *
+ * The probe engine itself lives in ./services.js — this module is only
+ * responsible for deciding what we are allowed to point it at.
  * Never sends path-traversal, pull, or generate payloads.
  */
 
@@ -50,79 +52,6 @@ export function validateTarget(host) {
   return { ok: true, host: h, kind: "hostname" };
 }
 
-export function validatePort(port, fallback = 11434) {
-  const p = port == null || port === "" ? fallback : Number(port);
-  if (!Number.isInteger(p) || p < 1 || p > 65535) {
-    return { ok: false, error: "invalid_port" };
-  }
-  return { ok: true, port: p };
-}
-
-/**
- * Probe target for unauthenticated Ollama /api/ps.
- */
-export async function probeOllama(host, port, timeoutMs = 3000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const started = Date.now();
-  const base = host.includes(":") && !host.startsWith("[") && IPV6.test(host)
-    ? `http://[${host}]:${port}`
-    : `http://${host}:${port}`;
-
-  try {
-    const resp = await fetch(`${base}/api/ps`, {
-      method: "GET",
-      signal: controller.signal,
-      redirect: "manual",
-      headers: { Accept: "application/json", "User-Agent": "LeakyCompute-SafeProbe/1.0" },
-    });
-    const latency = Date.now() - started;
-    if (resp.status === 401 || resp.status === 403) {
-      return {
-        exposed: false,
-        auth_required: true,
-        status: resp.status,
-        latency_ms: latency,
-        models: [],
-      };
-    }
-    if (!resp.ok) {
-      return {
-        exposed: false,
-        auth_required: false,
-        status: resp.status,
-        latency_ms: latency,
-        models: [],
-      };
-    }
-    let models = [];
-    try {
-      const data = await resp.json();
-      const list = Array.isArray(data?.models) ? data.models : [];
-      models = list.slice(0, 25).map((m) => ({
-        name: m.name || m.model || "unknown",
-        size: m.size || null,
-      }));
-    } catch {
-      // non-json but 200 — still interesting
-    }
-    return {
-      exposed: true,
-      auth_required: false,
-      status: resp.status,
-      latency_ms: latency,
-      models,
-    };
-  } catch (err) {
-    return {
-      exposed: false,
-      auth_required: false,
-      status: 0,
-      latency_ms: Date.now() - started,
-      models: [],
-      error: err?.name === "AbortError" ? "timeout" : "unreachable",
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// Port validation now lives in ./services.js (resolvePort): ports are
+// validated against the specific service's known-port list rather than the
+// full 1-65535 range, so this endpoint cannot be used as a port prober.

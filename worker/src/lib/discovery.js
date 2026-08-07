@@ -17,15 +17,27 @@ export async function recordExposedHost(env, hit) {
   const key = `${HIT_PREFIX}${ip}`;
   const now = new Date().toISOString();
   const prev = (await env.KV.get(key, "json")) || {};
+  // A single host can expose more than one stack (e.g. Ollama + Jupyter), so
+  // ports/stacks accumulate as sets while port/stack stay for older readers.
+  const mergedPorts = uniq([
+    ...(prev.ports || (prev.port ? [prev.port] : [])),
+    ...(hit.ports || (hit.port ? [hit.port] : [])),
+  ]);
+  const mergedStacks = uniq([
+    ...(prev.stacks || (prev.stack ? [prev.stack] : [])),
+    ...(hit.stacks || (hit.stack ? [hit.stack] : [])),
+  ]);
   const entry = {
     ip,
     port: hit.port || prev.port || 11434,
+    ports: mergedPorts,
     first_seen: prev.first_seen || now,
     last_seen: now,
     times_seen: (prev.times_seen || 0) + 1,
     models: hit.models || prev.models || [],
     source: hit.source || prev.source || "check",
     stack: hit.stack || prev.stack || null,
+    stacks: mergedStacks,
     product: hit.product || prev.product || null,
     country: hit.country || prev.country || null,
     country_code: hit.country_code || prev.country_code || null,
@@ -44,12 +56,21 @@ export async function recordExposedHost(env, hit) {
     await env.KV.put(HITS_INDEX, JSON.stringify(index));
   }
 
-  // Only count unique first-seen toward geo/asn/stack public aggregates
+  // Only count unique first-seen toward geo/asn public aggregates
   if (!prev.first_seen) {
     await bumpCounter(env, GEO_KEY, entry.country_code || entry.country || "ZZ");
     if (entry.asn) await bumpCounter(env, ASN_KEY, entry.asn);
-    if (entry.stack) await bumpCounter(env, STACK_KEY, entry.stack);
   }
+  // by_stack counts host+stack pairs: a host first seen with Ollama that later
+  // also exposes Jupyter should add to the Jupyter bucket, not be skipped.
+  const knownStacks = new Set(prev.stacks || (prev.stack ? [prev.stack] : []));
+  for (const s of mergedStacks) {
+    if (!knownStacks.has(s)) await bumpCounter(env, STACK_KEY, s);
+  }
+}
+
+function uniq(list) {
+  return [...new Set(list.filter((v) => v != null && v !== ""))];
 }
 
 async function bumpCounter(env, mapKey, label) {

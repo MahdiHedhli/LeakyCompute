@@ -22,7 +22,7 @@ export const ADVISORIES = [
   },
   {
     id: "JUPYTER-NO-TOKEN",
-    stacks: ["jupyter_open"],
+    stacks: ["jupyter"],
     title: "Jupyter without token gate",
     severity: "critical",
     remediation: "Require token; never publish 8888 publicly.",
