@@ -1,41 +1,218 @@
-# Security policy
+# Security policy & project constitution
 
-## What this project is
+This document is the standard every change is checked against. It is written as
+**invariants** — statements that must remain true — rather than intentions, so a
+diff can be verified against it by a reviewer or an agent.
 
-LeakyCompute is a **defensive** research instrument:
+If a change cannot be made without breaking an invariant, it does not ship in
+that form. Amending an invariant is a deliberate, documented act
+(see [Amending](#amending)), not a side effect of a feature.
 
-- Public self-check uses **read-only GETs only**, one confirm + one exposure probe per service:
+---
 
-  | Service | Port | Confirm | Exposure check |
-  |---|---|---|---|
-  | Ollama | 11434 | `GET /api/version` (fallback `GET /`) | `GET /api/tags` |
-  | Ray | 8265 | `GET /api/version` (fallback `GET /`) | `GET /api/jobs/` |
-  | Jupyter | 8888 | `GET /api/status` (fallback `GET /`) | `GET /tree` |
+## 0. The line
 
-  The exposure probe only runs once the service is confirmed, and nothing in the
-  probe path submits a job, pulls a model, sends a prompt, or otherwise changes
-  target state. We report that an endpoint answers unauthenticated requests; we
-  never send one to prove impact.
-- Target ports are validated against each service's known-port list, so `/v1/check`
-  cannot be used as a general-purpose port prober
-- Response bodies from targets are read with a 32 KB cap and redirects are never
-  followed, so a hostile target cannot stream at the Worker or bounce it elsewhere
-- Strict rate limits and optional Turnstile
-- Private abuse logs (hashed identifiers) — **not** in git
-- Gated lab for vetted GitHub users; **no** third-party chat proxy at launch
+LeakyCompute measures exposed AI infrastructure **to help operators close it**.
+The project's legitimacy rests on being distinguishable from the things it
+studies — STOLEN COMPUTE, NadMesh, ShadowRay tooling. Those also enumerate
+exposed AI endpoints. The difference is not stated intent; it is behaviour that
+can be audited from the source tree.
 
-## What this project is not
+Every invariant below exists to keep that difference auditable.
 
-- Not a mass internet scanner as a service  
-- Not STOLEN COMPUTE (no random anonymous host proxy)  
-- Not an exploit kit (path traversal / SSRF payloads are filtered from seed catalogs)
+---
 
-## Reporting
+## 1. Probe invariants
 
-If you find a vulnerability in LeakyCompute itself (auth bypass, SSRF in our Worker, allowlist escape), open a **private** security advisory on GitHub or email the maintainer via profile contact.
+**I-1. Every request to a third-party target is a `GET`.**
+No POST, PUT, PATCH, DELETE, or any method with side effects — including
+"harmless" ones. Enforced by `safeGet()` in `worker/src/lib/services.js`;
+asserted in `worker/test/probe.test.mjs`.
 
-Please **do not** use this project to attack third parties.
+**I-2. Probe paths are metadata, health, version, or listing endpoints only.**
+Never a job submission, model pull, prompt, kernel start, file read, or any path
+that makes the target *do* something. Current tier-1 set:
 
-## Abuse
+| Service | Port | Confirm | Exposure check |
+|---|---|---|---|
+| Ollama | 11434 | `GET /api/version` (fallback `GET /`) | `GET /api/tags` |
+| Ray | 8265 | `GET /api/version` (fallback `GET /`) | `GET /api/jobs/` |
+| Jupyter | 8888 | `GET /api/status` (fallback `GET /`) | `GET /tree` |
 
-Override checks require explicit authorization attestation and are rate-limited + logged privately. Maintainers may revoke lab access (`access-revoked` label) and block abusive clients.
+**I-3. We report that an endpoint answers unauthenticated requests. We never
+send one to prove impact.**
+Demonstrating exploitability against a third party is permanently out of scope —
+including when the user attests ownership, including for a write-up, including
+when the payload is "safe". Impact is described in prose in the finding.
+
+**I-4. The exposure probe runs only after the service is confirmed.**
+Unconfirmed hosts receive the confirm attempts and nothing else.
+
+**I-5. Ports are validated per service against a fixed allowlist.**
+`/v1/check` must never accept an arbitrary port. This is what stops it being a
+general-purpose port prober — for us, and for anyone else who finds the endpoint.
+See `resolvePort()` and the allowlist table in [API.md](API.md).
+
+**I-6. Redirects are never followed** (`redirect: "manual"`), so a target cannot
+bounce a probe to a third host.
+
+**I-7. Response bodies are read with a hard cap** (32 KB, `readCapped()`), so a
+hostile target cannot stream unbounded data at the Worker.
+
+**I-8. Connection failure, timeout, and filtering are reported as
+`detected: false` — never as an error, never as "safe".**
+A clean result always ships with the `limitations` caveat attached.
+
+---
+
+## 2. Authorization invariants
+
+**I-9. The default target is the caller's own egress IP** (`CF-Connecting-IP`).
+That path needs no attestation because it is inherently self-authorized.
+
+**I-10. Any other target requires an explicit `authorized: true` attestation.**
+No attestation, no scan. Refusals are logged.
+
+**I-11. Private, reserved, loopback, link-local and CGNAT targets are refused
+from the public API** — with or without attestation.
+
+**I-12. Rate limits are enforced server-side at the Worker**, per source IP and
+globally. Client-side limits are not limits.
+
+---
+
+## 3. Data handling invariants
+
+**I-13. A caller's IP is never echoed back to them.** `own_ip` mode returns the
+literal string `your_egress_ip`.
+
+**I-14. Raw IPs never reach a public endpoint.** They exist only in the
+admin-token-gated hit store. Public aggregates are counts by country, ASN, and
+stack.
+
+**I-15. Abuse logs store hashed identifiers only** — salted, 14-day TTL, covering
+both client IP and override target.
+
+**I-16. Strings returned by a probed host are untrusted input.**
+Versions, model names, page titles and error bodies are attacker-controlled in
+override mode. Any client rendering them must escape them.
+
+**I-17. Discovery seed catalogs are stripped of exploit-shaped entries**
+(path traversal, metadata IPs, webhook collectors) before publication.
+
+---
+
+## 4. Scope invariants
+
+**I-18. The Worker does not scan the internet.** One target per request, on
+request. Bulk discovery runs off-Worker, slowly, capped.
+
+**I-19. No mass scanning from any machine associated with this project.**
+No masscan/zmap sweeps of third-party address space, at any rate, for any reason.
+Local scanning means hosts and containers you own.
+
+**I-20. No proxying of user traffic through third-party hosts.** This is the
+single behaviour that defined STOLEN COMPUTE. It does not ship, in any phase.
+
+**I-21. Discovery sources are used within their terms of service.** OSINT sources
+that surface endpoints from someone's committed configuration (code search,
+public notebooks) are **counted, never probed**.
+
+---
+
+## 4a. Which invariants are machine-checked
+
+`npm test` enforces the following. **The rest are review-only** — that is the
+honest state, and closing the gaps is tracked work, not a claim.
+
+| Invariant | Covered by |
+|---|---|
+| I-1 GET only | `every request was a GET` |
+| I-2 no state-changing paths | `no state-changing ollama endpoints touched`, `no ray job submission` |
+| I-4 exposure after confirm | `exposure probe skipped when service not confirmed` |
+| I-5 port allowlist | `rejects arbitrary port`, `rejects ray port on ollama service`, `SSH port rejected before any probe is sent`, `legacy bare port also goes through the allowlist` |
+| I-8 failure ≠ error ≠ safe | `not detected, error recorded, no findings`, `limitations disclosed` |
+| I-10 attestation gate | `no attestation -> 400 authorization_required`, `refusal logged for abuse review` |
+| I-11 private targets refused | `private target rejected even with attestation` |
+| I-12 server-side rate limits | `blocks after RL_OWN_MAX in the window`, `429 body names the scope` |
+| I-13 IP never echoed | `client IP is never echoed back in any result field` |
+| I-14 no raw IPs public | `exposes by_service, no raw IPs` |
+| I-15 hashed abuse logs | `abuse log stores hashed target, never the raw host` |
+
+**Not machine-checked yet:** I-3 (no impact proof), I-6 (redirects), I-7 (body
+cap), I-16 (client-side escaping — verified manually against a hostile payload,
+but no regression test), I-17, I-18–I-21 (process/scope invariants that live
+outside the Worker).
+
+---
+
+## 5. Decision procedure for new capability
+
+Before adding a service, probe path, discovery source, or data field, answer in
+the PR or spec:
+
+1. **Which invariant could this break?** If none, say so explicitly.
+2. **Is every new request a read-only GET against a metadata endpoint?** (I-1, I-2)
+3. **Does it widen the port allowlist?** If so, why is each new port a known AI
+   service port? (I-5)
+4. **Does it introduce a new class of identifier?** Hostnames, org names and
+   emails are *not* equivalent to an IP in a hosting ASN — see Q-1. (I-14)
+5. **Does it increase active probe volume?** Then it needs a cap, and the cap is
+   documented. (I-18)
+6. **Would this be indistinguishable from NadMesh if someone read only the
+   network traffic?** If yes, stop.
+
+---
+
+## 6. Open questions — settle before shipping, not after
+
+**Q-1. Certificate Transparency yields named organizations.**
+CT-derived hostnames identify *whose* infrastructure is exposed — a materially
+different disclosure posture than an anonymous hosting IP. Before the CT lane
+ships: decide retention, decide whether hostnames may appear in any aggregate,
+and confirm I-14 extends to them. Default if undecided: treat hostnames exactly
+as raw IPs — admin-gated, never public.
+
+**Q-2. Coordinated disclosure has no policy.**
+We can identify exposed hosts and, via OSV, versions with known CVEs. There is no
+documented position on whether or how operators are notified. Until there is, we
+do not contact operators.
+
+**Q-3. Published counts inherit their source's bias.**
+The by-country chart is Shodan-shaped. Broaden sources or caveat the chart —
+publishing it unqualified overstates what was measured. See [DISCOVERY.md](DISCOVERY.md).
+
+**Q-4. Tunnelled exposure is structurally invisible** (ngrok, trycloudflare,
+Tailscale Funnel). Published totals must say so rather than imply completeness.
+
+---
+
+## 7. What this project is not
+
+- Not a mass internet scanner as a service
+- Not STOLEN COMPUTE — no random anonymous host proxy, ever
+- Not an exploit kit — no traversal or SSRF payloads, in code or in seed catalogs
+- Not a vulnerability *prover* — we report reachability, not demonstrated impact
+- Not an attack tool, and not to be used against third parties
+
+---
+
+## Reporting a vulnerability in LeakyCompute
+
+Auth bypass, SSRF in our Worker, allowlist escape, admin-token handling, or any
+way to make the checker probe something it should not: open a **private** GitHub
+security advisory, or email the maintainer via profile contact. Please do not
+open a public issue first.
+
+## Abuse handling
+
+Override checks require attestation, are rate-limited, and are logged privately
+with hashed identifiers. Maintainers may revoke lab access (`access-revoked`
+label) and block abusive clients.
+
+## Amending
+
+Changing an invariant requires the amendment stated in the PR description, the
+reason, and the compensating control if one exists. Invariants are numbered so
+they can be cited in specs, reviews and commit messages — cite `I-3`, not "the
+read-only rule".
