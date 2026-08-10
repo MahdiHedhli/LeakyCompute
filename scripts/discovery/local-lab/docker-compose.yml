@@ -1,0 +1,103 @@
+# LeakyCompute fingerprint lab — local ground truth, no accounts required.
+#
+# Purpose:
+#   1. Generate favicon hashes from versions we actually ran (favicon_hash.py)
+#   2. Validate tier-1 confirm/exposure fingerprints against REAL services,
+#      not hand-built fakes (worker/src/lib/services.js)
+#   3. Capture auth-on vs auth-off response pairs for both stacks
+#
+# SAFETY — read before `up`:
+#   Every port below is bound to 127.0.0.1 explicitly. Do NOT change these to
+#   0.0.0.0 or drop the host prefix. Several of these images are unauthenticated
+#   by design; publishing them on a routable interface would add this machine to
+#   the exact population this project measures.
+#
+#   Verify after starting:  docker compose ps --format '{{.Name}} {{.Ports}}'
+#   Every mapping must read 127.0.0.1:PORT->..., never 0.0.0.0:PORT->...
+#
+# Usage:
+#   docker compose -f scripts/discovery/local-lab/docker-compose.yml up -d
+#   python3 scripts/discovery/favicon_hash.py --yaml \
+#       jupyter=http://127.0.0.1:8888 openwebui=http://127.0.0.1:3000 \
+#       mlflow=http://127.0.0.1:5000 tensorboard=http://127.0.0.1:6006
+#   docker compose -f scripts/discovery/local-lab/docker-compose.yml down -v
+
+name: leakycompute-fingerprint-lab
+
+services:
+  # --- tier-1: Ollama -------------------------------------------------------
+  # Serves no favicon by default. Here for fingerprint validation:
+  # GET /api/version, GET /api/tags, GET / ("Ollama is running").
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["127.0.0.1:11434:11434"]
+    volumes: ["ollama:/root/.ollama"]
+    restart: "no"
+
+  # NOTE: images come from quay.io, not Docker Hub. The old jupyter/* Hub repos
+  # are deprecated and frozen — validating fingerprints against a frozen 2023
+  # build would defeat the purpose. quay.io images use start-notebook.py.
+
+  # --- tier-1: Jupyter, token DISABLED (the "exposed" case) -----------------
+  # Reproduces the jupyter-no-token-auth finding: GET /tree renders the file
+  # browser with no redirect to /login.
+  jupyter-open:
+    image: quay.io/jupyter/base-notebook:latest
+    ports: ["127.0.0.1:8888:8888"]
+    command: >
+      start-notebook.py
+      --ServerApp.token=''
+      --ServerApp.password=''
+      --ServerApp.allow_origin='*'
+    restart: "no"
+
+  # --- tier-1: Jupyter, token ENFORCED (the "clean" case) -------------------
+  # Confirms we correctly report detected+authenticated rather than exposed.
+  # Also the case to check /api/status auth behaviour on — it varies across
+  # jupyter_server releases and our confirm step depends on it.
+  jupyter-token:
+    image: quay.io/jupyter/base-notebook:latest
+    ports: ["127.0.0.1:8889:8888"]
+    command: >
+      start-notebook.py
+      --ServerApp.token='leakycompute-lab-token'
+    restart: "no"
+
+  # --- tier-1: Ray ----------------------------------------------------------
+  # dashboard-host 0.0.0.0 is INSIDE the container only; the host mapping above
+  # still pins it to loopback. Ray refuses to serve the dashboard otherwise.
+  ray:
+    image: rayproject/ray:latest
+    ports: ["127.0.0.1:8265:8265"]
+    command: >
+      bash -c "ray start --head --dashboard-host=0.0.0.0 --disable-usage-stats
+      && sleep infinity"
+    shm_size: 512mb
+    restart: "no"
+
+  # --- favicon donors (tier-2 lanes) ---------------------------------------
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports: ["127.0.0.1:3000:8080"]
+    environment: ["WEBUI_AUTH=False"]
+    restart: "no"
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports: ["127.0.0.1:5000:5000"]
+    command: mlflow server --host 0.0.0.0 --port 5000
+    restart: "no"
+
+  # tensorflow/tensorflow is amd64-only (slow emulation on Apple silicon) and
+  # no longer ships the tensorboard CLI. Install the package on a native base.
+  tensorboard:
+    image: python:3.11-slim
+    ports: ["127.0.0.1:6006:6006"]
+    command: >
+      bash -c "pip install --quiet --no-cache-dir tensorboard &&
+      mkdir -p /tmp/logs &&
+      tensorboard --logdir /tmp/logs --host 0.0.0.0 --port 6006"
+    restart: "no"
+
+volumes:
+  ollama:
