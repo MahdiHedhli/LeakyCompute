@@ -44,7 +44,7 @@ worker/src/       # Cloudflare Worker API
 data/             # seed-models.json (filtered)
 src/              # defensive Python CLI
 scripts/          # seed build helpers
-docs/             # DEPLOY, SECURITY, research notes
+docs/             # constitution, API contract, discovery model, deploy
 .github/          # access issue template + approve/revoke Actions
 ```
 
@@ -91,9 +91,12 @@ When you buy a domain: point Pages/Worker custom hosts, extend `ALLOWED_ORIGINS`
 
 ## Documentation
 
+- [Security policy & constitution](docs/SECURITY.md) — numbered invariants every change is checked against; read before adding any probe or source
+- [API reference](docs/API.md) — the `/v1/*` contract, findings, severities, rate limits
+- [Discovery model](docs/DISCOVERY.md) — census vs active lanes, source registry + account requirements, local fingerprint lab
 - [Deploy](docs/DEPLOY.md)  
-- [Security policy](docs/SECURITY.md)  
 - [Research background](docs/research.md)  
+- [Tier-1 checker handoff](docs/HANDOFF_TIER1.md) · [Discovery handoff](docs/HANDOFF_DISCOVERY.md) — *session artifacts, not durable docs*
 
 ## Seed data
 

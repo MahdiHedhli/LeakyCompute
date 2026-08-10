@@ -148,14 +148,28 @@ Cloudflare's vantage point," not "you are safe." The response carries a `limitat
 string saying exactly that, and it renders under the verdict. Please don't let a
 later UI pass quietly drop it.
 
-The fingerprints were validated against hand-built fake servers matching documented
-response shapes, **not against live instances**. Before trusting the numbers, run
-`wrangler dev` against real Ollama / Ray / Jupyter and tune `confirm[].match` and
-`exposure.evaluate` to the actual bodies. The Jupyter `/api/status` auth behaviour in
-particular varies across `jupyter_server` versions — the `GET /` fallback covers it,
-but confirm on a real instance.
+**Fingerprints are now verified against live services** (2026-08-07) via the
+local fingerprint lab, not just hand-built fakes:
 
----
+| Case | Version | Result |
+|---|---|---|
+| Ollama | 0.32.6 | `detected`, `exposed`, `ollama-unauth-api` / high |
+| Ray | 2.56.1 | `detected`, `exposed`, `ray-unauth-jobs-api` / critical |
+| Jupyter, token disabled | base-notebook (Aug 2026) | `detected`, `exposed`, `jupyter-no-token-auth` / critical |
+| Jupyter, token enforced | same | `detected` + `authenticated`, **not** exposed, `jupyter-reachable` / low |
+
+Two things the live run corrected, both now encoded in `worker/test/probe.test.mjs`:
+
+1. **`/api/status` returns no `version` field** on current `jupyter_server`. The
+   old fixture invented one. Detection keys on `started`, so it still works —
+   but `version` is legitimately `null` for Jupyter, not a bug.
+2. **A token-enforcing Jupyter answers `403 {"message":"Forbidden"}` on
+   `/api/status`.** Detection depends on the `authRejected && /jupyter|token|
+   forbidden/i` fallback in `services.js`. Without that branch the tokened case
+   would have gone undetected entirely. Don't remove it.
+
+Still unverified: the tier-2 services (vLLM, Triton, Gradio, Open WebUI,
+Triton, MLflow, TensorBoard) have no live-validated confirm/exposure fingerprints.
 
 ## Not done (explicitly out of v1 scope)
 
