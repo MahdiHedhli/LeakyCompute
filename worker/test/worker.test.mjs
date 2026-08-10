@@ -4,8 +4,11 @@
  */
 import http from "node:http";
 import assert from "node:assert/strict";
+import { requirePorts } from "./_preflight.mjs";
 import worker from "../src/index.js";
 
+
+await requirePorts([11434, 8265]);
 
 // --- in-memory KV stub ----------------------------------------------
 function makeKV() {

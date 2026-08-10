@@ -5,7 +5,10 @@
  */
 import http from "node:http";
 import assert from "node:assert/strict";
+import { requirePorts } from "./_preflight.mjs";
 import { runChecks, overallSeverity, resolvePort } from "../src/lib/services.js";
+
+await requirePorts([11434, 8265, 8888, 8889]);
 
 const hits = [];
 
@@ -50,13 +53,14 @@ const ray = server({
   "/api/jobs/": json([{ job_id: "raysubmit_1", status: "SUCCEEDED" }]),
 });
 
+// Shape verified against a live quay.io/jupyter/base-notebook (Aug 2026):
+// /api/status returns NO version field, so detection must key on `started`.
 const jupyterOpen = server({
   "/api/status": json({
     started: "2026-08-07T10:00:00.000000Z",
     last_activity: "2026-08-07T10:05:00.000000Z",
     connections: 0,
     kernels: 1,
-    version: "2.14.0",
   }),
   "/tree": html("<html><head><title>Home Page - Jupyter</title></head><body>files</body></html>"),
 });
@@ -64,8 +68,10 @@ const jupyterOpen = server({
 const jupyterTokened = http.createServer((req, res) => {
   hits.push(`${req.method} ${req.url}`);
   if (req.url.startsWith("/api/status")) {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ started: "2026-08-07T10:00:00.000000Z", version: "2.14.0" }));
+    // Verified live: a token-enforcing server returns 403 Forbidden here.
+    // Detection relies on the authRejected+body fallback in services.js.
+    res.writeHead(403, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ message: "Forbidden", reason: null }));
     return;
   }
   if (req.url.startsWith("/tree")) {
@@ -122,7 +128,8 @@ check("ray exposed jobs api -> critical", () => {
 });
 check("jupyter open -> critical", () => {
   assert.equal(byId.jupyter.detected, true);
-  assert.equal(byId.jupyter.version, "2.14.0");
+  // Real jupyter_server omits version here — null is correct, not a failure.
+  assert.equal(byId.jupyter.version, null);
   assert.equal(byId.jupyter.exposed, true);
   assert.equal(byId.jupyter.findings[0].id, "jupyter-no-token-auth");
 });
