@@ -18,7 +18,9 @@ __pycache__/
 *.pem
 .secrets.local.json
 .deploy_tmp/
+.deploy_tmp.js
 .deploy_code_tmp.js
+.deploy*.js
 worker/dist/
 
 # OS / IDE
