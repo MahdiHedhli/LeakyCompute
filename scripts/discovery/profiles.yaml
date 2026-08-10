@@ -12,8 +12,99 @@
 
 version: 1
 
+# ---------------------------------------------------------------------------
+# SOURCE REGISTRY
+# ---------------------------------------------------------------------------
+# Coverage is currently bounded by ACTIVE PROBE BUDGET, not by discovery.
+# Adding sources to the passive census is free; adding them to the active lane
+# is not. Keep the two separate:
+#
+#   census  = counts / facets / candidate lists. No probe cost. More is better.
+#   active  = slow safe GETs. Capped (see docs/DISCOVERY.md). Sample the census.
+#
+# `auth` tells you what has to exist before a lane can run, so signup work can
+# be queued ahead of implementation work. Quotas move — verify at signup.
+sources:
+  shodan:
+    status: live
+    auth: {account: true, key: SHODAN_API_KEY, friction: none}
+    note: Already wired. Membership tier. Facets + host search.
+
+  crt_sh:
+    status: planned
+    auth: {account: false, key: null, friction: none}
+    note: >
+      Certificate Transparency search over a public HTTP/JSON endpoint.
+      NO SIGNUP. Start here — it needs nothing but politeness on request rate.
+      Finds the reverse-proxied-on-443 population that port queries cannot see.
+
+  certstream:
+    status: planned
+    auth: {account: false, key: null, friction: none}
+    note: Real-time CT websocket feed. No signup. Complements crt.sh backfill.
+
+  common_crawl:
+    status: planned
+    auth: {account: false, key: null, friction: none}
+    note: Free index API. Body-level fingerprints (Gradio pages, /v1/models).
+
+  censys:
+    status: planned
+    auth: {account: true, key: "CENSYS_* (id+secret or platform token)", friction: low}
+    note: >
+      Second independent census. Cert-centric, different scan cadence than
+      Shodan. Free tier has been repeatedly reworked — CONFIRM CURRENT QUOTA
+      AT SIGNUP before designing a lane around it.
+
+  netlas:
+    status: planned
+    auth: {account: true, key: NETLAS_API_KEY, friction: low}
+    note: Full response-body search. Good for banner strings on odd ports.
+
+  fofa:
+    status: planned
+    auth: {account: true, key: "FOFA_EMAIL + FOFA_KEY", friction: medium}
+    note: >
+      Materially better APAC/CN coverage. Our by-country chart is currently
+      Shodan-shaped; this is the fix. Some operators require paid tiers for
+      bulk export — free tier may be count-only.
+
+  zoomeye:
+    status: planned
+    auth: {account: true, key: ZOOMEYE_API_KEY, friction: medium}
+    note: APAC coverage. Monthly free quota.
+
+  quake:
+    status: deferred
+    auth: {account: true, key: QUAKE_API_KEY, friction: high}
+    note: >
+      BLOCKER: signup has historically required a mainland-China mobile number.
+      Do not put this on the critical path; treat as opportunistic.
+
+  shadowserver:
+    status: deferred
+    auth: {account: true, key: null, friction: high}
+    note: >
+      Free daily reports, but ONLY for netblocks you can prove you own.
+      Not a discovery source for third parties — relevant only if we report
+      on our own infrastructure. Verification is a manual, multi-day process.
+
+  greynoise:
+    status: planned
+    auth: {account: true, key: GREYNOISE_API_KEY, friction: low}
+    note: >
+      Enrichment, not discovery: tells us who is ALREADY scanning these ports.
+      Strengthens the "attackers run these queries" claim with evidence.
+
 # Technique: negative-banner filters convert "open port" → "likely unauth"
 # Example: Jupyter with title minus token HTML is the clincher.
+#
+# Second technique: favicon hashes ignore port, title and page language, so
+# they catch reverse-proxied and non-standard-port instances that every
+# port-anchored query above structurally misses.
+# Generate with: python3 scripts/discovery/favicon_hash.py --yaml <label>=<url>
+# NEVER copy hashes from blog posts — a stale hash returns zero results, which
+# reads like "no exposure" instead of "wrong query".
 
 profiles:
 
@@ -26,6 +117,14 @@ profiles:
       - 'port:11434 "Ollama"'
       - '"Ollama is running"'
     default_port: 11434
+    favicon:
+      shodan_mmh3: null   # CONFIRMED against ollama 0.32.6: no favicon (404).
+      md5: null           # Favicon pivots do not work for Ollama — use
+      generated_from: null #  product:Ollama + "Ollama is running" instead.
+    ct_patterns:          # hostname regexes for CT / passive DNS lanes
+      - '^ollama\.'
+      - '(^|[.-])ollama[.-]'
+      - '^llm\.'
     safe_probe:
       method: GET
       path: /api/ps
@@ -41,6 +140,14 @@ profiles:
       - port:8265
       - 'http.title:"Ray" port:8265'
     default_port: 8265
+    favicon:
+      shodan_mmh3: 463802404
+      md5: b01715fdffe506f5a4dc79170429446c
+      generated_from: "local-lab /favicon.ico"
+      generated_version: "ray 2.56.1"   # hashes drift across releases — regenerate on bump
+    ct_patterns:
+      - '^ray\.'
+      - '(^|[.-])ray-?dash'
     safe_probe:
       method: GET
       path: /api/version
@@ -56,6 +163,15 @@ profiles:
       - 'http.title:"Jupyter" port:8888 -http.html:"token"'
       - 'http.title:"Jupyter" port:8888 -http.html:"login"'
     contrast_query: 'http.title:"Jupyter" port:8888'  # includes auth walls
+    favicon:
+      shodan_mmh3: -895963602
+      md5: 97c6417ed01bdc0ae3ef32ae4894fd03
+      generated_from: "local-lab /favicon.ico"
+      generated_version: "quay.io/jupyter/base-notebook 2026-08"   # hashes drift across releases — regenerate on bump
+    ct_patterns:
+      - '^jupyter\.'
+      - '^(nb|notebook|lab)\.'
+      - '(^|[.-])jupyterhub[.-]?'
     default_port: 8888
     safe_probe:
       method: GET
@@ -72,6 +188,11 @@ profiles:
       - 'http.title:"Open WebUI"'
       - 'http.html:"Open WebUI"'
     default_port: 8080
+    favicon:
+      shodan_mmh3: -2059688262
+      md5: d3d2358dc9adb5a786edd0d3747b690a
+      generated_from: "local-lab /favicon.ico"
+      generated_version: "open-webui 0.11.0"
     safe_probe:
       method: GET
       path: /
@@ -152,6 +273,11 @@ profiles:
     priority: 3
     shodan:
       - 'http.title:"MLflow"'
+    favicon:
+      shodan_mmh3: -1507094812
+      md5: c155726e1593418a937de00e65990e40
+      generated_from: "local-lab /static-files/favicon.ico"  # NOT /favicon.ico
+      generated_version: "mlflow 3.15.1"
     default_port: 5000
     safe_probe:
       method: GET
@@ -162,6 +288,10 @@ profiles:
     priority: 3
     shodan:
       - 'http.title:"TensorBoard"'
+    favicon:
+      shodan_mmh3: null   # CONFIRMED against tensorboard 2.21.0: the icon is
+      md5: null           # inlined as a data: URI, so there is no HTTP resource
+      generated_from: null #  for an engine to hash. Favicon pivots don't apply.
     default_port: 6006
     safe_probe:
       method: GET
