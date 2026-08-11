@@ -1,0 +1,76 @@
+name: Removal / scanning opt-out
+description: Exclude your address space from LeakyCompute probing and remove existing records. Honored on receipt.
+title: "[removal] Exclude address space"
+labels:
+  - removal-request
+  - honor-immediately
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Opt out of LeakyCompute probing
+
+        **This request is honored when we receive it, not when we finish reviewing it.**
+        Probing of the listed space stops and existing records are deleted. You do
+        not need to explain why, and we will not ask you to justify it.
+
+        Exclusions are permanent and do not expire. You can add to them later.
+
+        **Prefer not to use GitHub?** A removal request carries exactly the same
+        weight by email — see the contact on the maintainer's profile, or the
+        `/scanning` page. A GitHub account is not required to be left alone.
+
+        **What we probe:** read-only `GET` requests to version, health, and
+        listing endpoints on hosts that already appear in public indexes such as
+        Shodan or Censys. We never send a payload, submit a job, or attempt to
+        authenticate. See [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md).
+  - type: textarea
+    id: scope
+    attributes:
+      label: Address space to exclude
+      description: |
+        One entry per line. IPs, CIDR ranges, or AS numbers all work.
+        Broad is fine — we would rather over-exclude than argue about boundaries.
+      placeholder: |
+        203.0.113.0/24
+        198.51.100.17
+        AS64496
+    validations:
+      required: true
+  - type: dropdown
+    id: relationship
+    attributes:
+      label: Your relationship to this space
+      description: For our records only. We do not require proof up front.
+      options:
+        - Network owner / operator
+        - Hosting provider acting for a customer
+        - Organization security team
+        - CERT / CSIRT acting on behalf of a constituent
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: Contact (optional)
+      description: Only if you want confirmation once the exclusion is in place. Never published, never added to any list.
+    validations:
+      required: false
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: To the best of my knowledge I am authorized to request exclusion for this space.
+          required: true
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **Note on scope:** exclusion stops *our* probing and deletes *our* records.
+        It cannot remove your hosts from Shodan, Censys, or any third-party index —
+        those are separate services with their own removal processes. If a host is
+        exposed, opting out of our measurement does not close it. The remediation
+        guidance in [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md) and on the public checker
+        applies regardless.
