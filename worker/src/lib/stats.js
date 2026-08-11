@@ -93,9 +93,44 @@ export async function publicStatsPayload(env, live) {
   const snapshot_models = parseInt(env.SNAPSHOT_MODELS || "0", 10) || 0;
   const snapshot_hosts = parseInt(env.SNAPSHOT_HOSTS || "0", 10) || 0;
   // lazy import to avoid circular issues at module init
-  const { getGeoStats } = await import("./discovery.js");
+  const { getGeoStats, getCorpusCounts, RETENTION_DAYS } = await import("./discovery.js");
   const geo = await getGeoStats(env);
+  const corpus = await getCorpusCounts(env);
   return {
+    // Spec §4: three provenance-separated numbers, never summed. They answer
+    // different questions — what an archive once listed, what an index lists
+    // now, and what answered us — and adding them would manufacture a total
+    // nobody measured. research_snapshot/live_instrumented below are the older
+    // shape and stay until the page moves over.
+    counts_note:
+      "archive_snapshot, indexed_observed and reverified are three separate measurements with different provenance. They are never summed.",
+    archive_snapshot: {
+      label: "Archive snapshot",
+      hosts: snapshot_hosts,
+      models: snapshot_models,
+      as_of: env.SNAPSHOT_AS_OF || null,
+      source: "filtered STOLEN COMPUTE catalog",
+      note: "Listed as exposed in an archive-era catalog. Not re-verified, so it says nothing about today.",
+    },
+    indexed_observed: {
+      label: "Indexed, observed",
+      hosts: corpus.indexed_observed_hosts || 0,
+      source: corpus.indexed_observed_source || "public index records, counted not probed",
+      last_observed_at: corpus.last_observed_at || null,
+      note: "Counted from public index records. We sent these hosts nothing (I-21).",
+    },
+    reverified: {
+      label: "Re-verified",
+      hosts: corpus.reverified_hosts || 0,
+      window_days: RETENTION_DAYS,
+      source: "read-only GET by us",
+      last_reverified_at: corpus.last_reverified_at || null,
+      // Q-3 and Q-4 both bound this number; the card must carry them or the
+      // reader takes it for the population.
+      note:
+        "Hosts that answered a read-only GET from us within the retention window. " +
+        "Bounded by what public indexes list (source bias unsettled), and tunnelled exposure is invisible to it.",
+    },
     research_snapshot: {
       label: "Research snapshot (archive seed)",
       models: snapshot_models,
@@ -116,7 +151,10 @@ export async function publicStatsPayload(env, live) {
     },
     geography: {
       label: "Exposure candidates by country",
-      note: "Unique exposed hosts we have re-verified (country from Shodan/geo metadata). No raw IPs.",
+      // Counts follow record retention now: a host that stops answering ages
+      // out of the corpus and out of these totals (I-26). Still counts only,
+      // never addresses (I-14).
+      note: "Unique exposed hosts currently retained, i.e. re-verified in the last 180 days (country from Shodan/geo metadata). No raw IPs.",
       by_country: geo.by_country || [],
       by_asn: (geo.by_asn || []).slice(0, 20),
       by_stack: geo.by_stack || [],

@@ -14,6 +14,7 @@ describes the contract; when they disagree, the code wins and this file is a bug
 | `/v1/research/catalog` | GET | Access + allowlist | gated catalog |
 | `/v1/admin/allowlist` | POST | `X-Admin-Token` | approve / revoke researchers |
 | `/v1/admin/discovery/hits` | GET | `X-Admin-Token` | private hit list (raw IPs) |
+| `/v1/admin/discovery/clock` | GET | `X-Admin-Token` | I-24 re-probe clock (raw IPs) |
 | `/v1/admin/discovery/ingest` | POST | `X-Admin-Token` | ingest off-Worker discovery runs |
 
 CORS is allowlisted via the `ALLOWED_ORIGINS` var. All responses are
@@ -273,8 +274,22 @@ failures are written to the private abuse log.
 **`GET /v1/admin/discovery/hits`** — `?limit` (≤2000, default 500), `?sort=last_seen|country|asn`.
 **Returns raw IPs.** Admin-only, never proxied to a public surface.
 
-**`POST /v1/admin/discovery/ingest`** — `{ results: [...], run_meta? }`.
-Batches capped at 150; rate-limited to 10/hour.
+**`GET /v1/admin/discovery/clock`** — the I-24 re-probe ledger: `{ attempts: { ip: iso } }`,
+one entry per host we last *sent* a request, answered or not. **Returns raw IPs.**
+
+Separate from `/hits` because the two answer different questions. `/hits` is the
+corpus — hosts that answered — and it is paged, so past ~500 hosts a host first
+seen months ago falls outside the window and reads as never-probed. This is the
+whole ledger in one read, and it includes hosts that did not answer and so have
+no record at all. Those are the operators who already closed the port; without
+this they were the only ones the 14-day interval did not protect. Entries age
+out after 90 days and an exclusion deletes them (I-25).
+
+**`POST /v1/admin/discovery/ingest`** — `{ results: [...], run_meta?, indexed_observed? }`.
+Batches capped at 150; rate-limited to 10/hour. `indexed_observed` (also accepted
+as `run_meta.indexed_observed`) is spec §4's passive count: hosts a public index
+listed, counted and not probed. Results matching a stored exclusion are refused
+and reported as `refused_excluded` rather than written back (I-25).
 
 ---
 
