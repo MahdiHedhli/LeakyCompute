@@ -39,6 +39,39 @@ that makes the target *do* something. Current tier-1 set:
 | Ray | 8265 | `GET /api/version` (fallback `GET /`) | `GET /api/jobs/` |
 | Jupyter | 8888 | `GET /api/status` (fallback `GET /`) | `GET /tree` |
 
+The off-Worker re-verification runner probes a wider set. Its paths are part of
+this invariant, not an implementation detail, so they are listed here and
+asserted in `governance_gates.py` (`every lane probes a reviewed metadata path`):
+
+| Lane | Port | Probe path |
+|---|---|---|
+| ollama | 11434 | `/api/ps` |
+| jupyter | 8888 | `/` |
+| ray | 8265 | `/api/version` |
+| open_webui | 8080 | `/api/config` |
+| localai | 8080 | `/v1/models` |
+| litellm | 4000 | `/health/liveliness` |
+| vllm | 8000 | `/v1/models` |
+| openai_compat_8000 / _8080 | 8000 / 8080 | `/v1/models` |
+| comfyui | 8188 | `/system_stats` |
+| gradio | 7860 | `/config` |
+| mlflow | 5000 | `/health` |
+| triton | 8000 | `/v2` |
+| tensorboard | 6006 | `/data/plugins_listing` |
+
+**Corrected 2026-08-11 — `litellm` must never probe `/health`.** On a LiteLLM
+proxy that path is not metadata: it runs a live check by issuing a real
+completion against every model in the operator's config, so probing it makes the
+target do work and bills its owner for it — on exactly the unauthenticated
+proxies the lane exists to find. It was added as `/health` and caught in
+adversarial review before it ever ran. `/health/liveliness` returns a constant
+and calls no model. Asserted by `the litellm lane does not spend the operator's
+money`.
+
+The general rule this cost us: **a path named "health" is not automatically
+read-only.** Every new lane needs its path checked against that service's actual
+implementation, not against the word in the URL.
+
 **I-3. We report that an endpoint answers unauthenticated requests. We never
 send one to prove impact.**
 Demonstrating exploitability against a third party is permanently out of scope —
@@ -55,6 +88,19 @@ See `resolvePort()` and the allowlist table in [API.md](API.md).
 
 **I-6. Redirects are never followed** (`redirect: "manual"`), so a target cannot
 bounce a probe to a third host.
+
+**Corrected 2026-08-11 — this had only ever been true of the Worker.** The
+off-Worker runner used urllib's default opener, which follows 301/302/303/307
+automatically, so a probed host could answer with a `Location:` and aim our GET
+at a host that appears in no public index, at a path nobody reviewed. That makes
+the project a request reflector pointed by the target, and it defeats I-22 —
+which was added in the same session — from outside. The runner now uses a
+no-redirect opener. Asserted by `a probed host cannot bounce the runner onto
+another host`.
+
+The general rule: **an invariant enforced in one probe path is not enforced.**
+When probing moved off-Worker, every I-1…I-7 guarantee needed re-proving there,
+and only some of them had been.
 
 **I-7. Response bodies are read with a hard cap** (32 KB, `readCapped()`), so a
 hostile target cannot stream unbounded data at the Worker.
