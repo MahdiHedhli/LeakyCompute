@@ -10,6 +10,7 @@ import { json, noContent } from "./lib/cors.js";
 import { consume, intEnv } from "./lib/ratelimit.js";
 import { logAbuse } from "./lib/abuse.js";
 import { validateTarget, isPrivateOrLocal } from "./lib/check.js";
+import { loadExclusions, isExcluded, addExclusions } from "./lib/exclusions.js";
 import {
   runChecks,
   overallSeverity,
@@ -83,6 +84,14 @@ export default {
 
       if (path === "/v1/admin/allowlist" && request.method === "POST") {
         return handleAdminAllowlist(request, env);
+      }
+
+      if (path === "/v1/admin/exclusions" && request.method === "POST") {
+        return handleAdminExclusions(request, env);
+      }
+
+      if (path === "/v1/admin/exclusions" && request.method === "GET") {
+        return handleListExclusions(request, env);
       }
 
       if (path === "/v1/admin/discovery/hits" && request.method === "GET") {
@@ -190,6 +199,41 @@ async function handleCheck(request, env, ctx) {
     }
     targetHost = vt.host;
     mode = "override";
+  }
+
+  // I-25: an operator who asked to be left alone is honoured before any request
+  // is emitted, in both modes. The exclusion is the network owner's instruction
+  // and it outranks a visitor on that network asking us to probe it — same
+  // precedence rule as exclusion-beats-scan-request. ASN matching applies only
+  // where we know the ASN (own_ip, via Cloudflare); an override target is
+  // matched on address alone.
+  const exclusions = await loadExclusions(env);
+  if (
+    isExcluded(exclusions, {
+      ip: targetHost,
+      asn: mode === "own_ip" ? request.cf?.asn : null,
+    })
+  ) {
+    await logAbuse(env, {
+      action: "check",
+      result: "excluded",
+      clientIp: ip,
+      target: targetHost,
+      reason: "exclusion_list",
+      override,
+    });
+    return json(
+      {
+        error: "target_excluded",
+        message:
+          "This address space is on the scanning exclusion list at the network " +
+          "owner's request, so we will not probe it. If you own this space and " +
+          "want the exclusion withdrawn, say so on the removal issue that created it.",
+      },
+      403,
+      request,
+      env
+    );
   }
 
   // Which tier-1 services to check. Default: all of them.
@@ -493,6 +537,55 @@ async function handleAdminAllowlist(request, env) {
     meta: body.meta || null,
   });
   return json({ ok: true, entry }, 200, request, env);
+}
+
+/**
+ * Add exclusions (I-25). Called by the removal-request Action on issue open —
+ * honoured on receipt, reviewed afterwards. Adding is the only write path:
+ * withdrawing an exclusion is deliberate manual work, so a replayed or
+ * duplicated request can only ever widen the list.
+ */
+async function handleAdminExclusions(request, env) {
+  if (!requireAdmin(request, env)) {
+    await logAbuse(env, {
+      action: "admin_exclusions",
+      result: "unauthorized",
+      clientIp: clientIp(request),
+      reason: "bad_token",
+    });
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400, request, env);
+  }
+
+  const lines = Array.isArray(body.entries)
+    ? body.entries
+    : String(body.scope || "").split(/[\r\n,]+/);
+
+  const result = await addExclusions(env, lines, {
+    issue_number: body.issue_number ?? null,
+    source: body.source || "removal-request",
+    // Only a maintainer label can auto-honour space broader than the bound.
+    allowBroad: !!body.allow_broad,
+  });
+
+  // Rejected lines are reported, never silently dropped: an operator who
+  // fat-fingers a CIDR must find out, not assume they are excluded.
+  return json({ ok: true, ...result }, 200, request, env);
+}
+
+/** The discovery runner fetches this before probing and refuses to run without it. */
+async function handleListExclusions(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const entries = await loadExclusions(env);
+  return json({ ok: true, count: entries.length, entries }, 200, request, env);
 }
 
 async function handleDiscoveryHits(request, env) {

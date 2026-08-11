@@ -1,0 +1,136 @@
+name: Honor removal request
+
+# I-25: opt-out is honoured before the probe, not after review.
+# This runs on issue OPEN — there is no approval gate on the normal path,
+# because the worst case of a bad-faith removal request is that we fail to
+# probe a host we were never entitled to probe.
+#
+# The one exception is address space broader than the auto-honour bound
+# (see isBroad() in worker/src/lib/exclusions.js), which the Worker holds
+# until a maintainer applies `exclusion-approved` and this workflow re-runs
+# with allow_broad.
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+jobs:
+  honor:
+    if: contains(github.event.issue.labels.*.name, 'removal-request')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Extract requested scope
+        id: scope
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            // GitHub issue forms render as "### <label>\n\n<value>"
+            const m = body.match(
+              /###\s*Address space to exclude\s*\n+([\s\S]*?)(?=\n###\s|\s*$)/i
+            );
+            const raw = (m ? m[1] : '').trim();
+            const lines = raw
+              .split(/[\r\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s && !/^_no response_$/i.test(s));
+            if (!lines.length) {
+              core.setFailed('No address space found in the removal request.');
+              return;
+            }
+            core.setOutput('entries', JSON.stringify(lines));
+            core.setOutput('count', String(lines.length));
+
+      - name: Apply exclusion
+        id: apply
+        env:
+          API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+          ENTRIES: ${{ steps.scope.outputs.entries }}
+          ISSUE: ${{ github.event.issue.number }}
+          ALLOW_BROAD: ${{ contains(github.event.issue.labels.*.name, 'exclusion-approved') }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE:-}" ] || [ -z "${ADMIN_TOKEN:-}" ]; then
+            echo "Missing LEAKY_API_BASE or LEAKY_ADMIN_SYNC_TOKEN secrets."
+            exit 1
+          fi
+          API_BASE="${API_BASE%/}"
+          RESP=$(curl -fsS -X POST "$API_BASE/v1/admin/exclusions" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Token: $ADMIN_TOKEN" \
+            -d "{\"entries\":$ENTRIES,\"issue_number\":$ISSUE,\"allow_broad\":$ALLOW_BROAD}")
+          echo "response=$RESP" >> "$GITHUB_OUTPUT"
+          echo "$RESP"
+
+      - name: Confirm on the issue
+        uses: actions/github-script@v7
+        env:
+          RESPONSE: ${{ steps.apply.outputs.response }}
+        with:
+          script: |
+            let r = {};
+            try { r = JSON.parse(process.env.RESPONSE || '{}'); } catch {}
+            const accepted = r.accepted || [];
+            const rejected = r.rejected || [];
+            const held = r.held || [];
+
+            const lines = [];
+            if (accepted.length) {
+              lines.push(
+                `**Exclusion applied.** We have stopped probing the following and deleted existing records:`,
+                '',
+                ...accepted.map((e) => `- \`${e.value}\``),
+                '',
+                'This is in effect now. It does not expire.'
+              );
+            }
+            if (held.length) {
+              lines.push(
+                '',
+                `**Held for maintainer review** — broader than the auto-honour bound:`,
+                '',
+                ...held.map((e) => `- \`${e.input}\``),
+                '',
+                'This is not a refusal. A maintainer will apply it shortly; the bound only',
+                'exists so that a single issue cannot switch off the whole project.'
+              );
+            }
+            if (rejected.length) {
+              lines.push(
+                '',
+                `**Could not parse** — please re-check these and comment with a correction:`,
+                '',
+                ...rejected.map((e) => `- \`${e.input}\` (${e.reason})`),
+                '',
+                '**These are not excluded yet.** We would rather tell you than let you',
+                'assume you are covered.'
+              );
+            }
+            lines.push(
+              '',
+              '---',
+              'Note: this stops *our* probing and deletes *our* records. It cannot remove',
+              'your hosts from Shodan, Censys, or any other index — those are separate',
+              'services. If a host is exposed, opting out of our measurement does not',
+              'close it.'
+            );
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: lines.join('\n'),
+            });
+
+            if (!held.length && !rejected.length) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                labels: ['exclusion-active'],
+              });
+            }

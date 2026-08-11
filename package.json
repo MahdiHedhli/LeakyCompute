@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Defensive exposed-AI research instrument (Worker + static UIs)",
   "scripts": {
-    "test": "node worker/test/probe.test.mjs && node worker/test/osv.test.mjs && node worker/test/worker.test.mjs",
+    "test": "node worker/test/probe.test.mjs && node worker/test/osv.test.mjs && node worker/test/exclusions.test.mjs && node worker/test/worker.test.mjs",
     "dev:worker": "wrangler dev",
     "deploy:worker": "wrangler deploy",
     "tail": "wrangler tail"
