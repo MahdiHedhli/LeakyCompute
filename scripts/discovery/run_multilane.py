@@ -39,6 +39,11 @@ from discover import (  # noqa: E402
     parse_asn_facets,
     shodan_search,
 )
+from exclusions import (  # noqa: E402
+    ExclusionsUnavailable,
+    fetch_exclusions,
+    filter_candidates,
+)
 
 USER_AGENT = "LeakyCompute-MultiLane/1.0 (+defensive; safe GET only)"
 
@@ -455,6 +460,41 @@ def main() -> int:
                     by_key[k][f] = c[f]
 
     cands = list(by_key.values())[: args.max_total]
+
+    # --- I-25: exclusions are consulted before any probe is emitted ---------
+    # This runs ahead of the dry-run branch as well, so the candidate file we
+    # write never contains space someone asked us to leave alone.
+    #
+    # Fail closed: if we are going to probe and cannot read the list, we stop.
+    # A dry run emits no packets, so it may continue with a loud warning.
+    excluded: list[dict] = []
+    exclusions_applied = False
+    try:
+        entries = fetch_exclusions(args.api_base, args.admin_token)
+        exclusions_applied = True
+        before = len(cands)
+        cands, excluded = filter_candidates(cands, entries)
+        print(
+            f"\n[+] exclusions: {len(entries)} rule(s) · "
+            f"{before - len(cands)} candidate(s) removed"
+        )
+        for e in excluded[:20]:
+            print(f"    excluded {e['ip']}:{e.get('port')} by {e['excluded_by']}")
+        if len(excluded) > 20:
+            print(f"    … and {len(excluded) - 20} more")
+    except ExclusionsUnavailable as e:
+        if args.dry_run:
+            print(f"\n[!] exclusion list unavailable ({e})")
+            print("[!] dry run continues — no packets are sent to any target.")
+            print("[!] the candidate list below is NOT exclusion-filtered.")
+        else:
+            raise SystemExit(
+                f"\n[x] refusing to probe: {e}\n"
+                "    I-25 requires the exclusion list to be consulted before any\n"
+                "    request is emitted. Fix the API base / admin token, or use\n"
+                "    --dry-run, which sends nothing."
+            )
+
     # country summary of passive set
     from collections import Counter
 
@@ -467,6 +507,9 @@ def main() -> int:
     meta = {
         "lanes": [L["id"] for L in lanes],
         "candidate_count": len(cands),
+        "excluded_count": len(excluded),
+        # False only ever appears on a dry run, where nothing was probed.
+        "exclusion_filtered": exclusions_applied,
         "rate": args.rate,
         "mode": "multilane_seed",
     }

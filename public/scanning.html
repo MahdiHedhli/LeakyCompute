@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeakyCompute — about our scanning</title>
+  <meta name="description" content="Who we are, exactly what we send, and how to have your address space excluded from LeakyCompute probing." />
+  <meta name="theme-color" content="#0a0e17" />
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="scanline" aria-hidden="true"></div>
+  <div class="wrap">
+    <header class="top">
+      <img src="assets/logo.svg" alt="LeakyCompute logo" />
+      <div class="brand">
+        <a class="eyebrow" href="https://mahdihedhli.com/dont-panic/" target="_blank" rel="noopener noreferrer"
+          >DON'T PANIC // Threat Research</a
+        >
+        <h1>ABOUT OUR SCANNING</h1>
+        <div class="tag">you found us in your logs — here is exactly what we are</div>
+      </div>
+      <nav class="nav">
+        <a href="index.html">Home</a>
+        <a href="https://github.com/MahdiHedhli/LeakyCompute" target="_blank" rel="noopener">Repo</a>
+        <a class="primary"
+           href="https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_removal.yml"
+           target="_blank" rel="noopener">Opt out</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h2>OPT OUT // no justification required</h2>
+      <p>
+        If you do not want us touching your address space, say so and we stop. You do
+        not have to explain why, and we will not ask you to justify it. Exclusions are
+        applied when we receive them — not when we finish reviewing them — and they do
+        not expire.
+      </p>
+      <p>
+        <a class="primary"
+           href="https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_removal.yml"
+           target="_blank" rel="noopener">Open a removal request</a>
+      </p>
+      <p>
+        Prefer not to use GitHub? Email works and carries exactly the same weight —
+        see the contact on the maintainer's profile. Needing an account in order to be
+        left alone would not be an opt-out.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h3>What we send</h3>
+      <p>
+        Every request is a read-only <code>GET</code> against a version, health, or
+        listing endpoint. We are checking whether a service answers an unauthenticated
+        request. We never send one to prove what that would allow.
+      </p>
+      <table class="probe-table">
+        <thead>
+          <tr><th>Service</th><th>Port</th><th>What we request</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Ollama</td><td>11434</td><td><code>GET /api/version</code>, <code>GET /api/tags</code></td></tr>
+          <tr><td>Ray</td><td>8265</td><td><code>GET /api/version</code>, <code>GET /api/jobs/</code></td></tr>
+          <tr><td>Jupyter</td><td>8888</td><td><code>GET /api/status</code>, <code>GET /tree</code></td></tr>
+        </tbody>
+      </table>
+      <p>
+        We never submit a job, pull a model, send a prompt, start a kernel, read a
+        file, or attempt to authenticate. We do not follow redirects, so we cannot be
+        bounced onto a different host. We do not scan ports: each service is only ever
+        contacted on its own known port.
+      </p>
+      <p>
+        Identify us by the User-Agent <code>LeakyCompute-SafeProbe</code> or
+        <code>LeakyCompute-MultiLane</code>.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h3>How your host came to our attention</h3>
+      <p>
+        We do not find hosts by scanning. Every address we contact either already
+        appeared in a public index such as Shodan or Censys, or its owner asked us to
+        check it. Our traffic never reveals anything that was not already published by
+        someone else.
+      </p>
+      <p>
+        This also means opting out here does not remove you from those indexes. Shodan
+        and Censys are separate services with their own removal processes. And if a
+        host is genuinely exposed, opting out of our measurement does not close it —
+        the people who are not asking permission will still find it.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h3>What we keep</h3>
+      <p>
+        Per host: address, port, service, version string, first and last seen, and
+        geo/ASN metadata. We do not retain model lists, job records, or page contents.
+        Records are deleted 180 days after we last saw the host answer. Raw addresses
+        are never published — public figures are aggregate counts by country, ASN, and
+        stack.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h3>If you are exposed</h3>
+      <p>
+        The fastest fixes, in order: bind the service to <code>127.0.0.1</code> instead
+        of <code>0.0.0.0</code>; restrict the port at your host firewall and cloud
+        security group; put an authenticating reverse proxy in front if you need remote
+        access. The
+        <a href="index.html">self-check on the home page</a> reports the specific
+        remediation for whatever it finds, and runs against your own connecting IP with
+        no input from you.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h3>Rules we hold ourselves to</h3>
+      <p>
+        The project's invariants are written down and versioned, so this page can be
+        checked against the code rather than taken on trust:
+        <a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md"
+           target="_blank" rel="noopener">SECURITY.md</a>.
+        If you can make this checker probe something it should not, that is a security
+        issue in our software and we want to hear about it — open a private advisory on
+        the repository.
+      </p>
+    </section>
+
+    <footer class="footer">
+      <div class="stamp">EVIDENCE FIRST · PANIC NEVER</div>
+      <p style="margin-top:8px">
+        LeakyCompute ·
+        <a href="https://mahdihedhli.com/dont-panic/" target="_blank" rel="noopener noreferrer"
+          >DON'T PANIC // Threat Research</a
+        >
+        · <a href="index.html">back to the pulse</a>
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

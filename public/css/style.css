@@ -230,3 +230,27 @@ label.check input { margin-top: 3px; }
   font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
 }
 .remediation ul { margin-left: 16px; color: var(--dim); }
+
+/* /scanning — probe disclosure table (I-23) */
+.probe-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.probe-table th, .probe-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.probe-table th {
+  color: var(--amber);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.probe-table td code { white-space: nowrap; }
+@media (max-width: 560px) {
+  .probe-table td code { white-space: normal; word-break: break-word; }
+}

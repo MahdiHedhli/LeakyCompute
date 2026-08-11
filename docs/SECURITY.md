@@ -138,6 +138,7 @@ honest state, and closing the gaps is tracked work, not a claim.
 | I-13 IP never echoed | `client IP is never echoed back in any result field` |
 | I-14 no raw IPs public | `exposes by_service, no raw IPs` |
 | I-15 hashed abuse logs | `abuse log stores hashed target, never the raw host` |
+| I-25 opt-out honoured before the probe | `NO request reached any target — skipped, not suppressed`, `exclusion beats an attested scan request for the same space`, plus the `exclusions.test.mjs` parsing/matching/bound suite |
 
 **Not machine-checked yet:** I-3 (no impact proof), I-6 (redirects), I-7 (body
 cap), I-16 (client-side escaping — verified manually against a hostile payload,

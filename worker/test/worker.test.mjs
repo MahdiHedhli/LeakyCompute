@@ -35,13 +35,20 @@ function listen(srv, port) {
   return new Promise((r) => srv.listen(port, "127.0.0.1", r));
 }
 
+// Counts every request that actually reaches a target. This is how the I-25
+// ordering assertion is made: a suppressed *result* would still show up here,
+// a genuinely skipped *probe* would not.
+let probesReceived = 0;
+
 const ollama = http.createServer((req, res) => {
+  probesReceived++;
   if (req.url === "/api/version") return json({ version: "0.6.2" })(req, res);
   if (req.url === "/api/tags")
     return json({ models: [{ name: "llama3.2:3b", size: 2019393189 }] })(req, res);
   res.writeHead(404).end();
 });
 const ray = http.createServer((req, res) => {
+  probesReceived++;
   if (req.url === "/api/version")
     return json({ version: "1", ray_version: "2.9.0" })(req, res);
   if (req.url === "/api/jobs/") return json([])(req, res);
@@ -252,6 +259,74 @@ await check("CORS honours the allowlist", () => {
     res.headers.get("Access-Control-Allow-Origin"),
     "https://mahdihedhli.github.io"
   );
+});
+
+// --- 7. I-25 exclusions ----------------------------------------------
+console.log("\n[7] exclusion list is consulted before any probe is emitted");
+
+env = freshEnv();
+await env.KV.put(
+  "exclusions:v1",
+  JSON.stringify([
+    { type: "cidr4", value: "127.0.0.0/8", active: true, issue_number: 42 },
+  ])
+);
+
+const probesBefore = probesReceived;
+res = await worker.fetch(post({}), env, ctx);
+data = await res.json();
+
+await check("excluded target is refused", () => {
+  assert.equal(res.status, 403);
+  assert.equal(data.error, "target_excluded");
+});
+
+await check("NO request reached any target — skipped, not suppressed", () => {
+  assert.equal(
+    probesReceived,
+    probesBefore,
+    `expected 0 probes, got ${probesReceived - probesBefore}`
+  );
+});
+
+await check("refusal does not echo the excluded address back", () => {
+  assert.ok(!JSON.stringify(data).includes("127.0.0"));
+});
+
+await check("refusal is logged for review", async () => {
+  await Promise.all(pending);
+  const keys = [...env.KV._store.keys()].filter((k) => k.startsWith("abuse:"));
+  assert.ok(keys.length > 0, "expected an abuse-log entry for the refusal");
+});
+
+// An override request naming excluded space must lose to the exclusion, even
+// with a valid ownership attestation — I-25 precedence over I-22a.
+const probesBeforeOverride = probesReceived;
+env = freshEnv();
+await env.KV.put(
+  "exclusions:v1",
+  JSON.stringify([{ type: "cidr4", value: "203.0.113.0/24", active: true }])
+);
+res = await worker.fetch(
+  post({ target: "203.0.113.10", authorized: true }),
+  env,
+  ctx
+);
+data = await res.json();
+
+await check("exclusion beats an attested scan request for the same space", () => {
+  assert.equal(res.status, 403);
+  assert.equal(data.error, "target_excluded");
+  assert.equal(probesReceived, probesBeforeOverride, "must not probe");
+});
+
+// A clean list must not accidentally block everything.
+env = freshEnv();
+res = await worker.fetch(post({}), env, ctx);
+data = await res.json();
+await check("empty exclusion list still permits a normal self-check", () => {
+  assert.equal(res.status, 200);
+  assert.equal(data.mode, "own_ip");
 });
 
 ollama.close();

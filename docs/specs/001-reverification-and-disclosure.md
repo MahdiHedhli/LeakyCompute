@@ -187,17 +187,24 @@ host-identifying and are not gated by the window.
 The order is load-bearing, not administrative. Expanded probing must not ship
 before the machinery that lets people escape it.
 
-1. **Opt-out intake live** — removal template, email route, exclusion list
-   consulted by the runner. Ships first and independently; it is already useful
-   against the probing we do *today*.
-2. **`/scanning` page live** (I-23) — an operator who sees us in their logs can
-   identify us before volume increases, not after.
-3. **I-24/I-26 governance in the runner** — rate ceilings, re-probe interval,
-   expiry-on-silence.
+1. **DONE — opt-out intake live.** Removal template, honour-on-receipt Action,
+   `/v1/admin/exclusions`, runner filtering that **fails closed** when the list
+   cannot be read, auto-honour bound against griefing, and tests asserting the
+   probe is *skipped* rather than suppressed. I-25 is machine-checked.
+2. **DONE — `/scanning` page live** (I-23). An operator who finds us in their
+   logs can identify us and leave in one click, before volume increases.
+3. **I-24/I-26 governance in the runner** — rate ceilings, 14-day re-probe
+   interval, expiry-on-silence. *Not implemented.*
 4. **Then** decouple `search_limit` from `max_hosts` and raise passive breadth.
+   *Blocked on 3.*
 5. **Then** the archive re-verification cohort.
-6. **Disclosure routing** (I-27) — can proceed in parallel from step 1, gated on
-   Shadowserver intake confirmation.
+6. **Disclosure routing** (I-27) — can proceed in parallel, gated on Shadowserver
+   intake confirmation.
+
+I-22 (provenance) is **not yet enforced in code**: the runner still trusts that
+its candidates came from a Shodan lane. That is true today because that is the
+only source wired up, but it is an assumption rather than a check, and it must
+become one before step 4.
 
 Steps 1–3 are the cost of step 4. Shipping 4 first would be the version of this
 project that its own §0 warns about.
