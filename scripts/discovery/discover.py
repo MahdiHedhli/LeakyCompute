@@ -63,6 +63,12 @@ DEFAULT_QUERY = "product:Ollama"
 FALLBACK_QUERY = 'port:11434 http.html:"Ollama is running"'
 USER_AGENT = "LeakyCompute-Discovery/1.0 (+defensive research; safe GET /api/ps only)"
 
+# I-23 promises an operator one search. That only works if the packet says what
+# the /scanning page says it says, so anything aimed at a third-party target
+# goes out under this — the same prefix the Worker's probe uses. USER_AGENT
+# above stays for calls to our own API and to Shodan, which are not probes.
+PROBE_USER_AGENT = "LeakyCompute-SafeProbe/1.0 (+defensive research; read-only GET)"
+
 # Hard safety rails (cannot be overridden above these without editing code)
 HARD_MAX_TOTAL = 128
 HARD_MAX_RATE = 1.0  # probes/sec global absolute ceiling
@@ -89,6 +95,26 @@ class GlobalRateLimiter:
             self._next = now + self._interval
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """
+    I-6, off-Worker half.
+
+    urlopen()'s default opener follows 301/302/303/307 silently, so a probed
+    host could answer with `Location:` and aim our next GET wherever it liked —
+    an address in no public index (I-22) at a path no one reviewed (I-2). From
+    the far end that makes this a request reflector pointed by the target, which
+    is the shape the Worker has refused since it shipped (`redirect: "manual"`
+    in services.js). Returning None here surfaces the 3xx as the response
+    instead of chasing it.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def http_json(
     url: str,
     method: str = "GET",
@@ -104,7 +130,10 @@ def http_json(
         hdrs.update(headers)
     req = urllib.request.Request(url, data=body, method=method, headers=hdrs)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # No opt-out parameter on purpose. Every caller here either probes a
+        # third-party target or talks to our own API; neither needs to be
+        # redirected, and a flag is one edit away from the target choosing.
+        with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             try:
                 return resp.status, json.loads(raw)
@@ -122,7 +151,11 @@ def http_json(
 
 def probe_ollama(ip: str, port: int, timeout: float, limiter: GlobalRateLimiter) -> dict:
     limiter.wait()
-    status, payload = http_json(f"http://{ip}:{port}/api/ps", timeout=timeout)
+    status, payload = http_json(
+        f"http://{ip}:{port}/api/ps",
+        timeout=timeout,
+        headers={"User-Agent": PROBE_USER_AGENT},
+    )
     if status == 200 and isinstance(payload, dict):
         models = payload.get("models") or []
         return {

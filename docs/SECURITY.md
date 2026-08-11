@@ -138,12 +138,20 @@ honest state, and closing the gaps is tracked work, not a claim.
 | I-13 IP never echoed | `client IP is never echoed back in any result field` |
 | I-14 no raw IPs public | `exposes by_service, no raw IPs` |
 | I-15 hashed abuse logs | `abuse log stores hashed target, never the raw host` |
-| I-25 opt-out honoured before the probe | `NO request reached any target — skipped, not suppressed`, `exclusion beats an attested scan request for the same space`, plus the `exclusions.test.mjs` parsing/matching/bound suite |
+| I-25 opt-out honoured before the probe | `NO request reached any target — skipped, not suppressed`, `exclusion beats an attested scan request for the same space`, `an ingest cannot write back a host that is excluded`, `re-filing a removal request purges again, not only the first time`, plus the `exclusions.test.mjs` parsing/matching/bound suite |
+| I-2 probe paths, off-Worker | `every lane probes a reviewed metadata path`, `the litellm lane does not spend the operator's money` |
+| I-6 redirects | `I-6: the probe never follows a redirect off the target` (Worker), `a probed host cannot bounce the runner onto another host` (runner) |
+| I-23 attributable probes | `probes carry the agent the public page names`, `every agent this project probes under is attributable to it` |
+| I-24 re-probe interval | `a re-probe inside the interval is skipped, outside it is due`, `the interval is a floor a flag cannot lower` (driven through the CLI), `a host that did not answer still lands in the probe clock` |
+| I-26 expiry + minimisation | the `retention.test.mjs` suite: expiry from last contact, minimised record shape, aggregates that follow deletion down |
 
-**Not machine-checked yet:** I-3 (no impact proof), I-6 (redirects), I-7 (body
-cap), I-16 (client-side escaping — verified manually against a hostile payload,
-but no regression test), I-17, I-18–I-21 (process/scope invariants that live
-outside the Worker).
+**Not machine-checked yet:** I-3 (no impact proof — the *probe paths* are
+asserted against a reviewed list, but "we never send a request to prove impact"
+is a property of every future change, not of the current table), I-7 (body cap
+in the Worker is asserted; the off-Worker runner has no equivalent — see the
+`triton` lane comment), I-16 (client-side escaping — verified manually against a
+hostile payload, but no regression test), I-17, I-18–I-21 (process/scope
+invariants that live outside the Worker).
 
 ---
 

@@ -15,12 +15,17 @@ version: 1
 # ---------------------------------------------------------------------------
 # SOURCE REGISTRY
 # ---------------------------------------------------------------------------
-# Coverage is currently bounded by ACTIVE PROBE BUDGET, not by discovery.
 # Adding sources to the passive census is free; adding them to the active lane
 # is not. Keep the two separate:
 #
 #   census  = counts / facets / candidate lists. No probe cost. More is better.
 #   active  = slow safe GETs. Capped (see docs/DISCOVERY.md). Sample the census.
+#
+# Until spec 001 §3 these were tied together — `search_limit` was set equal to
+# `max_hosts` in every lane, so the census was throttled to the probe budget and
+# the published count measured our restraint rather than the internet. They are
+# now independent in run_multilane.LANES: census bounded by source ToS and API
+# quota (I-21), probes bounded by I-24. Do not re-couple them.
 #
 # `auth` tells you what has to exist before a lane can run, so signup work can
 # be queued ahead of implementation work. Quotas move — verify at signup.
@@ -96,6 +101,18 @@ sources:
       Enrichment, not discovery: tells us who is ALREADY scanning these ports.
       Strengthens the "attackers run these queries" claim with evidence.
 
+# Every query that feeds an ACTIVE lane must pin an explicit `port:` filter.
+# The runner takes the probe port from the index record, not from default_port,
+# so an unpinned query is how a host indexed on some arbitrary port becomes a
+# probe target. Pinning is what carries I-5's per-service allowlist off-Worker,
+# where resolvePort() is not in the path. Census-only queries may be unpinned.
+#
+# `safe_probe.path` is metadata / health / version / listing, and nothing else
+# (I-2). When a service offers both a cheap metadata path and a real one behind
+# its auth gate, prefer the one a real caller hits: we publish that an endpoint
+# answered an unauthenticated read (I-3), and a path the vendor exempts from
+# auth cannot support that claim. See vllm below for the worked example.
+#
 # Technique: negative-banner filters convert "open port" → "likely unauth"
 # Example: Jupyter with title minus token HTML is the clincher.
 #
@@ -113,9 +130,9 @@ profiles:
     name: Ollama
     priority: 1
     shodan:
-      - product:Ollama
+      - product:Ollama port:11434
       - 'port:11434 "Ollama"'
-      - '"Ollama is running"'
+      - 'port:11434 "Ollama is running"'
     default_port: 11434
     favicon:
       shodan_mmh3: null   # CONFIRMED against ollama 0.32.6: no favicon (404).
@@ -185,9 +202,10 @@ profiles:
     name: Open WebUI
     priority: 2
     shodan:
-      - 'http.title:"Open WebUI"'
-      - 'http.html:"Open WebUI"'
+      - 'http.title:"Open WebUI" port:8080'
+      - 'http.html:"Open WebUI" port:8080'
     default_port: 8080
+    known_other_ports: [3000]   # census only — not in the active lane (I-5)
     favicon:
       shodan_mmh3: -2059688262
       md5: d3d2358dc9adb5a786edd0d3747b690a
@@ -195,14 +213,17 @@ profiles:
       generated_version: "open-webui 0.11.0"
     safe_probe:
       method: GET
-      path: /
-    notes: Often front door to Ollama / OpenAI-compatible backends.
+      path: /api/config
+    notes: >
+      Often front door to Ollama / OpenAI-compatible backends.
+      /api/config is the public config document. Preferred over "/" because the
+      SPA shell renders for a fully locked-down instance too, so a 200 on "/"
+      does not support the unauthenticated-read claim.
 
   comfyui:
     name: ComfyUI
     priority: 2
     shodan:
-      - 'http.title:"ComfyUI"'
       - 'port:8188 http.title:"ComfyUI"'
     default_port: 8188
     safe_probe:
@@ -214,20 +235,24 @@ profiles:
     name: Gradio
     priority: 2
     shodan:
-      - 'http.title:"Gradio"'
+      - 'http.title:"Gradio" port:7860'
       - port:7860
     default_port: 7860
     safe_probe:
       method: GET
-      path: /
-    notes: Demo UIs; avoid invoking predict endpoints.
+      path: /config
+    notes: >
+      Demo UIs. /config returns the interface schema — it describes the
+      endpoints; /run/*, /call/* and /queue/join would invoke them. That line is
+      the whole distinction (I-2, I-3), so it is stated here rather than left to
+      "avoid invoking predict endpoints".
 
   localai:
     name: LocalAI
     priority: 2
     shodan:
-      - 'http.html:"LocalAI"'
-      - 'http.title:"LocalAI"'
+      - 'http.html:"LocalAI" port:8080'
+      - 'http.title:"LocalAI" port:8080'
     default_port: 8080
     safe_probe:
       method: GET
@@ -237,7 +262,7 @@ profiles:
     name: LiteLLM
     priority: 2
     shodan:
-      - 'http.html:"LiteLLM"'
+      - 'http.html:"LiteLLM" port:4000'
     default_port: 4000
     safe_probe:
       method: GET
@@ -247,13 +272,40 @@ profiles:
     name: vLLM
     priority: 2
     shodan:
-      - 'http.html:"vLLM"'
+      - 'http.html:"vLLM" port:8000'
       - 'port:8000 http.html:"/v1/models"'
     default_port: 8000
     safe_probe:
       method: GET
       path: /v1/models
-    notes: Prefer /version or /v1/models over bare port:8000.
+    notes: >
+      Both /version and /v1/models are read-only, and we use /v1/models.
+      vLLM's API-key middleware guards /v1/* only, so /version answers on a
+      key-protected server as well: a 200 there evidences reachability, not an
+      unauthenticated read, and I-3 is a claim about the latter. /v1/models sits
+      behind the same gate a real caller meets, and is a listing endpoint (I-2).
+      Never bare port:8000 — that is a port prober's query, not a lane.
+
+  triton:
+    name: NVIDIA Triton Inference Server
+    priority: 2
+    shodan:
+      - 'port:8000 "Triton Inference Server"'
+    default_port: 8000          # KServe v2 HTTP
+    known_other_ports: [8001, 8002]   # gRPC, Prometheus metrics — see notes
+    safe_probe:
+      method: GET
+      path: /v2                 # server metadata: name, version, extensions
+    notes: >
+      Model inventory is NOT probed. Under the v2 protocol it is
+      POST /v2/repository/index, and no finding justifies a non-GET (I-1).
+      GET /v2/models is not a listing endpoint — v2 only exposes
+      /v2/models/{name}, so there is nothing to enumerate without a name.
+      Metrics on 8002 are a legitimate read but the exposition is unbounded and
+      the runner has no equivalent of the Worker's 32 KB body cap (I-7), so 8002
+      stays out of the active lane. Low-yield fingerprint: Triton answers "/"
+      with a 400, so banner-anchored matching is weak. Verify a non-zero result
+      before reading a zero as "no exposure".
 
   openai_compat:
     name: OpenAI-compatible generic
@@ -272,7 +324,7 @@ profiles:
     name: MLflow
     priority: 3
     shodan:
-      - 'http.title:"MLflow"'
+      - 'http.title:"MLflow" port:5000'
     favicon:
       shodan_mmh3: -1507094812
       md5: c155726e1593418a937de00e65990e40
@@ -281,13 +333,17 @@ profiles:
     default_port: 5000
     safe_probe:
       method: GET
-      path: /
+      path: /health
+    notes: >
+      /health, not the tracking API. Experiment and run listings are content we
+      would have to refuse to retain under I-26, so we do not fetch them; the
+      finding is "answers an unauthenticated read", which /health carries.
 
   tensorboard:
     name: TensorBoard
     priority: 3
     shodan:
-      - 'http.title:"TensorBoard"'
+      - 'http.title:"TensorBoard" port:6006'
     favicon:
       shodan_mmh3: null   # CONFIRMED against tensorboard 2.21.0: the icon is
       md5: null           # inlined as a data: URI, so there is no HTTP resource
@@ -295,7 +351,13 @@ profiles:
     default_port: 6006
     safe_probe:
       method: GET
-      path: /
+      path: /data/plugins_listing
+    notes: >
+      Enabled-plugin listing — read-only, and the call TensorBoard's own
+      frontend makes on load. Chosen over /data/logdir, which returns a host
+      filesystem path: more than the finding needs and retained nowhere (I-26).
+      If a release moves this path we under-count, which is the safe direction
+      to be wrong in (I-8) — it never sends more.
 
   # --- Do not use as primary seeds (noise) ---
 noise_ports:
@@ -311,3 +373,15 @@ calibration_lanes:
   - jupyter
   - ray
   - open_webui
+
+# Tier-2 lanes added under spec 001 step 4. Listed separately because they are
+# unproven: no yield baseline yet, so a zero from one of these is "query not
+# calibrated" until a run says otherwise. Do not publish a count from a lane
+# that has never returned a non-zero.
+tier2_lanes:
+  - vllm
+  - triton
+  - gradio
+  - open_webui
+  - mlflow
+  - tensorboard

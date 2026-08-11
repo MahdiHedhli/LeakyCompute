@@ -32,6 +32,37 @@ CHECK_TIMEOUT_MS = "2500"
 ACCESS_TEAM_DOMAIN = "odd-night-42c2.cloudflareaccess.com"
 ACCESS_AUD = "" # removed from public history
 
+# --- Researcher lab (/v1/research/lab/*) -----------------------------------
+# Every lab route is behind Cloudflare Access + the researcher allowlist and
+# returns raw addresses, so these limits protect the corpus and the KV budget,
+# not the public API. Counted per allowlisted login, not per IP: a shared exit
+# node must not let one researcher exhaust another's quota.
+RL_LAB_MAX = "120"
+RL_LAB_WINDOW_SEC = "300"
+# Seconds a Worker isolate may reuse a corpus read. Exclusions are re-applied on
+# every request regardless (I-25), so this never delays an opt-out taking effect.
+LAB_CACHE_TTL_SEC = "60"
+
+# --- Re-verification + retention governance --------------------------------
+# I-24: at most one probe cycle per host per this many days. The runner holds
+# the enforcing copy; the lab reads this to report when a host next becomes
+# eligible. Lowering it here does NOT let the runner probe faster — the floor
+# lives in scripts/discovery/run_multilane.py.
+REPROBE_INTERVAL_DAYS = "14"
+# I-26: delete a record this many days after its last *successful* probe. 180 is
+# the invariant's ceiling; this var can only tighten it (see retentionWindow()
+# in worker/src/index.js), because widening retention would amend I-26.
+CORPUS_EXPIRY_DAYS = "180"
+# I-27: days between the first notification attempt and publication of any
+# host-identifying detail. Aggregates are not gated by this window.
+DISCLOSURE_WINDOW_DAYS = "90"
+
+# I-26 expiry on silence. Retention is only real if something runs unattended;
+# the admin route POST /v1/admin/discovery/sweep is the manual equivalent.
+# Daily, off the hour, because nothing here is time-critical.
+[triggers]
+crons = ["17 4 * * *"]
+
 [[kv_namespaces]]
 binding = "KV"
 id = "432febf1abd64e9995e33d6081dfd3c7"

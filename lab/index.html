@@ -3,15 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LeakyCompute Lab — DON'T PANIC // case files</title>
+  <title>LeakyCompute Lab — DON'T PANIC // corpus</title>
   <meta name="robots" content="noindex, nofollow" />
   <meta name="theme-color" content="#0a0e17" />
+  <!-- I-14: gated researcher data. Nothing here should be indexed, cached by an
+       intermediary, or leak an address through a referer to a third party. -->
+  <meta name="referrer" content="no-referrer" />
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div id="app" class="sb-hidden">
-    <button id="expand-btn" title="show sidebar">☰</button>
+  <div id="app">
+    <button id="expand-btn" title="show filters">☰</button>
     <div id="sb-backdrop"></div>
 
     <aside id="sidebar">
@@ -20,93 +23,179 @@
         <div>
           <h1>LEAKY&nbsp;COMPUTE</h1>
           <div class="sub">
-            <a
-              href="https://mahdihedhli.com/dont-panic/"
-              target="_blank"
-              rel="noopener noreferrer"
-              style="color: inherit; text-decoration: none"
-              >DON'T PANIC</a
-            >
+            <a href="https://mahdihedhli.com/dont-panic/" target="_blank" rel="noopener noreferrer">DON'T PANIC</a>
             // LAB
           </div>
         </div>
         <div class="brand-actions">
-          <button id="stats-btn" title="statistics">STATS</button>
-          <button id="collapse-btn" title="hide sidebar">«</button>
+          <button id="collapse-btn" title="hide filters">«</button>
         </div>
       </header>
-      <div id="tools">
-        <div class="search-wrap">
-          <span style="padding-left:10px;color:var(--dim)">⌕</span>
-          <input id="search" type="text" placeholder="search case files (models)" autocomplete="off" spellcheck="false" />
-          <button id="search-clear" hidden>✕</button>
+
+      <div id="identity" class="ident">checking access…</div>
+
+      <form id="filters" autocomplete="off">
+        <label class="field">
+          <span>search <em>org · banner · city · country · stack</em></span>
+          <input id="f-q" type="text" placeholder="substring match" spellcheck="false" />
+        </label>
+
+        <div class="field">
+          <span>stack</span>
+          <div id="f-stack" class="choices"></div>
         </div>
-        <div class="sort-row">
-          <div class="seg" id="sort-key">
-            <button data-key="num" class="on">size</button>
-            <button data-key="hosts">nodes</button>
-            <button data-key="model">name</button>
-          </div>
-          <div class="seg" id="sort-dir">
-            <button data-dir="desc" class="on">▼</button>
-            <button data-dir="asc">▲</button>
-          </div>
+
+        <div class="field">
+          <span>verification state</span>
+          <div id="f-state" class="choices"></div>
         </div>
-      </div>
-      <ul id="model-list"></ul>
+
+        <label class="field">
+          <span>country <em>code or name, comma-separated</em></span>
+          <input id="f-country" type="text" list="dl-country" spellcheck="false" />
+        </label>
+
+        <label class="field">
+          <span>ASN <em>AS15169, comma-separated</em></span>
+          <input id="f-asn" type="text" list="dl-asn" spellcheck="false" />
+        </label>
+
+        <label class="field">
+          <span>org <em>substring</em></span>
+          <input id="f-org" type="text" list="dl-org" spellcheck="false" />
+        </label>
+
+        <label class="field">
+          <span>CIDR <em>address or block</em></span>
+          <input id="f-cidr" type="text" placeholder="198.51.100.0/24" spellcheck="false" />
+        </label>
+
+        <label class="field">
+          <span>source</span>
+          <input id="f-source" type="text" list="dl-source" spellcheck="false" />
+        </label>
+
+        <div class="field row2">
+          <label>
+            <span>version <em>exact</em></span>
+            <input id="f-version" type="text" list="dl-version" spellcheck="false" />
+          </label>
+          <label>
+            <span>version prefix</span>
+            <input id="f-version-prefix" type="text" spellcheck="false" />
+          </label>
+        </div>
+
+        <div class="field row2">
+          <label>
+            <span>has version</span>
+            <select id="f-has-version">
+              <option value="">any</option>
+              <option value="1">yes</option>
+              <option value="0">no</option>
+            </select>
+          </label>
+          <label>
+            <span>vuln id contains</span>
+            <input id="f-vuln" type="text" placeholder="CVE-2024" spellcheck="false" />
+          </label>
+        </div>
+
+        <div class="field row2">
+          <label><span>first seen ≥</span><input id="f-first-seen-after" type="date" /></label>
+          <label><span>first seen ≤</span><input id="f-first-seen-before" type="date" /></label>
+        </div>
+        <div class="field row2">
+          <label><span>last seen ≥</span><input id="f-last-seen-after" type="date" /></label>
+          <label><span>last seen ≤</span><input id="f-last-seen-before" type="date" /></label>
+        </div>
+
+        <div class="field row2">
+          <label>
+            <span>sort</span>
+            <select id="f-sort">
+              <option value="last_seen">last seen</option>
+              <option value="first_seen">first seen</option>
+              <option value="times_seen">times seen</option>
+              <option value="ip">address</option>
+              <option value="country">country</option>
+              <option value="asn">ASN</option>
+              <option value="stack">stack</option>
+              <option value="version">version</option>
+            </select>
+          </label>
+          <label>
+            <span>order</span>
+            <select id="f-order">
+              <option value="desc">desc</option>
+              <option value="asc">asc</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="field row2">
+          <label>
+            <span>page size</span>
+            <select id="f-page-size">
+              <option>25</option><option>50</option><option>100</option><option>200</option>
+            </select>
+          </label>
+          <label>
+            <span>scan cap <em>KV budget</em></span>
+            <select id="f-limit">
+              <option>250</option><option>500</option><option>1000</option><option>2000</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn primary">APPLY</button>
+          <button type="button" id="reset-btn" class="btn">RESET</button>
+        </div>
+      </form>
+
+      <footer class="sb-foot">
+        <p>Read-only corpus view. The lab sends no request to any discovered host — no re-test, no embed, no relay (I-20).</p>
+      </footer>
     </aside>
 
     <main id="stage">
-      <div id="welcome">
-        <img class="flag" src="assets/logo.svg" alt="" />
-        <h2>LEAKY&nbsp;COMPUTE</h2>
-        <p class="tag">evidence first · panic never · catalog + stats (chat locked until phase B)</p>
-        <div class="counters">
-          <div class="counter"><span class="cnum" id="c-models">0</span><span class="clbl">models</span></div>
-          <div class="counter"><span class="cnum" id="c-nodes">0</span><span class="clbl">seed hosts</span></div>
+      <header id="stagebar">
+        <div class="seg" id="tabs">
+          <button data-view="corpus" class="on">CORPUS</button>
+          <button data-view="map">MAP</button>
+          <button data-view="validation">VALIDATION</button>
         </div>
-        <p class="hint">← pick a model from the case files · seed rows revalidate when live scans confirm them</p>
-        <div id="auth-box" class="auth-box">Checking access…</div>
-      </div>
+        <div class="stage-actions">
+          <button id="osv-btn" class="btn" title="Query OSV.dev by version string in the validation view. OSV is a vulnerability database, not a probed host.">OSV</button>
+          <button id="mask-btn" class="btn" title="Display-only address masking for screen shares. Lab access is not publication clearance (I-27).">MASK</button>
+          <button id="refresh-btn" class="btn">RELOAD</button>
+        </div>
+      </header>
 
-      <section id="session" hidden>
-        <header id="chat-head">
-          <div>
-            <span id="ch-name">—</span>
-            <span id="ch-size" class="chip"></span>
-            <span id="ch-valid" class="chip warn">seed</span>
-          </div>
-          <div>
-            <span class="chip" id="pool-info">lab mode · no third-party proxy</span>
-          </div>
-        </header>
-        <div id="detail"></div>
-      </section>
+      <div id="status" class="statusline"></div>
+      <div id="content"></div>
     </main>
 
-    <div id="stats-modal" class="modal" hidden>
-      <div class="modal-backdrop"></div>
-      <div class="modal-box">
-        <header class="stats-head">
-          <h2>FIELD STATS // OPEN SOCKETS</h2>
-          <button id="stats-close">✕</button>
-        </header>
-        <div class="tiles" id="tiles"></div>
-        <div class="cards">
-          <div class="card">
-            <h3>seed hosts by model size (top)</h3>
-            <div id="donut-legend" class="legend"></div>
-          </div>
-          <div class="card">
-            <h3>busiest models <span style="color:var(--dim)">(seed hosts)</span></h3>
-            <div id="bars"></div>
-          </div>
+    <aside id="host-panel" hidden>
+      <header class="panel-head">
+        <span id="host-title">HOST</span>
+        <div>
+          <button id="host-copy" class="btn">COPY ADDR</button>
+          <button id="host-close" class="btn">✕</button>
         </div>
-      </div>
-    </div>
+      </header>
+      <div id="host-body"></div>
+    </aside>
   </div>
 
+  <datalist id="dl-country"></datalist>
+  <datalist id="dl-asn"></datalist>
+  <datalist id="dl-org"></datalist>
+  <datalist id="dl-source"></datalist>
+  <datalist id="dl-version"></datalist>
+
   <script src="js/config.js"></script>
-  <script src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

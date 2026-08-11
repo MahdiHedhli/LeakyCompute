@@ -1,10 +1,16 @@
 /**
  * LeakyCompute API Worker
  * Public:  GET /v1/health, GET /v1/stats, POST /v1/check
- * Lab:     GET /v1/research/me, GET /v1/research/catalog
- * Admin:   POST /v1/admin/allowlist  (GitHub Action sync token)
+ * Lab:     GET /v1/research/me, GET /v1/research/catalog,
+ *          GET /v1/research/lab/{catalog,map,validation,host}
+ * Admin:   POST /v1/admin/allowlist, /v1/admin/exclusions,
+ *          /v1/admin/discovery/{ingest,sweep}; GET /v1/admin/exclusions,
+ *          /v1/admin/discovery/hits
+ * Cron:    I-26 retention sweep (see scheduled() and [triggers] in wrangler.toml)
  *
- * Safe probes only. No mass scan. No exploit payloads.
+ * Raw addresses leave this Worker only through the Access-gated research lab
+ * and the admin-token routes; every public route above returns aggregates
+ * (I-14). Safe probes only. No mass scan. No exploit payloads.
  */
 import { json, noContent } from "./lib/cors.js";
 import { consume, intEnv } from "./lib/ratelimit.js";
@@ -35,8 +41,13 @@ import {
   recordExposedHost,
   listHits,
   ingestDiscoveryBatch,
+  sweepExpiredHosts,
+  purgeExcluded,
+  getProbeAttempts,
+  RETENTION_DAYS,
 } from "./lib/discovery.js";
 import { enrichServicesWithOsv } from "./lib/osv.js";
+import { routeLab } from "./lib/lab.js";
 
 // Embedded compact snapshot meta (full catalog served from Pages/lab static seed)
 const SNAPSHOT_NOTE =
@@ -82,6 +93,15 @@ export default {
         return handleResearchCatalog(request, env);
       }
 
+      // Researcher lab (/v1/research/lab/*). routeLab owns its own 404 and 405
+      // for that prefix, so an unknown lab path cannot fall through to a route
+      // gated differently. Each handler re-checks Access identity and the
+      // researcher allowlist itself: these are the only routes besides the
+      // admin token that emit raw addresses, and I-14 must not depend on this
+      // router having mounted them correctly.
+      const labResponse = await routeLab(request, env);
+      if (labResponse) return labResponse;
+
       if (path === "/v1/admin/allowlist" && request.method === "POST") {
         return handleAdminAllowlist(request, env);
       }
@@ -98,8 +118,16 @@ export default {
         return handleDiscoveryHits(request, env);
       }
 
+      if (path === "/v1/admin/discovery/clock" && request.method === "GET") {
+        return handleDiscoveryClock(request, env);
+      }
+
       if (path === "/v1/admin/discovery/ingest" && request.method === "POST") {
         return handleDiscoveryIngest(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/sweep" && request.method === "POST") {
+        return handleDiscoverySweep(request, env);
       }
 
       return json({ error: "not_found" }, 404, request, env);
@@ -112,7 +140,43 @@ export default {
       );
     }
   },
+
+  /**
+   * I-26 expiry on silence. The retention rule is only real if something runs
+   * it unattended: the admin route exists for a maintainer who wants it now,
+   * the cron is what makes 180 days a deletion rather than an intention.
+   */
+  async scheduled(event, env, ctx) {
+    // The sweep is bounded per invocation (KV operations count against the
+    // Worker's subrequest ceiling) and resumes from a stored cursor, so a
+    // corpus larger than one window is walked over successive nights rather
+    // than throwing into an unhandled waitUntil rejection every time.
+    ctx.waitUntil(
+      sweepExpiredHosts(env, { retentionDays: retentionWindow(env) })
+        .then((s) => {
+          if (!s.complete) {
+            console.log(`retention sweep partial: ${s.deleted} deleted, ${s.remaining} to go`);
+          }
+        })
+        // A retention sweep that fails silently is indistinguishable from one
+        // that found nothing due — which is the wrong thing to believe about
+        // I-26. Nothing else can surface this, so it goes to the log.
+        .catch((err) => console.error("retention sweep failed:", err?.message || err))
+    );
+  },
 };
+
+/**
+ * I-26 fixes the ceiling at 180 days from the last successful probe. A
+ * deployment may hold records for less time, never for more, so both the env
+ * var and the admin request body can only tighten the window — widening it
+ * would be an amendment to the invariant, not a configuration change.
+ */
+function retentionWindow(env, requested) {
+  const configured = intEnv(env, "CORPUS_EXPIRY_DAYS", RETENTION_DAYS);
+  const asked = Number.isFinite(requested) && requested > 0 ? requested : configured;
+  return Math.max(1, Math.min(asked, configured, RETENTION_DAYS));
+}
 
 async function handleStats(request, env) {
   const live = await getLiveStats(env);
@@ -574,9 +638,42 @@ async function handleAdminExclusions(request, env) {
     allowBroad: !!body.allow_broad,
   });
 
+  const purged = await purgeExcludedRecords(env);
+
   // Rejected lines are reported, never silently dropped: an operator who
   // fat-fingers a CIDR must find out, not assume they are excluded.
-  return json({ ok: true, ...result }, 200, request, env);
+  return json({ ok: true, ...result, purged }, 200, request, env);
+}
+
+/**
+ * I-25: "exclusion deletes existing records as well as stopping future probes."
+ * An operator who asks to be left alone has not asked us to keep what we
+ * already hold about them.
+ *
+ * Deliberately best-effort: if the corpus cannot be deleted from, the exclusion
+ * is still recorded and the failure is reported in the response. Refusing the
+ * whole removal request in that case would leave the operator with neither the
+ * deletion nor the opt-out, which is strictly worse for them.
+ *
+ * Runs over the *whole* stored list, not the lines this request happened to
+ * add. addExclusions drops entries it already holds, so an operator whose first
+ * removal request hit a KV error and who re-filed a week later got an empty
+ * `accepted` list and no purge at all — the deletion half of I-25 held only for
+ * a first submission that happened to succeed. Re-filing now retries it, and so
+ * does any later exclusion write.
+ */
+async function purgeExcludedRecords(env) {
+  if (!env.KV || typeof env.KV.delete !== "function") {
+    return { deleted: 0, matched: 0, error: "kv_delete_unavailable" };
+  }
+  try {
+    const entries = await loadExclusions(env);
+    // Counts only in the response body: this endpoint is admin-gated, but the
+    // list of addresses we just deleted is not something to hand back (I-14).
+    return await purgeExcluded(env, entries);
+  } catch (err) {
+    return { deleted: 0, matched: 0, error: String(err?.message || err) };
+  }
 }
 
 /** The discovery runner fetches this before probing and refuses to run without it. */
@@ -600,23 +697,55 @@ async function handleDiscoveryHits(request, env) {
     {
       count: hits.length,
       sort,
+      // Mirrors RETAINED_FIELDS in discovery.js. Model lists, city, org,
+      // product banners, vulns and times_seen are no longer stored per host
+      // (I-26), so serialising them here would only promise the runner and the
+      // lab UI fields that are permanently null.
       hits: hits.map((h) => ({
         ip: h.ip,
         port: h.port,
+        ports: h.ports || (h.port ? [h.port] : []),
         last_seen: h.last_seen,
         first_seen: h.first_seen,
-        times_seen: h.times_seen,
-        models: h.models,
         source: h.source,
         stack: h.stack || null,
+        stacks: h.stacks || (h.stack ? [h.stack] : []),
+        version: h.version || null,
         country: h.country || null,
         country_code: h.country_code || null,
-        city: h.city || null,
         asn: h.asn || null,
-        org: h.org || null,
-        product: h.product || null,
-        vulns: h.vulns || [],
       })),
+    },
+    200,
+    request,
+    env
+  );
+}
+
+/**
+ * I-24 re-probe clock: when we last *sent* each host a request.
+ *
+ * Separate from /hits because the two answer different questions. /hits is the
+ * corpus — hosts that answered — and it is paged, so a host first seen months
+ * ago falls outside the window and looks to the runner like one we have never
+ * touched. This returns the whole ledger in one read, including the hosts that
+ * did not answer and therefore have no record at all. Those are precisely the
+ * operators who have already closed the port, and without this they were the
+ * only ones the 14-day interval did not protect.
+ *
+ * Admin-gated like the hit store: it is a list of addresses (I-14).
+ */
+async function handleDiscoveryClock(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const attempts = await getProbeAttempts(env);
+  return json(
+    {
+      ok: true,
+      count: Object.keys(attempts).length,
+      reprobe_interval_days: intEnv(env, "REPROBE_INTERVAL_DAYS", 14),
+      attempts,
     },
     200,
     request,
@@ -655,6 +784,58 @@ async function handleDiscoveryIngest(request, env) {
   const summary = await ingestDiscoveryBatch(env, {
     results,
     run_meta: body.run_meta || null,
+    // Spec §4's second number. Passive breadth is a property of the run, not of
+    // any result row, so it arrives on the envelope; accepted at either level
+    // because the runner reports it in run_meta.
+    indexed_observed: body.indexed_observed ?? null,
   });
   return json({ ok: true, ...summary }, 200, request, env);
+}
+
+/**
+ * Run the I-26 retention sweep on demand. Same work the cron does — this route
+ * exists so a maintainer can force it after a policy change, and so the result
+ * is inspectable rather than only visible in cron logs.
+ *
+ * POST because it deletes. I-1's GET-only rule governs requests we send to
+ * third-party targets; this is our own store, and a sweep that deleted records
+ * on a GET would be reachable by a prefetch.
+ */
+async function handleDiscoverySweep(request, env) {
+  if (!requireAdmin(request, env)) {
+    await logAbuse(env, {
+      action: "admin_discovery_sweep",
+      result: "unauthorized",
+      clientIp: clientIp(request),
+      reason: "bad_token",
+    });
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const days = retentionWindow(env, Number(body.retention_days));
+  try {
+    const summary = await sweepExpiredHosts(env, { retentionDays: days });
+    // Counts and a cutoff timestamp only — never the addresses removed (I-14).
+    return json({ ok: true, retention_days: days, ...summary }, 200, request, env);
+  } catch (err) {
+    if (String(err?.message) === "kv_delete_unavailable") {
+      return json(
+        {
+          error: "kv_delete_unavailable",
+          message:
+            "The bound store cannot delete keys, so retention cannot be enforced. " +
+            "Reporting success here would claim an I-26 deletion that did not happen.",
+        },
+        501,
+        request,
+        env
+      );
+    }
+    throw err;
+  }
 }
