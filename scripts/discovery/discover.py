@@ -205,6 +205,7 @@ def shodan_search(
     out: list[dict] = []
     facets_out: dict = {}
     exhausted = False
+    index_total = None
     page = max(1, int(start_page))
     while len(out) < limit:
         params: dict[str, Any] = {"key": api_key, "query": query, "page": page}
@@ -214,10 +215,15 @@ def shodan_search(
         status, data = http_json(url, timeout=60)
         if status != 200 or not isinstance(data, dict):
             raise SystemExit(f"Shodan search failed: HTTP {status} {data}")
+        # `total` rides on every page, not just the first. Reading it only in
+        # the page==1 branch left it None for every lane that resumed from a
+        # cursor — which is every lane after the first run.
+        _t = data.get("total")
+        if isinstance(_t, int):
+            index_total = _t
         if page == 1:
             facets_out = data.get("facets") or {}
-            total = data.get("total")
-            print(f"[*] Shodan total matching query: {total}")
+            print(f"[*] Shodan total matching query: {index_total}")
         matches = data.get("matches") or []
         if not matches:
             break
@@ -267,7 +273,11 @@ def shodan_search(
         time.sleep(1.25)  # slow Shodan pagination
 
     next_page = 1 if exhausted or page < 1 else page
-    return out, facets_out, next_page
+    # index_total is what Shodan says the query matches *in the index*, not what
+    # we paid to pull. It arrives with page 1 at no extra cost, and it is the
+    # only figure here that is a measurement of the exposed population rather
+    # than a measurement of our budget.
+    return out, facets_out, next_page, index_total
 
 
 def parse_asn_facets(facets: dict) -> list[dict]:
@@ -300,7 +310,7 @@ def hosts_for_asn(api_key: str, base_query: str, asn: str, limit: int) -> list[d
     limit = min(limit, HARD_MAX_HOSTS_PER_ASN)
     # Shodan filter: asn:AS####
     q = f"{base_query} asn:{asn}"
-    matches, _, _ = shodan_search(api_key, q, limit, facets=None)
+    matches, _, _, _ = shodan_search(api_key, q, limit, facets=None)
     for m in matches:
         m["source"] = f"shodan_asn:{asn}"
         m["asn"] = asn
@@ -518,7 +528,7 @@ def main() -> int:
     if args.asn_report or args.from_top_asns > 0:
         print(f"[*] Shodan facet report for: {args.shodan_query!r}")
         # 1 result page is enough to get facets; limit=1 still returns facets
-        sample, facets, _ = shodan_search(
+        sample, facets, _, _ = shodan_search(
             args.shodan_key,
             args.shodan_query,
             limit=max(1, min(args.shodan_limit, 10)),
@@ -562,7 +572,7 @@ def main() -> int:
     if args.from_top_asns > 0:
         if not asn_rows:
             # obtain facets if we skipped report path
-            _, facets, _ = shodan_search(
+            _, facets, _, _ = shodan_search(
                 args.shodan_key, args.shodan_query, limit=1, facets="asn:25"
             )
             asn_rows = parse_asn_facets(facets)
@@ -586,7 +596,7 @@ def main() -> int:
 
     if args.shodan:
         print(f"[*] Shodan search: {args.shodan_query!r} limit={args.shodan_limit}")
-        matches, facets, _ = shodan_search(
+        matches, facets, _, _ = shodan_search(
             args.shodan_key,
             args.shodan_query,
             args.shodan_limit,
