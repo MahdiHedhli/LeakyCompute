@@ -656,7 +656,7 @@ def retire_hosts(api_base: str, token: str, ips: list[str]) -> None:
 
 def collect_lane(
     api_key: str, lane: dict, start_page: int = 1
-) -> tuple[list[dict], int, int]:
+) -> tuple[list[dict], int, int, int | None]:
     """
     Returns (candidates, indexed_observed, next_page).
 
@@ -676,7 +676,7 @@ def collect_lane(
     if lane["mode"] == "asn":
         # facet + top ASNs
         next_page = start_page
-        sample, facets, _ = shodan_search(
+        sample, facets, _, lane_total = shodan_search(
             api_key, lane["query"], limit=5, facets="asn:20,org:15"
         )
         asns = parse_asn_facets(facets)
@@ -716,7 +716,7 @@ def collect_lane(
         for m in sample:
             cands.append(match_to_candidate(m, lane))
     else:
-        matches, facets, next_page = shodan_search(
+        matches, facets, next_page, lane_total = shodan_search(
             api_key,
             lane["query"],
             limit=lane.get("search_limit", 30),
@@ -746,7 +746,13 @@ def collect_lane(
         f"  unique candidates this lane: {len(out)} (indexed, observed: {observed})"
         f" · pages {start_page}->{next_page}"
     )
-    return out, observed, next_page
+    # Three different numbers, deliberately not collapsed:
+    #   len(out)     what we are willing to probe   (max_hosts)
+    #   observed     what we paid to pull            (search_limit / credits)
+    #   lane_total   what the index says exists      (free, arrives with the page)
+    # Only the third is a measurement of the exposed population; the other two
+    # measure our own budget.
+    return out, observed, next_page, lane_total
 
 
 VERSION_KEYS = ("version", "server_version", "ray_version", "app_version")
@@ -1081,14 +1087,20 @@ def main() -> int:
     cursor_updates: list[dict] = []
 
     indexed_observed = 0
+    # Per-lane index totals. Summed these are index *records*, not unique hosts:
+    # a box on 8080 can match both open_webui and openai_compat_8080, and we
+    # cannot dedupe what we did not pull. The label has to say so.
+    index_listed: dict[str, int] = {}
     for lane in lanes:
         try:
             start_page = int((cursors.get(lane["id"]) or {}).get("page") or 1)
-            lane_cands, lane_observed, next_page = collect_lane(
+            lane_cands, lane_observed, next_page, lane_total = collect_lane(
                 args.shodan_key, lane, start_page
             )
             all_cands.extend(lane_cands)
             indexed_observed += lane_observed
+            if isinstance(lane_total, int):
+                index_listed[lane["id"]] = lane_total
             cursor_updates.append(
                 {
                     "lane": lane["id"],
@@ -1325,6 +1337,12 @@ def main() -> int:
 
     # country summary of passive set
     cc = Counter(c.get("country_code") or "?" for c in cands)
+    if index_listed:
+        print("\n[*] Index says these populations exist (free, not pulled):")
+        for lane_id, n in sorted(index_listed.items(), key=lambda kv: -kv[1]):
+            print(f"    {lane_id:22} {n:>9,}")
+        print(f"    {'TOTAL RECORDS':22} {sum(index_listed.values()):>9,}  (not deduped)")
+
     print(f"\n[*] Total unique candidates: {len(cands)}")
     print("[*] Countries (passive set):")
     for k, v in cc.most_common(20):
@@ -1335,6 +1353,17 @@ def main() -> int:
         "lanes": [L["id"] for L in lanes],
         "candidate_count": len(cands),
         "excluded_count": len(excluded),
+        # What the public index says exists, per lane and summed. Free — it
+        # arrives with each page we were already buying. This is the honest
+        # answer to "how big is the exposed population", as distinct from
+        # indexed_observed, which only ever answers "how much did we pull".
+        "index_listed_by_lane": dict(sorted(index_listed.items(), key=lambda kv: -kv[1])),
+        "index_listed_records": sum(index_listed.values()),
+        "index_listed_note": (
+            "Sum of per-lane Shodan totals. These are index RECORDS, not unique "
+            "hosts: one host can match more than one lane and we cannot dedupe "
+            "what we did not pull."
+        ),
         # Spec §4, second number: hosts a public index listed, counted and not
         # probed (I-21). Reported separately from candidate_count, which is the
         # subset we are willing to send a read-only GET.
@@ -1357,6 +1386,10 @@ def main() -> int:
         "max_inflight_per_24": MAX_INFLIGHT_PER_24,
         "max_inflight_per_asn": MAX_INFLIGHT_PER_ASN,
         "mode": "multilane_seed",
+        "observed": sum(index_listed.values()) or indexed_observed,
+        "observed_source": (
+            "public index records matching our lane fingerprints, counted not probed"
+        ),
     }
 
     # Persist the Shodan cursors before the dry-run exit: those pages were paid
