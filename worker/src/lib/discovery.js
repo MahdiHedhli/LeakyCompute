@@ -713,3 +713,104 @@ async function loadExclusionsSafe(env) {
     return [];
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Final re-verification queue + lane cursors                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A record reaching the retention limit gets one last probe before it is
+ * deleted, rather than ageing out unobserved.
+ *
+ * The distinction matters to the research, not just to tidiness: a host that
+ * stops answering has either been remediated or has moved, and deleting it on a
+ * timer records neither. Probing it on the way out turns an expiry into a
+ * measurement — the operator fixed it, or the address went away — and that is
+ * the only signal this project has that anything it publishes ever helped.
+ *
+ * Due one day before the limit so the runner has a full cycle to act. Hosts
+ * past the limit are still returned: if the runner was down for a week, the
+ * backlog is the queue, not a set of silent deletions.
+ */
+export const FINAL_VERIFY_DAYS = RETENTION_DAYS - 1;
+
+export async function listExpiringHosts(
+  env,
+  { now = Date.now(), dueDays = FINAL_VERIFY_DAYS, limit = 500 } = {}
+) {
+  if (!env.KV) return { due: [], cutoff: null, count: 0 };
+  const cutoff = now - dueDays * DAY_MS;
+  const index = (await env.KV.get(HITS_INDEX, "json")) || [];
+  const due = [];
+
+  for (const ip of Array.isArray(index) ? index : []) {
+    if (due.length >= limit) break;
+    const rec = await env.KV.get(`${HIT_PREFIX}${ip}`, "json");
+    if (!rec) continue;
+    const seen = Date.parse(rec.last_seen || rec.first_seen || "");
+    if (!Number.isFinite(seen) || seen > cutoff) continue;
+    due.push({
+      ip: rec.ip,
+      port: rec.port,
+      // Carried so the runner can rebuild provenance (I-22) and pick a probe
+      // path. A row whose source is not a public index will be dropped by the
+      // provenance gate, which is correct: a self-check never entitled us to
+      // re-probe that host later.
+      stack: rec.stack || null,
+      source: rec.source || null,
+      asn: rec.asn || null,
+      last_seen: rec.last_seen || null,
+      age_days: Math.floor((now - seen) / DAY_MS),
+      final_verification: true,
+    });
+  }
+
+  due.sort((a, b) => b.age_days - a.age_days);
+  return { due, cutoff: new Date(cutoff).toISOString(), count: due.length };
+}
+
+/**
+ * Delete a host after its final probe found nothing. Distinct from the timer
+ * sweep: this is deletion with evidence behind it.
+ */
+export async function retireUnreachableHost(env, ip, { reason = "final_probe_no_answer" } = {}) {
+  // Delegates to forgetHosts rather than calling forgetRecord directly: the
+  // record and the aggregates are only half the state, and leaving the address
+  // in HITS_INDEX would have the sweep rediscover a key that no longer exists
+  // and book it as an orphan every night.
+  const res = await forgetHosts(env, [ip]);
+  return { ip, deleted: res.deleted > 0, reason: res.deleted ? reason : "not_found" };
+}
+
+const CURSOR_KEY = "discovery:lane_cursors";
+
+/**
+ * Per-lane Shodan pagination state.
+ *
+ * shodan_search() opened at page 1 on every invocation, so consecutive runs
+ * bought the same first hundred results over and over: the corpus stopped
+ * growing while the query credits still drained. Advancing a cursor per lane
+ * walks down the result set instead of re-reading the top of it.
+ *
+ * Wrapping back to page 1 when a lane is exhausted is deliberate — the index
+ * changes underneath us, so the top of the list a month later is not the list
+ * we already have.
+ */
+export async function getLaneCursors(env) {
+  if (!env.KV) return {};
+  return (await env.KV.get(CURSOR_KEY, "json")) || {};
+}
+
+export async function setLaneCursor(env, lane, { page, exhausted = false, observed = 0 }) {
+  if (!env.KV || !lane) return null;
+  const all = (await env.KV.get(CURSOR_KEY, "json")) || {};
+  const p = Number(page);
+  all[lane] = {
+    page: Number.isFinite(p) && p >= 1 ? Math.floor(p) : 1,
+    exhausted: !!exhausted,
+    observed_last_run: Number(observed) || 0,
+    updated_at: new Date().toISOString(),
+  };
+  await env.KV.put(CURSOR_KEY, JSON.stringify(all));
+  return all[lane];
+}

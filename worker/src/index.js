@@ -42,6 +42,11 @@ import {
   listHits,
   ingestDiscoveryBatch,
   sweepExpiredHosts,
+  listExpiringHosts,
+  retireUnreachableHost,
+  getLaneCursors,
+  setLaneCursor,
+  FINAL_VERIFY_DAYS,
   purgeExcluded,
   getProbeAttempts,
   RETENTION_DAYS,
@@ -128,6 +133,22 @@ export default {
 
       if (path === "/v1/admin/discovery/sweep" && request.method === "POST") {
         return handleDiscoverySweep(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/expiring" && request.method === "GET") {
+        return handleExpiring(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/retire" && request.method === "POST") {
+        return handleRetire(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/cursors" && request.method === "GET") {
+        return handleGetCursors(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/cursors" && request.method === "POST") {
+        return handleSetCursor(request, env);
       }
 
       return json({ error: "not_found" }, 404, request, env);
@@ -683,6 +704,78 @@ async function handleListExclusions(request, env) {
   }
   const entries = await loadExclusions(env);
   return json({ ok: true, count: entries.length, entries }, 200, request, env);
+}
+
+/**
+ * Hosts due a final probe before retention deletes them (I-26 + spec §4).
+ * The runner treats these as its highest-priority candidates; they still pass
+ * every gate, so a host whose provenance was only ever a self-check is dropped
+ * here exactly as it would be anywhere else.
+ */
+async function handleExpiring(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const url = new URL(request.url);
+  const asked = Number(url.searchParams.get("days"));
+  // Only ever earlier than the default: asking for a longer fuse would let a
+  // caller quietly opt records out of their final verification.
+  const dueDays = Number.isFinite(asked) && asked > 0
+    ? Math.min(asked, FINAL_VERIFY_DAYS)
+    : FINAL_VERIFY_DAYS;
+  const limit = Math.min(Number(url.searchParams.get("limit")) || 500, 1000);
+  const res = await listExpiringHosts(env, { dueDays, limit });
+  return json({ ok: true, due_days: dueDays, ...res }, 200, request, env);
+}
+
+/** Deletion with evidence: the final probe ran and found nothing. */
+async function handleRetire(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400, request, env);
+  }
+  const ips = Array.isArray(body.ips) ? body.ips : [body.ip].filter(Boolean);
+  if (!ips.length) return json({ error: "ips_required" }, 400, request, env);
+  const results = [];
+  for (const ip of ips.slice(0, 200)) {
+    results.push(await retireUnreachableHost(env, String(ip), { reason: body.reason }));
+  }
+  return json({ ok: true, retired: results.filter((r) => r.deleted).length, results }, 200, request, env);
+}
+
+async function handleGetCursors(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  return json({ ok: true, cursors: await getLaneCursors(env) }, 200, request, env);
+}
+
+async function handleSetCursor(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400, request, env);
+  }
+  const updates = Array.isArray(body.cursors) ? body.cursors : [body];
+  const out = [];
+  for (const u of updates.slice(0, 100)) {
+    if (!u || !u.lane) continue;
+    out.push(await setLaneCursor(env, String(u.lane), {
+      page: u.page,
+      exhausted: u.exhausted,
+      observed: u.observed,
+    }));
+  }
+  return json({ ok: true, updated: out.filter(Boolean).length, cursors: out }, 200, request, env);
 }
 
 async function handleDiscoveryHits(request, env) {

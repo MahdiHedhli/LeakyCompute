@@ -71,6 +71,7 @@ PROBE_USER_AGENT = "LeakyCompute-SafeProbe/1.0 (+defensive research; read-only G
 
 # Hard safety rails (cannot be overridden above these without editing code)
 HARD_MAX_TOTAL = 128
+PAGES_PER_RUN = 3
 HARD_MAX_RATE = 1.0  # probes/sec global absolute ceiling
 HARD_MIN_PREFIX = 28  # never expand wider than /28
 HARD_MAX_HOSTS_PER_ASN = 25
@@ -186,11 +187,25 @@ def shodan_search(
     limit: int,
     *,
     facets: str | None = None,
-) -> tuple[list[dict], dict]:
-    """Shodan host search. Returns (matches, facet_dict). Uses API credits."""
+    start_page: int = 1,
+) -> tuple[list[dict], dict, int]:
+    """
+    Shodan host search. Returns (matches, facet_dict, next_page).
+
+    start_page exists because this opened at page 1 on every invocation, so
+    consecutive runs bought the same first hundred results over and over: the
+    corpus stopped growing while query credits still drained. The caller keeps a
+    per-lane cursor and walks down the result set instead of re-reading the top.
+
+    next_page is where the caller should resume. It comes back as 1 when the
+    lane is exhausted, which is a deliberate wrap rather than a stop: the index
+    changes underneath us, so the top of the list next month is not the list we
+    already hold.
+    """
     out: list[dict] = []
     facets_out: dict = {}
-    page = 1
+    exhausted = False
+    page = max(1, int(start_page))
     while len(out) < limit:
         params: dict[str, Any] = {"key": api_key, "query": query, "page": page}
         if facets and page == 1:
@@ -236,11 +251,23 @@ def shodan_search(
             )
             if len(out) >= limit:
                 break
+        # A short page means the result set ran out under us. Recording it here
+        # is what lets the caller wrap its cursor back to 1 instead of paging
+        # forever into empty responses, each of which still costs a credit.
+        if len(matches) < 100:
+            exhausted = True
+            page = 0  # signals wrap; normalised below
+            break
         page += 1
-        if page > 10:
+        # Walk at most PAGES_PER_RUN pages per lane per invocation. The cap is
+        # per run, not absolute: the cursor carries the position forward, so
+        # successive runs continue down the list rather than restarting it.
+        if page - start_page >= PAGES_PER_RUN:
             break
         time.sleep(1.25)  # slow Shodan pagination
-    return out, facets_out
+
+    next_page = 1 if exhausted or page < 1 else page
+    return out, facets_out, next_page
 
 
 def parse_asn_facets(facets: dict) -> list[dict]:
@@ -273,7 +300,7 @@ def hosts_for_asn(api_key: str, base_query: str, asn: str, limit: int) -> list[d
     limit = min(limit, HARD_MAX_HOSTS_PER_ASN)
     # Shodan filter: asn:AS####
     q = f"{base_query} asn:{asn}"
-    matches, _ = shodan_search(api_key, q, limit, facets=None)
+    matches, _, _ = shodan_search(api_key, q, limit, facets=None)
     for m in matches:
         m["source"] = f"shodan_asn:{asn}"
         m["asn"] = asn
@@ -491,7 +518,7 @@ def main() -> int:
     if args.asn_report or args.from_top_asns > 0:
         print(f"[*] Shodan facet report for: {args.shodan_query!r}")
         # 1 result page is enough to get facets; limit=1 still returns facets
-        sample, facets = shodan_search(
+        sample, facets, _ = shodan_search(
             args.shodan_key,
             args.shodan_query,
             limit=max(1, min(args.shodan_limit, 10)),
@@ -535,7 +562,7 @@ def main() -> int:
     if args.from_top_asns > 0:
         if not asn_rows:
             # obtain facets if we skipped report path
-            _, facets = shodan_search(
+            _, facets, _ = shodan_search(
                 args.shodan_key, args.shodan_query, limit=1, facets="asn:25"
             )
             asn_rows = parse_asn_facets(facets)
@@ -559,7 +586,7 @@ def main() -> int:
 
     if args.shodan:
         print(f"[*] Shodan search: {args.shodan_query!r} limit={args.shodan_limit}")
-        matches, facets = shodan_search(
+        matches, facets, _ = shodan_search(
             args.shodan_key,
             args.shodan_query,
             args.shodan_limit,

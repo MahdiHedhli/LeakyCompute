@@ -86,6 +86,11 @@ USER_AGENT = PROBE_USER_AGENT
 
 REPROBE_INTERVAL_DAYS = 14  # at most one probe cycle per host per 14 days
 
+# I-26 retention is 180 days from last contact. A record is offered one final
+# probe the day before that, so an expiry records an observation — the operator
+# closed it, or the address moved — rather than a timer firing unobserved.
+FINAL_VERIFY_DAYS = 179
+
 # Ceiling below discover.py's HARD_MAX_RATE. HARD_MAX_RATE is the absolute floor
 # of sanity for any probing this repo does; bulk re-verification is held slower
 # than that on purpose, because it is unattended and long-running.
@@ -570,9 +575,93 @@ def match_to_candidate(m: dict, lane: dict) -> dict:
     }
 
 
-def collect_lane(api_key: str, lane: dict) -> tuple[list[dict], int]:
+# --- Shodan cursor + final-verification queue -------------------------------
+
+
+def fetch_cursors(api_base: str, token: str) -> dict:
+    """Per-lane Shodan page cursors. Absent state is page 1, not an error."""
+    if not api_base or not token:
+        return {}
+    status, data = http_json(
+        f"{api_base.rstrip('/')}/v1/admin/discovery/cursors",
+        timeout=15,
+        headers={"X-Admin-Token": token},
+    )
+    if status != 200 or not isinstance(data, dict):
+        print(f"[!] cursors unavailable (HTTP {status}) — every lane starts at page 1")
+        return {}
+    return data.get("cursors") or {}
+
+
+def push_cursors(api_base: str, token: str, updates: list[dict]) -> None:
     """
-    Returns (candidates, indexed_observed).
+    Save the cursors after a run.
+
+    Best-effort on purpose: failing to persist means the next run re-reads pages
+    we already have, which wastes quota but probes nothing new. That is not worth
+    aborting a completed run over — unlike the exclusion list, which is.
+    """
+    if not api_base or not token or not updates:
+        return
+    status, data = http_json(
+        f"{api_base.rstrip('/')}/v1/admin/discovery/cursors",
+        timeout=15,
+        method="POST",
+        headers={"X-Admin-Token": token},
+        data={"cursors": updates},
+    )
+    if status != 200:
+        print(f"[!] could not save lane cursors (HTTP {status}) — next run repeats these pages")
+    else:
+        print(f"[+] lane cursors saved: {(data or {}).get('updated', 0)}")
+
+
+def fetch_final_verification(api_base: str, token: str) -> list[dict]:
+    """
+    Hosts one day from retention deletion (I-26).
+
+    These are probed *before* they are deleted so an expiry records something:
+    the operator closed it, or the address moved. Deleting on a timer alone
+    throws away the only evidence this project ever gets that publishing helped.
+    """
+    if not api_base or not token:
+        return []
+    status, data = http_json(
+        f"{api_base.rstrip('/')}/v1/admin/discovery/expiring",
+        timeout=20,
+        headers={"X-Admin-Token": token},
+    )
+    if status != 200 or not isinstance(data, dict):
+        print(f"[!] final-verification queue unavailable (HTTP {status})")
+        return []
+    return data.get("due") or []
+
+
+def retire_hosts(api_base: str, token: str, ips: list[str]) -> None:
+    """Delete hosts whose final probe found nothing — deletion with evidence."""
+    if not api_base or not token or not ips:
+        return
+    status, data = http_json(
+        f"{api_base.rstrip('/')}/v1/admin/discovery/retire",
+        timeout=20,
+        method="POST",
+        headers={"X-Admin-Token": token},
+        data={"ips": ips, "reason": "final_probe_no_answer"},
+    )
+    if status == 200:
+        print(f"[+] retired {(data or {}).get('retired', 0)} host(s) after a silent final probe")
+    else:
+        print(f"[!] retire failed (HTTP {status}) — the timer sweep remains the backstop")
+
+
+def collect_lane(
+    api_key: str, lane: dict, start_page: int = 1
+) -> tuple[list[dict], int, int]:
+    """
+    Returns (candidates, indexed_observed, next_page).
+
+    next_page is the lane's Shodan cursor. Without it every run re-bought the
+    same first page: the corpus stopped growing while the quota still drained.
 
     The second number is spec §4's middle column: unique hosts this lane's
     public-index query listed, before `max_hosts` cut the set down to what we
@@ -586,7 +675,8 @@ def collect_lane(api_key: str, lane: dict) -> tuple[list[dict], int]:
     cands: list[dict] = []
     if lane["mode"] == "asn":
         # facet + top ASNs
-        sample, facets = shodan_search(
+        next_page = start_page
+        sample, facets, _ = shodan_search(
             api_key, lane["query"], limit=5, facets="asn:20,org:15"
         )
         asns = parse_asn_facets(facets)
@@ -626,10 +716,11 @@ def collect_lane(api_key: str, lane: dict) -> tuple[list[dict], int]:
         for m in sample:
             cands.append(match_to_candidate(m, lane))
     else:
-        matches, facets = shodan_search(
+        matches, facets, next_page = shodan_search(
             api_key,
             lane["query"],
             limit=lane.get("search_limit", 30),
+            start_page=start_page,
             facets="asn:15,country:20",
         )
         print(f"  matches={len(matches)} countries_facet={len((facets or {}).get('country') or [])}")
@@ -651,8 +742,11 @@ def collect_lane(api_key: str, lane: dict) -> tuple[list[dict], int]:
                     prev[field] = c[field]
     observed = len(by_key)
     out = list(by_key.values())[: lane.get("max_hosts", 40)]
-    print(f"  unique candidates this lane: {len(out)} (indexed, observed: {observed})")
-    return out, observed
+    print(
+        f"  unique candidates this lane: {len(out)} (indexed, observed: {observed})"
+        f" · pages {start_page}->{next_page}"
+    )
+    return out, observed, next_page
 
 
 VERSION_KEYS = ("version", "server_version", "ray_version", "app_version")
@@ -920,6 +1014,11 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--timeout", type=float, default=3.5)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--no-final-verify",
+        action="store_true",
+        help="skip the pre-deletion re-probe queue (the timer sweep still applies)",
+    )
     ap.add_argument("--ingest", action="store_true")
     ap.add_argument("--from-prior", action="store_true", default=True)
     ap.add_argument("--no-prior", action="store_true")
@@ -977,12 +1076,27 @@ def main() -> int:
         print("[!] no Shodan key — skipping index lanes (dry run emits nothing)")
         lanes = []
 
+    # Shodan cursors: where each lane stopped reading last time.
+    cursors = fetch_cursors(args.api_base, args.admin_token) if not args.self_test else {}
+    cursor_updates: list[dict] = []
+
     indexed_observed = 0
     for lane in lanes:
         try:
-            lane_cands, lane_observed = collect_lane(args.shodan_key, lane)
+            start_page = int((cursors.get(lane["id"]) or {}).get("page") or 1)
+            lane_cands, lane_observed, next_page = collect_lane(
+                args.shodan_key, lane, start_page
+            )
             all_cands.extend(lane_cands)
             indexed_observed += lane_observed
+            cursor_updates.append(
+                {
+                    "lane": lane["id"],
+                    "page": next_page,
+                    "exhausted": next_page == 1 and start_page != 1,
+                    "observed": lane_observed,
+                }
+            )
         except SystemExit as e:
             print(f"  lane {lane['id']} aborted: {e}")
         except Exception as e:
@@ -1066,6 +1180,38 @@ def main() -> int:
             ):
                 if c.get(f) and not by_key[k].get(f):
                     by_key[k][f] = c[f]
+
+    # --- I-26: hosts one day from deletion get one last probe ---------------
+    # Merged before the gates, never around them: a record whose provenance was
+    # only ever a self-check is dropped here exactly as it would be anywhere
+    # else, and it then ages out on the timer instead. Being nearly expired is
+    # not an entitlement to be probed.
+    final_verify: dict[str, dict] = {}
+    if not args.self_test and not args.no_final_verify:
+        for row in fetch_final_verification(args.api_base, args.admin_token):
+            ip = row.get("ip")
+            if not ip:
+                continue
+            prov = provenance_from_corpus_source(row.get("source"))
+            if not prov:
+                continue
+            final_verify[ip] = {
+                "ip": ip,
+                "port": row.get("port") or 11434,
+                "stack": row.get("stack") or "prior",
+                "probe_path": "/api/ps" if (row.get("stack") or "ollama") == "ollama" else "/",
+                "source": row.get("source"),
+                "asn": row.get("asn"),
+                "provenance": prov,
+                "final_verification": True,
+                "age_days": row.get("age_days"),
+            }
+        if final_verify:
+            print(f"\n[+] final verification due: {len(final_verify)} host(s) at/over "
+                  f"{FINAL_VERIFY_DAYS} days since last contact")
+            for c in final_verify.values():
+                all_cands.append(c)
+                by_key.setdefault(f"{c['ip']}:{c['port']}", c)
 
     cands = list(by_key.values())[: args.max_total]
 
@@ -1213,6 +1359,11 @@ def main() -> int:
         "mode": "multilane_seed",
     }
 
+    # Persist the Shodan cursors before the dry-run exit: those pages were paid
+    # for either way, so re-reading them on the next run is pure waste.
+    if not args.self_test:
+        push_cursors(args.api_base, args.admin_token, cursor_updates)
+
     if args.dry_run:
         os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
         with open(args.output, "w") as f:
@@ -1225,6 +1376,22 @@ def main() -> int:
     results = run_probes(cands, args.rate, args.workers, args.timeout)
     exposed = [r for r in results if r.get("exposed")]
     print(f"[+] exposed={len(exposed)} / {len(results)}")
+
+    # I-26: a final-verification host that stayed silent is deleted now, with
+    # the probe as the evidence, rather than waiting for the timer to drop it
+    # unobserved. One that answered has just reset its own retention clock.
+    if final_verify:
+        silent = [
+            r["ip"]
+            for r in results
+            if r.get("ip") in final_verify and not r.get("exposed")
+        ]
+        answered = len(final_verify) - len(silent)
+        print(
+            f"[*] final verification: {answered} still answering, "
+            f"{len(silent)} silent -> retiring"
+        )
+        retire_hosts(args.api_base, args.admin_token, silent)
 
     # geo of exposed
     ecc = Counter(r.get("country_code") or "?" for r in exposed)
