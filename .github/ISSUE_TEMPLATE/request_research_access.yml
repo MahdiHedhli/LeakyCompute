@@ -52,9 +52,7 @@ body:
       options:
         - label: I will only probe systems I own or have explicit authorization to test.
           required: true
-        - label: I will not use LeakyCompute to proxy abuse, mass-scan the public internet, or exploit third parties.
-          required: true
-        - label: I understand chat/proxy to random internet hosts is intentionally not provided.
+        - label: I will not use LeakyCompute to mass-scan the public internet or exploit third parties.
           required: true
   - type: textarea
     id: notes

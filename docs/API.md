@@ -272,7 +272,7 @@ failures are written to the private abuse log.
 **`POST /v1/admin/allowlist`** — `{ op: "approve" | "revoke", login, issue_number?, approved_by?, meta? }`
 
 **`GET /v1/admin/discovery/hits`** — `?limit` (≤2000, default 500), `?sort=last_seen|country|asn`.
-**Returns raw IPs.** Admin-only, never proxied to a public surface.
+**Returns raw IPs.** Admin-only; never returned on a public route (I-14).
 
 **`GET /v1/admin/discovery/clock`** — the I-24 re-probe ledger: `{ attempts: { ip: iso } }`,
 one entry per host we last *sent* a request, answered or not. **Returns raw IPs.**

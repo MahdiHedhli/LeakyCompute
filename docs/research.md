@@ -13,7 +13,7 @@ We reuse the **UX pattern** (sidebar catalog, counters, stats modal) for **defen
 | STOLEN COMPUTE | LeakyCompute |
 |----------------|--------------|
 | Pirate / “free AI” | DON'T PANIC cyberpunk noir |
-| Random third-party proxy | Lab backends only (phase B); none at launch |
+| Random third-party host pool | Corpus we re-verified ourselves, with provenance |
 | Weaponized model names | Filtered out of seed; safe `/api/ps` only |
 | Opaque host pool | Dual counters: archive snapshot + live instrumented |
 
