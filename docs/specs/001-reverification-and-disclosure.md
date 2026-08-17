@@ -193,21 +193,57 @@ before the machinery that lets people escape it.
    probe is *skipped* rather than suppressed. I-25 is machine-checked.
 2. **DONE — `/scanning` page live** (I-23). An operator who finds us in their
    logs can identify us and leave in one click, before volume increases.
-3. **I-24/I-26 governance in the runner** — rate ceilings, 14-day re-probe
-   interval, expiry-on-silence. *Not implemented.*
-4. **Then** decouple `search_limit` from `max_hosts` and raise passive breadth.
-   *Blocked on 3.*
-5. **Then** the archive re-verification cohort.
-6. **Disclosure routing** (I-27) — can proceed in parallel, gated on Shadowserver
-   intake confirmation.
+3. **DONE — I-24/I-26 governance.** Global rate ceiling plus per-/24 and per-ASN
+   in-flight ceilings and spacing; one probe cycle per host per 14 days, failing
+   closed without last-seen data; retention expiring from last successful probe,
+   swept on cron rather than on intention. The interval clock reads the probe
+   *attempt* ledger, not the hit store — the hit store holds only hosts that
+   answered, so a host since firewalled left no trace there and was being
+   re-probed every run.
+4. **DONE and MEASURED** (dry run, 2026-08-17, zero packets to any target).
+   `search_limit` is decoupled from `max_hosts` across 14 lanes, and the split is
+   behaving as intended: **1,537 hosts observed in public index records**
+   (counted, not probed) against **370 probe-eligible** after `max_hosts` caps.
+   107 distinct ASNs; concentration DE 79 / US 66 / CN 50 / FR 33.
 
-I-22 (provenance) is **not yet enforced in code**: the runner still trusts that
-its candidates came from a Shodan lane. That is true today because that is the
-only source wired up, but it is an assumption rather than a check, and it must
-become one before step 4.
+   The number that matters for the counter problem: 1,537 observed is **~8% of
+   the 19,348 archive figure**, and Shodan's own reported totals per lane exceed
+   what we pulled, so supply is bounded by `search_limit` rather than exhausted.
+   Even so, no plausible breadth increase closes a 19,348 gap — which is the
+   quantitative case for step 5 rather than for raising caps again.
 
-Steps 1–3 are the cost of step 4. Shipping 4 first would be the version of this
-project that its own §0 warns about.
+   Two lanes returned zero and need query work before they count as coverage:
+   `triton` (`port:8000 "Triton Inference Server"`) and `gradio`. `vllm` returned
+   13 against a cap of 30.
+5. **Archive re-verification cohort** — not started. Still the highest-value
+   output in this spec.
+6. **Disclosure routing** (I-27) — not started. The lab already withholds the
+   address of an unnotified host until the window elapses, so the *mechanism*
+   exists; the routing does not. Gated on Shadowserver intake confirmation.
+
+I-22 (provenance) **is enforced in code** as of the governance commit. Every
+candidate carries a record naming a recognised public index or an approved
+operator request, and a row whose only provenance is our own prior traffic is
+refused — "we probed it before" is not an entitlement. Verified by
+`governance_gates.py`, which runs under `npm test` via `provenance.test.mjs`.
+
+Still open against this section:
+
+- **I-22a has no intake.** Operator scan requests are a maintainer-curated JSON
+  manifest passed with `--approved-requests`. Without that flag, zero candidates
+  are eligible by that path. The gate is real; the front door is unbuilt, so the
+  issue template, requester rate limit, and refusal log described in I-22a do not
+  exist yet.
+- **Provenance is not persisted.** The corpus stores `source`, so a replayed
+  row's entitlement is re-derived from a string rather than read from a record.
+  A worker-side provenance field would make it auditable after the fact.
+- **No real run has occurred.** Steps 1–4 are all enforcement. Nothing has been
+  measured, and until the Worker is deployed a real `--ingest` run cannot even
+  start: the exclusion and interval gates fail closed against endpoints that
+  exist only in the undeployed code.
+
+Steps 1–3 were the cost of step 4. Shipping 4 first would have been the version
+of this project that its own §0 warns about.
 
 ## Out of scope
 
