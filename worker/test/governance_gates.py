@@ -571,5 +571,98 @@ def _self_test_cli():
 check("--self-test drops every ineligible candidate before the plan is written", _self_test_cli)
 
 
+# ---------------------------------------------------------------------------
+print("\n[G7] I-5: the port comes from the index record, so it is untrusted")
+
+
+def _port_allowlist_defaults_narrow():
+    lane = {"id": "x", "port_default": 9999}
+    assert R.lane_allowed_ports(lane) == {9999}, "a lane with no declaration must be narrow"
+
+
+def _port_allowlist_drops_off_port_candidates():
+    lanes = [
+        {"id": "gradio", "port_default": 7860, "allowed_ports": [7860]},
+        {"id": "vllm", "port_default": 8000, "allowed_ports": [8000, 8080]},
+    ]
+    cands = [
+        {"ip": "203.0.113.1", "port": 7860, "stack": "gradio"},
+        {"ip": "203.0.113.2", "port": 80, "stack": "gradio"},     # proxied Gradio
+        {"ip": "203.0.113.3", "port": 443, "stack": "gradio"},
+        {"ip": "203.0.113.4", "port": 8080, "stack": "vllm"},
+        {"ip": "203.0.113.5", "port": 22, "stack": "vllm"},       # never
+    ]
+    ok, bad = R.partition_by_allowed_port(cands, lanes)
+    assert [c["port"] for c in ok] == [7860, 8080], [c["port"] for c in ok]
+    assert {c["port"] for c in bad} == {80, 443, 22}, bad
+
+
+def _laneless_candidate_held_to_the_union_not_to_anything():
+    # An approved operator request and a replayed corpus row have no lane. They
+    # must still be inside the project's known-AI-port set — the first version of
+    # this gate dropped them outright, which would have disabled I-22 path (b).
+    lanes = [
+        {"id": "ollama", "port_default": 11434, "allowed_ports": [11434]},
+        {"id": "ray", "port_default": 8265, "allowed_ports": [8265]},
+    ]
+    ok, bad = R.partition_by_allowed_port(
+        [
+            {"ip": "203.0.113.9", "port": 11434, "stack": "operator_request"},
+            {"ip": "203.0.113.8", "port": 8265, "stack": "prior"},
+            {"ip": "203.0.113.7", "port": 22, "stack": "operator_request"},
+            {"ip": "203.0.113.6", "port": 443, "stack": "prior"},
+        ],
+        lanes,
+    )
+    assert [c["port"] for c in ok] == [11434, 8265], [c["port"] for c in ok]
+    assert {c["port"] for c in bad} == {22, 443}, bad
+
+
+def _lane_candidate_cannot_borrow_another_lanes_port():
+    lanes = [
+        {"id": "ollama", "port_default": 11434, "allowed_ports": [11434]},
+        {"id": "ray", "port_default": 8265, "allowed_ports": [8265]},
+    ]
+    ok, bad = R.partition_by_allowed_port(
+        [{"ip": "203.0.113.5", "port": 8265, "stack": "ollama"}], lanes
+    )
+    assert ok == [], "a lane candidate must be held to its own lane's ports"
+    assert len(bad) == 1
+
+
+def _unparseable_port_is_dropped():
+    lanes = [{"id": "k", "port_default": 8000, "allowed_ports": [8000]}]
+    ok, bad = R.partition_by_allowed_port(
+        [{"ip": "203.0.113.9", "port": None, "stack": "k"},
+         {"ip": "203.0.113.9", "port": "eighty", "stack": "k"}], lanes
+    )
+    assert ok == [] and len(bad) == 2, (ok, bad)
+
+
+def _every_lane_declares_ports_it_can_justify():
+    # A lane whose query matches page content rather than port can return any
+    # port; the allowlist is the only thing standing between that and a probe.
+    for lane in R.LANES:
+        allowed = R.lane_allowed_ports(lane)
+        assert allowed, f"{lane['id']} has an empty port allowlist"
+        assert int(lane["port_default"]) in allowed, (
+            f"{lane['id']} cannot probe its own default port"
+        )
+        assert all(0 < p < 65536 for p in allowed), lane["id"]
+        # 22/80/443 are not AI service ports. If one ever appears here it is a
+        # widening that belongs in an amendment, not in a lane edit.
+        assert not (allowed & {22, 80, 443, 3389}), (
+            f"{lane['id']} allows a non-AI port: {sorted(allowed)}"
+        )
+
+
+check("a lane with no declared ports stays narrow", _port_allowlist_defaults_narrow)
+check("off-allowlist ports are dropped before probing", _port_allowlist_drops_off_port_candidates)
+check("a laneless candidate is held to the port union, not to nothing", _laneless_candidate_held_to_the_union_not_to_anything)
+check("a lane candidate cannot borrow another lane's port", _lane_candidate_cannot_borrow_another_lanes_port)
+check("an unparseable port is dropped, not coerced", _unparseable_port_is_dropped)
+check("every lane's allowlist contains only justifiable ports", _every_lane_declares_ports_it_can_justify)
+
+
 print("\n" + (f"{FAILURES} FAILURE(S)" if FAILURES else "all assertions passed"))
 sys.exit(1 if FAILURES else 0)

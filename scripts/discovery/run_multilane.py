@@ -107,6 +107,57 @@ class IntervalDataUnavailable(RuntimeError):
     """Raised when last-seen data cannot be read. Callers must not probe (I-24)."""
 
 
+def lane_allowed_ports(lane: dict) -> set[int]:
+    """
+    Ports this lane may probe. Defaults to the lane's own port so a new lane is
+    narrow unless it says otherwise — a lane author has to opt into breadth.
+    """
+    declared = lane.get("allowed_ports")
+    if declared:
+        return {int(p) for p in declared}
+    return {int(lane["port_default"])}
+
+
+def all_allowed_ports(lanes: list[dict]) -> set[int]:
+    """Every port this runner is ever willing to touch — mirrors ALLOWED_PORTS
+    in worker/src/lib/services.js."""
+    out: set[int] = set()
+    for L in lanes:
+        out |= lane_allowed_ports(L)
+    return out
+
+
+def partition_by_allowed_port(
+    cands: list[dict], lanes: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """
+    Split candidates into (allowed, off_allowlist) on the I-5 port rule.
+
+    A candidate with a lane is held to that lane's ports. Not every candidate has
+    one: an approved operator request (I-22 path b) and a corpus row replayed for
+    re-verification both arrive without a lane, and an earlier version of this
+    gate dropped them — which would have disabled operator-requested scanning
+    entirely. Those are held to the union of every lane's ports instead, so the
+    rule that matters survives ("never an arbitrary port") without the rule that
+    does not ("must belong to a lane").
+    """
+    by_stack = {L["id"]: lane_allowed_ports(L) for L in lanes}
+    fallback = all_allowed_ports(lanes)
+    ok, bad = [], []
+    for c in cands:
+        allowed = by_stack.get(c.get("stack")) or fallback
+        try:
+            port = int(c.get("port"))
+        except (TypeError, ValueError):
+            bad.append({**c, "allowed": sorted(allowed)})
+            continue
+        if port in allowed:
+            ok.append(c)
+        else:
+            bad.append({**c, "allowed": sorted(allowed)})
+    return ok, bad
+
+
 def bucket_keys(cand: dict) -> tuple[str | None, str | None]:
     """(neighbourhood, asn) keys used for the per-bucket ceilings."""
     try:
@@ -379,7 +430,11 @@ LANES: list[dict[str, Any]] = [
     },
     {
         "id": "vllm",
-        "query": 'http.html:"vLLM" port:8000',
+        # Measured 2026-08-17: port:8000 -> 13, port:8080 -> 18. Both ports are
+        # already in this project's allowlist (open_webui/localai use 8080), so
+        # covering both is coverage, not an I-5 widening.
+        "query": 'http.html:"vLLM" port:8000,8080',
+        "allowed_ports": [8000, 8080],
         "port_default": 8000,
         # /version is deliberately NOT used. vLLM's API-key middleware only
         # guards /v1/*, so /version answers even on a key-protected server: a
@@ -420,7 +475,13 @@ LANES: list[dict[str, Any]] = [
     },
     {
         "id": "gradio",
-        "query": 'http.title:"Gradio" port:7860',
+        # Measured 2026-08-17: this returns 0, and http.html:"gradio-app" returns
+        # 1,464 — but unconstrained by port, because almost every Gradio app is
+        # proxied onto 80/443. Taking that yield would mean probing arbitrary
+        # ports, which I-5 forbids, so the lane stays narrow and low-yield.
+        # Coverage loss is the price of the invariant, not a bug to fix.
+        "query": 'http.html:"gradio-app" port:7860',
+        "allowed_ports": [7860],
         "port_default": 7860,
         # The interface schema. It is the read that stops short of the one
         # thing a Gradio host must never receive from us: /config describes the
@@ -447,7 +508,10 @@ LANES: list[dict[str, Any]] = [
         # legitimate read, but the Prometheus exposition is unbounded and the
         # runner's http_json() has no equivalent of the Worker's 32 KB cap
         # (I-7), so a hostile target could stream at it.
-        "query": 'port:8000 "Triton Inference Server"',
+        # Measured 2026-08-17: the banner string returns 0 (Triton does not put
+        # its name in the HTTP banner); matching page content returns 164.
+        "query": 'port:8000 http.html:"triton"',
+        "allowed_ports": [8000, 8002],
         "port_default": 8000,
         # Server metadata (name, version, extensions) under the KServe v2
         # protocol. The model inventory is NOT probed: v2 exposes it as
@@ -1004,6 +1068,30 @@ def main() -> int:
                     by_key[k][f] = c[f]
 
     cands = list(by_key.values())[: args.max_total]
+
+    # --- I-5: the port comes from the index record, so it is untrusted ---------
+    # match_to_candidate() takes whatever port Shodan reports. A lane query that
+    # matches on page content rather than port — the shape every high-yield
+    # replacement query has — therefore returns hosts on 80, 443, or anything
+    # else, and without this gate the runner would probe them. The Worker has
+    # enforced a per-service allowlist since it shipped (resolvePort in
+    # services.js); this is the same rule for the path that now carries most of
+    # the volume. Same defect class as I-6 holding in one probe path only.
+    before_ports = len(cands)
+    cands, bad_port = partition_by_allowed_port(cands, LANES)
+    if bad_port:
+        print(
+            f"\n[x] I-5: dropped {len(bad_port)} candidate(s) on ports outside "
+            f"their lane's allowlist ({before_ports - len(bad_port)} remain)"
+        )
+        for d in bad_port[:10]:
+            print(f"    dropped {d['ip']}:{d.get('port')} — {d.get('stack')} allows {d['allowed']}")
+        if len(bad_port) > 10:
+            print(f"    … and {len(bad_port) - 10} more")
+        print(
+            f"[x] I-5: {len(bad_port)} off-allowlist port(s) dropped",
+            file=sys.stderr,
+        )
 
     # --- I-22: every target traces to a public index record or an approved
     # operator request. No record → no probe, and the drop is printed rather
