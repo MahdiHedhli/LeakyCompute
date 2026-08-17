@@ -15,8 +15,14 @@ export function corsHeaders(request, env) {
   const allowed = parseOrigins(env);
   const headers = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    // X-Dev-GitHub-Login is the local-dev identity header (access.js honours it
+    // only when ENVIRONMENT=development, so allowing it here is inert in
+    // production). Without it the preflight passes and the real request is
+    // blocked, which is why the lab's dev path had never rendered in a browser:
+    // curl ignores CORS, so every endpoint test passed while the UI could not
+    // load at all.
     "Access-Control-Allow-Headers":
-      "Content-Type, cf-access-jwt-assertion, Cf-Access-Jwt-Assertion, Authorization, X-Admin-Token",
+      "Content-Type, cf-access-jwt-assertion, Cf-Access-Jwt-Assertion, Authorization, X-Admin-Token, X-Dev-GitHub-Login",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };

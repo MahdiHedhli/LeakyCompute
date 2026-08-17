@@ -533,4 +533,39 @@ section("[N6] the lab prefix owns its own 404/405 (no fall-through)");
   });
 }
 
+// --- CORS preflight must allow every header the clients actually send -------
+// The lab's dev path was unreachable in a browser for as long as it existed:
+// the preflight omitted X-Dev-GitHub-Login, so Chrome blocked the real request
+// while curl (which ignores CORS) passed every endpoint test. A route that only
+// works from curl is a route nobody has opened.
+section("CORS preflight allows the headers the clients send");
+
+{
+  const env = await seededEnv();
+  const pre = await worker.fetch(
+    req("OPTIONS", "/v1/research/me", {
+      headers: {
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "x-dev-github-login",
+      },
+    }),
+    env,
+    ctx
+  );
+  const allow = (pre.headers.get("Access-Control-Allow-Headers") || "").toLowerCase();
+
+  await check("preflight allows the Access JWT header", async () => {
+    assert.ok(allow.includes("cf-access-jwt-assertion"), allow);
+  });
+  await check("preflight allows the admin token header", async () => {
+    assert.ok(allow.includes("x-admin-token"), allow);
+  });
+  await check("preflight allows the dev identity header", async () => {
+    assert.ok(
+      allow.includes("x-dev-github-login"),
+      `a browser would block the lab dev path; got: ${allow}`
+    );
+  });
+}
+
 finish();
