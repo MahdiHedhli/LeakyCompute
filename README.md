@@ -1,141 +1,199 @@
+<div align="center">
+
+<img src="public/assets/logo.svg" width="96" height="96" alt="LeakyCompute" />
+
 # LeakyCompute
 
 **DON'T PANIC // Threat Research**
 
-Defensive research instrument for **internet-exposed AI inference** (especially unauthenticated Ollama). Inspired by the UX of [STOLEN COMPUTE](https://web.archive.org/web/20260727203031/https://stolencompute.com/) — rebuilt with a **Don't Panic cyberpunk-noir** skin, safe probes only, hard rate limits, and a **GitHub-SSO gated researcher lab**.
+*Is your AI inference server answering the whole internet?*
 
-> Evidence first. Panic never.  
-> We measure exposure. We do **not** proxy chat through strangers' GPUs.
+### → **[Check your own IP — no signup, no input](https://mahdihedhli.github.io/LeakyCompute/)** ←
 
-![LeakyCompute](public/assets/logo.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-f5c542.svg)](LICENSE)
+[![Probes](https://img.shields.io/badge/probes-read--only%20GET-5ce1ff.svg)](docs/SECURITY.md)
+[![Opt out](https://img.shields.io/badge/opt%20out-honoured%20on%20receipt-ff6b6b.svg)](https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_removal.yml)
 
-## What you get
+</div>
 
-| Surface | Host (free) | Audience |
-|---------|-------------|---------|
-| **Public pulse** | GitHub Pages (`public/`) | Anyone — dual counters + safe self-check + checklist |
-| **API** | Cloudflare Worker (`worker/`) | Stats, rate-limited checks, allowlist admin, lab APIs |
-| **Researcher lab** | Cloudflare Pages (`lab/`) | Allowlisted GitHub users after issue approval |
-| **CLI** | `src/check_ollama_exposure.py` | Local / owned-range audits |
+---
 
-### Dual counters (public)
+Thousands of Ollama, Ray, and Jupyter servers are reachable from the public
+internet with no authentication at all. Anyone who finds one can run inference on
+someone else's GPU, read their models, and — on Ray and Jupyter — execute code.
 
-1. **Research snapshot** — filtered archive-era catalog seed (~1.8k models / ~19k host-sum after exploit-like filtering).  
-2. **Live instrumented** — voluntary self-checks + researcher-owned scans only.
+LeakyCompute measures that exposure **so operators can close it**. Visit the
+checker and it tells you whether *your* address is answering, and exactly how to
+stop it. Nothing is typed in; the default target is the address you connected
+from, which is why the common path needs no permission from anyone.
 
-### Safety rails
+> Evidence first. Panic never.
+> We measure exposure. We never proxy traffic through strangers' GPUs.
 
-- Every probe is a **read-only `GET`** against a version / health / listing endpoint —
-  never `/api/pull`, `/api/generate`, a Ray job submission, or a traversal payload
-- Tier-1 coverage: **Ollama** (11434), **Ray** (8265), **Jupyter** (8888)
-- Ports are validated per service against a known-AI-port list — not a general port prober
-- Default check target = visitor egress IP; override requires attestation  
-- Strict per-IP + global rate limits; optional Turnstile  
-- Private abuse logs (hashed) in Worker KV — **not** in this repo  
-- Lab chat / third-party proxy **disabled at launch** (phase B later)  
-- Seed catalog strips path/SSRF-shaped “models”
+## Try it
+
+| | |
+|---|---|
+| 🔎 **[Public checker](https://mahdihedhli.github.io/LeakyCompute/)** | Scans your own egress IP for Ollama, Ray and Jupyter. No input, no account. |
+| 📄 **[About our scanning](https://mahdihedhli.github.io/LeakyCompute/scanning.html)** | Found us in your logs? Exactly what we send, and a one-click opt-out. |
+| 🔬 **[Researcher lab](https://leakycompute-lab.pages.dev)** | Corpus browser and exposure maps. GitHub SSO, [approval required](https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_research_access.yml). |
+| ⚙️ **[API](https://leakycompute-api.mhedhli.workers.dev/v1/health)** | `/v1/*` — see the [contract](docs/API.md). |
+
+## How a probe gets permission
+
+The interesting part of this project is not the scanner. It's what stands
+between a candidate host and a packet. Four gates, all of them ahead of the
+dry-run branch, so the plan a run writes down is the plan it executes:
+
+```
+  candidate host
+        │
+        ▼
+  ┌───────────────┐   I-22  did a public index already list this host,
+  │  PROVENANCE   │         or did its owner ask us to check it?
+  └───────┬───────┘         we never discover a host by probing
+          ▼
+  ┌───────────────┐   I-25  did anyone ask to be left alone?
+  │  EXCLUSIONS   │         fails closed — no list, no probe
+  └───────┬───────┘
+          ▼
+  ┌───────────────┐   I-24  probed within the last 14 days?
+  │   INTERVAL    │         fails closed — no clock, no probe
+  └───────┬───────┘
+          ▼
+  ┌───────────────┐   I-24  global rate ceiling, plus per-/24
+  │  RATE + PORT  │   I-5   and per-ASN limits; port must be on
+  └───────┬───────┘         that service's allowlist
+          ▼
+   read-only GET   ← the only thing we ever send
+```
+
+**We never discover a host by probing.** Every address we contact was already
+published in a public index, or its owner asked us to look. That single rule is
+what separates this from the tooling it studies, and it holds whether the corpus
+is 300 hosts or 300,000.
+
+## What it checks
+
+Confirm the service, then run one read-only exposure check. Never a job
+submission, model pull, prompt, kernel start, or file read.
+
+| Service | Port | Confirm | Exposure check |
+|---|---|---|---|
+| **Ollama** | 11434 | `GET /api/version` | `GET /api/tags` |
+| **Ray** | 8265 | `GET /api/version` | `GET /api/jobs/` |
+| **Jupyter** | 8888 | `GET /api/status` | `GET /tree` |
+
+Background re-verification covers a wider set — vLLM, Triton, Open WebUI,
+LocalAI, LiteLLM, ComfyUI, MLflow, TensorBoard, Gradio — every probe path listed
+and justified under invariant I-2 in [SECURITY.md](docs/SECURITY.md).
+
+Ray is flagged on **configuration, not version**: CVE-2023-48022 is disputed
+because the vendor considers missing auth intended, so upgrading will not fix it.
+
+## Three numbers, never summed
+
+The public page shows three separate measurements with different provenance,
+because collapsing them into one would be the easiest lie to tell:
+
+| | |
+|---|---|
+| **Archive snapshot** | What a Wayback-era catalog listed. Counted, never probed by us. |
+| **Indexed, observed** | Hosts in public index records today. Counted, not probed. |
+| **Re-verified** | Hosts that answered a read-only GET *from us*, inside the re-probe window. |
+
+The third number is the only one we stand behind directly, and it is the
+smallest. That gap is the honest finding, not a shortfall to engineer away.
+
+## Safety rails
+
+Every rule below is a numbered invariant in
+**[docs/SECURITY.md](docs/SECURITY.md)**, the document each change is reviewed
+against. Most are enforced by `npm test` rather than by good intentions.
+
+- **Read-only `GET` only** — never `/api/pull`, `/api/generate`, a Ray job, or a traversal payload
+- **We report that an endpoint answers unauthenticated requests. We never send one to prove impact**
+- **Ports validated per service** against a fixed allowlist — not a general port prober
+- **Redirects never followed**, so a target cannot bounce a probe to another host
+- **Default target is your own egress IP**; any other target requires an ownership attestation
+- **Opt-out honoured on receipt**, reviewed afterwards, and never expires
+- **Records expire 180 days after last contact** — a host that goes quiet ages out
+- **Raw addresses never reach a public endpoint** — public figures are counts by country, ASN and stack
+- **No proxying of user traffic through third-party hosts.** This is the single behaviour that defined STOLEN COMPUTE. It does not ship, in any phase — not as a lab feature, not later
+
+## Opt out
+
+Don't want us touching your address space? **[Open a removal
+request](https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_removal.yml)**
+— it is applied when we receive it, not when we finish reviewing it. No
+justification required, and it never expires. Email works equally well if you'd
+rather not use GitHub; needing an account in order to be left alone would not be
+an opt-out.
 
 ## Repo layout
 
 ```
-public/           # GitHub Pages pulse UI
-lab/              # Gated researcher UI (STOLEN COMPUTE layout, noir skin)
-worker/src/       # Cloudflare Worker API
-data/             # seed-models.json (filtered)
-src/              # defensive Python CLI
-scripts/          # seed build helpers
-docs/             # constitution, API contract, discovery model, deploy
-.github/          # access issue template + approve/revoke Actions
+public/            # GitHub Pages checker + /scanning disclosure page
+lab/               # Access-gated researcher UI (corpus, maps, validation)
+worker/src/        # Cloudflare Worker API
+worker/test/       # the invariant suite — npm test
+scripts/discovery/ # off-Worker re-verification runner + gates
+src/               # defensive Python CLI
+docs/              # constitution, API contract, discovery model, specs
+.github/           # access + removal templates and their Actions
 ```
 
-## Quick start (local)
+## Local development
 
 ```bash
+npm test                                  # the invariant suite
+
 # CLI — localhost only
 python3 src/check_ollama_exposure.py --scan-local
-python3 src/check_ollama_exposure.py --check-url http://127.0.0.1:11434
 
-# Worker (needs wrangler + KV ids in wrangler.toml)
-npx wrangler dev worker/src/index.js
-# Public UI: open public/index.html via any static server, ?api=http://127.0.0.1:8787
+# Worker + public checker
+npx wrangler dev
+# then open public/index.html with ?api=http://127.0.0.1:8787
 
-# Lab UI offline seed preview
+# Researcher lab against a local Worker
 python3 -m http.server 5500 --directory lab
-# open http://127.0.0.1:5500/?dev_user=YOUR_GITHUB&api=http://127.0.0.1:8787
-# first: wrangler + approve yourself via admin API or KV
+# http://127.0.0.1:5500/?api=http://127.0.0.1:8787&dev_user=YOUR_GITHUB
+# needs ENVIRONMENT=development and an allowlist entry for that login
 ```
 
-## Deploy
+Discovery runs **on your machine**, never inside the Worker:
 
-See **[docs/DEPLOY.md](docs/DEPLOY.md)** for free-tier Worker + Pages + Access + GitHub secrets.
+```bash
+export SHODAN_API_KEY=... LEAKY_API_BASE=... LEAKY_ADMIN_TOKEN=...
 
-**Researcher access flow**
+python3 scripts/discovery/run_multilane.py --self-test   # gates only, no packets
+python3 scripts/discovery/run_multilane.py --dry-run     # passive pull, no packets
+python3 scripts/discovery/run_multilane.py --ingest      # all four gates live
+```
 
-1. Open issue with [Request research lab access](.github/ISSUE_TEMPLATE/request_research_access.yml)  
-2. Maintainer vets GitHub profile/repos  
-3. Add label **`access-approved`**  
-4. Action calls Worker admin API → KV allowlist  
-5. Researcher opens lab URL → Cloudflare Access → **GitHub SSO**
-
-Revoke with label **`access-revoked`**.
-
-## Configuration (domain-ready)
-
-| File | Purpose |
-|------|---------|
-| `public/js/config.js` | `API_BASE`, Turnstile site key, lab/repo URLs |
-| `lab/js/config.js` | Same for lab |
-| `wrangler.toml` `[vars]` | `ALLOWED_ORIGINS`, snapshot numbers, rate limits |
-
-When you buy a domain: point Pages/Worker custom hosts, extend `ALLOWED_ORIGINS`, update the two `config.js` files and GitHub secrets — no architectural rewrite.
+`--ingest` refuses to run if it cannot read the exclusion list or the probe
+clock. That is the design, not a bug: an opt-out that stops being consulted when
+the network hiccups is not an opt-out.
 
 ## Documentation
 
-- [Security policy & constitution](docs/SECURITY.md) — numbered invariants every change is checked against; read before adding any probe or source
+- **[Security policy & constitution](docs/SECURITY.md)** — the numbered invariants, and which are machine-checked. Read this before adding any probe or source.
 - [API reference](docs/API.md) — the `/v1/*` contract, findings, severities, rate limits
-- [Discovery model](docs/DISCOVERY.md) — census vs active lanes, source registry + account requirements, local fingerprint lab
-- [Deploy](docs/DEPLOY.md)  
-- [Research background](docs/research.md)  
-- [Tier-1 checker handoff](docs/HANDOFF_TIER1.md) · [Discovery handoff](docs/HANDOFF_DISCOVERY.md) — *session artifacts, not durable docs*
+- [Re-verification & disclosure spec](docs/specs/001-reverification-and-disclosure.md) — the corpus expansion plan and the disclosure policy
+- [Discovery model](docs/DISCOVERY.md) — passive lanes, source registry, local fingerprint lab
+- [Deploy](docs/DEPLOY.md) · [Research background](docs/research.md)
 
-## Seed data
+## Reporting a problem
 
-```bash
-python3 scripts/build_seed.py path/to/models.json -o data/seed-models.json
-cp data/seed-models.json lab/data/seed-models.json
-# keep SNAPSHOT_* vars in wrangler.toml in sync with seed snapshot
-```
-
-**Note:** the archive seed is **model names + counts only** (no IPs). ASN/hosting-provider
-candidates for active re-probes come from **Shodan facets** and prior hits — see [docs/DISCOVERY.md](docs/DISCOVERY.md).
-
-## Discovery (passive Shodan → slow re-probe)
-
-Active scanning runs **on your machine**, not inside the free Worker:
-
-```bash
-export SHODAN_API_KEY=...
-export LEAKY_ADMIN_TOKEN=...   # Worker ADMIN_SYNC_TOKEN
-
-# Top hosting ASNs for Ollama-like exposure (passive)
-python3 scripts/discovery/discover.py --asn-report
-
-# Slow capped run: top ASNs + prior hits + optional /30 neighbors
-python3 scripts/discovery/discover.py \
-  --from-top-asns 10 --hosts-per-asn 8 \
-  --from-prior --expand-prefix 30 --max-expand-per-seed 4 \
-  --max-total 48 --rate 0.2 --workers 1 \
-  --ingest
-```
-
-Defaults are intentionally slow (≈1 probe / 4–5s) to stay polite and free-tier safe.
+If you can make this checker probe something it should not — auth bypass, SSRF
+in the Worker, allowlist escape — that is a security issue in *our* software.
+Open a private GitHub security advisory rather than a public issue.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
-## Credits
-
-- UX structure studied from archived STOLEN COMPUTE (acidvegas) via Wayback Machine  
-- Brand voice: DON'T PANIC threat research / detective noir  
-- Built for free Cloudflare + GitHub tiers  
+<div align="center">
+<sub>UX structure studied from archived STOLEN COMPUTE via the Wayback Machine ·
+Brand voice: DON'T PANIC threat research · Built on free Cloudflare + GitHub tiers</sub>
+</div>
