@@ -27,7 +27,7 @@ checker and it tells you whether *your* address is answering, and exactly how to
 stop it. Nothing is typed in; the default target is the address you connected
 from, which is why the common path needs no permission from anyone.
 
-> Evidence first. Panic never.
+> **Evidence first. Panic never.**<br>
 > We measure exposure. We never proxy traffic through strangers' GPUs.
 
 ## Try it
