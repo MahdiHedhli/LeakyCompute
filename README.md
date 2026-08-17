@@ -28,7 +28,7 @@ stop it. Nothing is typed in; the default target is the address you connected
 from, which is why the common path needs no permission from anyone.
 
 > **Evidence first. Panic never.**<br>
-> We measure exposure. We never proxy traffic through strangers' GPUs.
+> We measure exposure so operators can close it.
 
 ## Try it
 
@@ -119,7 +119,7 @@ against. Most are enforced by `npm test` rather than by good intentions.
 - **Opt-out honoured on receipt**, reviewed afterwards, and never expires
 - **Records expire 180 days after last contact** — a host that goes quiet ages out
 - **Raw addresses never reach a public endpoint** — public figures are counts by country, ASN and stack
-- **No proxying of user traffic through third-party hosts.** This is the single behaviour that defined STOLEN COMPUTE. It does not ship, in any phase — not as a lab feature, not later
+- **The lab reads our stored corpus only** — it never sends a request to a discovered host
 
 ## Opt out
 
