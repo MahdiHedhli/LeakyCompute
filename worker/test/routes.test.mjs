@@ -114,6 +114,15 @@ const ADMIN_ROUTES = [
   { method: "GET", path: "/v1/admin/discovery/clock" },
   { method: "POST", path: "/v1/admin/discovery/ingest", body: { results: [] } },
   { method: "POST", path: "/v1/admin/discovery/sweep", body: {} },
+  // Final-verification queue: hosts one day from retention deletion. Admin-gated
+  // because it is a list of addresses (I-14), same as /hits and /clock.
+  { method: "GET", path: "/v1/admin/discovery/expiring" },
+  // Deletion with evidence — the final probe ran and found nothing.
+  { method: "POST", path: "/v1/admin/discovery/retire", body: { ips: ["203.0.113.5"] } },
+  // Shodan pagination state. No addresses, but it steers what gets probed next,
+  // so it is not something an unauthenticated caller may read or move.
+  { method: "GET", path: "/v1/admin/discovery/cursors" },
+  { method: "POST", path: "/v1/admin/discovery/cursors", body: { lane: "ollama", page: 2 } },
 ];
 
 /* ------------------------------------------------------------------ */
