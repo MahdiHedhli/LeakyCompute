@@ -382,7 +382,7 @@ LANES: list[dict[str, Any]] = [
         "port_default": 8888,
         "probe_path": "/",
         "mode": "search",
-        "search_limit": 200,
+        "search_limit": 1000,
         "max_hosts": 40,
     },
     {
@@ -391,7 +391,7 @@ LANES: list[dict[str, Any]] = [
         "port_default": 8265,
         "probe_path": "/api/version",
         "mode": "search",
-        "search_limit": 200,
+        "search_limit": 1000,
         "max_hosts": 40,
     },
     {
@@ -414,7 +414,7 @@ LANES: list[dict[str, Any]] = [
         "port_default": 8080,
         "probe_path": "/v1/models",
         "mode": "search",
-        "search_limit": 150,
+        "search_limit": 1000,
         "max_hosts": 30,
     },
     {
@@ -430,7 +430,7 @@ LANES: list[dict[str, Any]] = [
         # a constant and calls no model.
         "probe_path": "/health/liveliness",
         "mode": "search",
-        "search_limit": 150,
+        "search_limit": 1000,
         "max_hosts": 30,
     },
     {
@@ -448,7 +448,7 @@ LANES: list[dict[str, Any]] = [
         # the same gate a real caller hits, and is a listing endpoint (I-2).
         "probe_path": "/v1/models",
         "mode": "search",
-        "search_limit": 200,
+        "search_limit": 1000,
         "max_hosts": 30,
     },
     {
@@ -457,7 +457,7 @@ LANES: list[dict[str, Any]] = [
         "port_default": 8000,
         "probe_path": "/v1/models",
         "mode": "search",
-        "search_limit": 150,
+        "search_limit": 1000,
         "max_hosts": 25,
     },
     {
@@ -466,7 +466,7 @@ LANES: list[dict[str, Any]] = [
         "port_default": 8080,
         "probe_path": "/v1/models",
         "mode": "search",
-        "search_limit": 150,
+        "search_limit": 1000,
         "max_hosts": 25,
     },
     {
@@ -475,7 +475,7 @@ LANES: list[dict[str, Any]] = [
         "port_default": 8188,
         "probe_path": "/system_stats",
         "mode": "search",
-        "search_limit": 150,
+        "search_limit": 1000,
         "max_hosts": 35,
     },
     {
@@ -493,7 +493,7 @@ LANES: list[dict[str, Any]] = [
         # endpoints, /run/* and /queue/join would invoke them (I-2, I-3).
         "probe_path": "/config",
         "mode": "search",
-        "search_limit": 150,
+        "search_limit": 1000,
         "max_hosts": 25,
     },
     {
@@ -504,7 +504,7 @@ LANES: list[dict[str, Any]] = [
         # content we would then have to refuse to retain under I-26.
         "probe_path": "/health",
         "mode": "search",
-        "search_limit": 100,
+        "search_limit": 1000,
         "max_hosts": 25,
     },
     {
@@ -523,7 +523,7 @@ LANES: list[dict[str, Any]] = [
         # POST /v2/repository/index, and no finding is worth a non-GET (I-1).
         "probe_path": "/v2",
         "mode": "search",
-        "search_limit": 100,
+        "search_limit": 1000,
         "max_hosts": 20,
     },
     {
@@ -535,7 +535,7 @@ LANES: list[dict[str, Any]] = [
         # nowhere under I-26.
         "probe_path": "/data/plugins_listing",
         "mode": "search",
-        "search_limit": 100,
+        "search_limit": 1000,
         "max_hosts": 20,
     },
 ]
@@ -1352,6 +1352,15 @@ def main() -> int:
     meta = {
         "lanes": [L["id"] for L in lanes],
         "candidate_count": len(cands),
+        # What the public index lists. This is the key the Worker publishes as
+        # indexed_observed, so it has to be the population figure — sending the
+        # pulled count here is how that counter ended up measuring our budget.
+        "indexed_observed": sum(index_listed.values()) or indexed_observed,
+        "observed_source": (
+            "public index records matching our lane fingerprints, counted not probed"
+        ),
+        # Kept separately so the two are never confused again.
+        "pulled_count": indexed_observed,
         "excluded_count": len(excluded),
         # What the public index says exists, per lane and summed. Free — it
         # arrives with each page we were already buying. This is the honest
@@ -1364,11 +1373,6 @@ def main() -> int:
             "hosts: one host can match more than one lane and we cannot dedupe "
             "what we did not pull."
         ),
-        # Spec §4, second number: hosts a public index listed, counted and not
-        # probed (I-21). Reported separately from candidate_count, which is the
-        # subset we are willing to send a read-only GET.
-        "indexed_observed": indexed_observed,
-        "observed_source": "public index records (Shodan lanes), counted not probed",
         # False only ever appears on a dry run, where nothing was probed.
         "exclusion_filtered": exclusions_applied,
         # I-22. Reasons only — the dropped addresses stay on the console, since
@@ -1386,10 +1390,6 @@ def main() -> int:
         "max_inflight_per_24": MAX_INFLIGHT_PER_24,
         "max_inflight_per_asn": MAX_INFLIGHT_PER_ASN,
         "mode": "multilane_seed",
-        "observed": sum(index_listed.values()) or indexed_observed,
-        "observed_source": (
-            "public index records matching our lane fingerprints, counted not probed"
-        ),
     }
 
     # Persist the Shodan cursors before the dry-run exit: those pages were paid
