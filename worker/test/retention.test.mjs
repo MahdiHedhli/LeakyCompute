@@ -785,4 +785,74 @@ section("[R9] the sweep is bounded per invocation and resumes where it stopped")
   });
 }
 
+/* ------------------------------------------------------------------ */
+section("KV write budget: refuse before the first write, not partway through");
+
+{
+  const env = await freshEnv();
+  // Park the day's counter just under the ceiling.
+  await env.KV.put("kv:puts:" + new Date().toISOString().slice(0, 10), "895");
+
+  const before = env.KV._store ? env.KV._store.size : null;
+  const res = await worker.fetch(
+    new Request("https://api.test/v1/admin/discovery/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Token": ADMIN,
+                 "CF-Connecting-IP": "198.51.100.99" },
+      body: JSON.stringify({
+        results: Array.from({ length: 100 }, (_, i) => ({
+          ip: `203.0.113.${i}`, port: 11434, exposed: true, stack: "ollama",
+          source: "shodan:ollama",
+        })),
+      }),
+    }),
+    env,
+    ctx
+  );
+  const body = await res.json();
+
+  await check("a batch that would cross the ceiling is refused", async () => {
+    assert.equal(res.status, 429);
+    assert.equal(body.error, "kv_write_budget_exhausted");
+  });
+
+  await check("the refusal names what it would have cost", async () => {
+    assert.ok(body.estimated >= 100, JSON.stringify(body));
+    assert.ok(body.remaining < body.estimated, JSON.stringify(body));
+  });
+
+  await check("nothing was written — no partial corpus", async () => {
+    const keys = [...(env.KV._store?.keys() || [])].filter((k) =>
+      k.startsWith("discovery:hit:")
+    );
+    assert.deepEqual(keys, [], `expected no records written, got ${keys.length}`);
+  });
+}
+
+{
+  const env = await freshEnv();
+  const res = await worker.fetch(
+    new Request("https://api.test/v1/admin/discovery/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Token": ADMIN,
+                 "CF-Connecting-IP": "198.51.100.99" },
+      body: JSON.stringify({
+        results: Array.from({ length: 40 }, (_, i) => ({
+          ip: `203.0.113.${i}`, port: 11434, exposed: true, stack: "ollama",
+          country_code: ["DE", "US"][i % 2], asn: "AS6449" + (i % 3),
+          source: "shodan:ollama",
+        })),
+      }),
+    }),
+    env,
+    ctx
+  );
+  const body = await res.json();
+  await check("a normal batch stays near one put per host", async () => {
+    assert.equal(res.status, 200);
+    // Pre-batching this was ~6 per host. The aggregate flush is a fixed cost.
+    assert.ok(body.kv_puts <= 40 + 10, `kv_puts=${body.kv_puts} for 40 hosts`);
+  });
+}
+
 finish();

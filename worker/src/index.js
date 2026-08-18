@@ -49,6 +49,7 @@ import {
   FINAL_VERIFY_DAYS,
   purgeExcluded,
   getProbeAttempts,
+  checkWriteBudget,
   RETENTION_DAYS,
 } from "./lib/discovery.js";
 import { enrichServicesWithOsv } from "./lib/osv.js";
@@ -883,6 +884,31 @@ async function handleDiscoveryIngest(request, env) {
   // Keep batches small: KV write budget + Worker CPU on free tier
   if (results.length > 150) {
     return json({ error: "batch_too_large", max: 150 }, 400, request, env);
+  }
+
+  // Refuse before the first write rather than failing partway through. A batch
+  // that stops mid-flight leaves records without the aggregates that describe
+  // them, which is a worse outcome than not ingesting at all. Roughly one put
+  // per host plus the fixed aggregate flush.
+  const budget = await checkWriteBudget(env, results.length + 8);
+  if (!budget.ok) {
+    return json(
+      {
+        error: "kv_write_budget_exhausted",
+        message:
+          "Refusing to ingest: this batch would cross today's KV put ceiling, " +
+          "and a partial write leaves the corpus disagreeing with the counts " +
+          "that describe it. Retry after 00:00 UTC, send a smaller batch, or " +
+          "raise KV_DAILY_PUT_BUDGET on a paid plan.",
+        used: budget.used,
+        budget: budget.budget,
+        remaining: budget.remaining,
+        estimated: budget.estimated,
+      },
+      429,
+      request,
+      env
+    );
   }
   const summary = await ingestDiscoveryBatch(env, {
     results,

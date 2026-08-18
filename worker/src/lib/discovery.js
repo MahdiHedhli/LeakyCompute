@@ -81,7 +81,7 @@ export function versionFromProduct(product) {
   return m ? m[1] : null;
 }
 
-export async function recordExposedHost(env, hit) {
+export async function recordExposedHost(env, hit, batch = null) {
   if (!env.KV || !hit?.ip) return;
   const ip = hit.ip;
   const key = `${HIT_PREFIX}${ip}`;
@@ -141,13 +141,13 @@ export async function recordExposedHost(env, hit) {
   // would make the published figure mean something other than what it claims.
   if (answered) {
     if (counted.geo !== geoBucket) {
-      if (counted.geo) await bumpCounter(env, GEO_KEY, counted.geo, -1);
-      await bumpCounter(env, GEO_KEY, geoBucket);
+      if (counted.geo) await bumpCounter(env, GEO_KEY, counted.geo, -1, batch);
+      await bumpCounter(env, GEO_KEY, geoBucket, 1, batch);
       counted.geo = geoBucket;
     }
     if (counted.asn !== asnBucket) {
-      if (counted.asn) await bumpCounter(env, ASN_KEY, counted.asn, -1);
-      if (asnBucket) await bumpCounter(env, ASN_KEY, asnBucket);
+      if (counted.asn) await bumpCounter(env, ASN_KEY, counted.asn, -1, batch);
+      if (asnBucket) await bumpCounter(env, ASN_KEY, asnBucket, 1, batch);
       counted.asn = asnBucket;
     }
     // by_stack counts host+stack pairs: a host first seen with Ollama that
@@ -156,7 +156,7 @@ export async function recordExposedHost(env, hit) {
     const countedStacks = new Set(counted.stacks || []);
     for (const s of mergedStacks) {
       if (!countedStacks.has(s)) {
-        await bumpCounter(env, STACK_KEY, s);
+        await bumpCounter(env, STACK_KEY, s, 1, batch);
         countedStacks.add(s);
       }
     }
@@ -168,7 +168,7 @@ export async function recordExposedHost(env, hit) {
     // sat at 0 no matter how many hosts answered. Marking on contact heals a
     // legacy row the next time it is probed.
     if (!counted.reverified) {
-      await bumpCorpus(env, "reverified_hosts", 1, now);
+      await bumpCorpus(env, "reverified_hosts", 1, now, batch);
       counted.reverified = true;
     }
   }
@@ -182,6 +182,13 @@ export async function recordExposedHost(env, hit) {
   await env.KV.put(key, JSON.stringify(entry), {
     expirationTtl: (RETENTION_DAYS + TTL_GRACE_DAYS) * 86400,
   });
+
+  // Staged when batching: this rewrote the entire index array once per host,
+  // which is the single largest contributor to the write count on a bulk run.
+  if (batch) {
+    batch.indexAdds.push(ip);
+    return;
+  }
 
   let index = (await env.KV.get(HITS_INDEX, "json")) || [];
   if (!Array.isArray(index)) index = [];
@@ -464,8 +471,92 @@ function uniq(list) {
   return [...new Set(list.filter((v) => v != null && v !== ""))];
 }
 
-async function bumpCounter(env, mapKey, label, delta = 1) {
+/* ------------------------------------------------------------------ */
+/* Write batching                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * KV write budget is the binding constraint on ingest size, not CPU.
+ *
+ * Every counter here is a read-modify-write of a whole map, so recording one
+ * host touched six keys: the record, the index, three aggregate maps and the
+ * corpus totals. A 362-host run therefore issued ~2,100 puts against a free
+ * tier of 1,000/day and tripped the limit mid-run — the dangerous failure, since
+ * a record can land while the aggregates that describe it do not.
+ *
+ * A batch accumulates every aggregate mutation in memory and flushes one put per
+ * distinct key at the end, which turns those six-per-host into one-per-host plus
+ * a fixed five. Passing no batch keeps the immediate behaviour, so the
+ * single-host paths (/v1/check) are unchanged.
+ */
+export function createWriteBatch() {
+  return {
+    counters: new Map(), // mapKey -> Map(label -> delta)
+    corpus: new Map(), // field -> delta
+    corpusAt: null,
+    indexAdds: [],
+    puts: 0,
+  };
+}
+
+function stageCounter(batch, mapKey, label, delta) {
+  if (!batch.counters.has(mapKey)) batch.counters.set(mapKey, new Map());
+  const m = batch.counters.get(mapKey);
+  m.set(label, (m.get(label) || 0) + delta);
+}
+
+export async function flushWriteBatch(env, batch) {
+  if (!env.KV || !batch) return { puts: 0 };
+  let puts = 0;
+
+  for (const [mapKey, deltas] of batch.counters) {
+    const map = (await env.KV.get(mapKey, "json")) || {};
+    for (const [label, delta] of deltas) {
+      const next = (map[label] || 0) + delta;
+      if (next > 0) map[label] = next;
+      else delete map[label];
+    }
+    await env.KV.put(mapKey, JSON.stringify(map));
+    puts++;
+  }
+
+  if (batch.corpus.size || batch.corpusAt) {
+    const corpus = (await env.KV.get(CORPUS_KEY, "json")) || {};
+    for (const [field, delta] of batch.corpus) {
+      corpus[field] = Math.max(0, (corpus[field] || 0) + delta);
+    }
+    if (batch.corpusAt) corpus.last_reverified_at = batch.corpusAt;
+    await env.KV.put(CORPUS_KEY, JSON.stringify(corpus));
+    puts++;
+  }
+
+  if (batch.indexAdds.length) {
+    let index = (await env.KV.get(HITS_INDEX, "json")) || [];
+    if (!Array.isArray(index)) index = [];
+    const seen = new Set(index);
+    let changed = false;
+    for (const ip of batch.indexAdds) {
+      if (!seen.has(ip)) {
+        index.push(ip);
+        seen.add(ip);
+        changed = true;
+      }
+    }
+    if (changed) {
+      if (index.length > MAX_INDEX) index = index.slice(-MAX_INDEX);
+      await env.KV.put(HITS_INDEX, JSON.stringify(index));
+      puts++;
+    }
+  }
+
+  batch.puts += puts;
+  return { puts };
+}
+
+
+async function bumpCounter(env, mapKey, label, delta = 1, batch = null) {
   if (!label) return;
+  if (batch) return stageCounter(batch, mapKey, label, delta);
   const map = (await env.KV.get(mapKey, "json")) || {};
   const next = (map[label] || 0) + delta;
   if (next > 0) map[label] = next;
@@ -473,7 +564,12 @@ async function bumpCounter(env, mapKey, label, delta = 1) {
   await env.KV.put(mapKey, JSON.stringify(map));
 }
 
-async function bumpCorpus(env, field, delta, at = null) {
+async function bumpCorpus(env, field, delta, at = null, batch = null) {
+  if (batch) {
+    batch.corpus.set(field, (batch.corpus.get(field) || 0) + delta);
+    if (at && delta >= 0) batch.corpusAt = at;
+    return;
+  }
   const corpus = (await env.KV.get(CORPUS_KEY, "json")) || {};
   corpus[field] = Math.max(0, (corpus[field] || 0) + delta);
   // delta 0 is a real case: a host that answers again is already in the count,
@@ -592,6 +688,57 @@ export async function mergeValidatedModels(env, modelHits) {
   return catalog;
 }
 
+/* ------------------------------------------------------------------ */
+/* Daily KV write budget                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Workers KV free tier allows 1,000 put operations a day, and exceeding it
+ * blocks writes account-wide until 00:00 UTC. The dangerous part is not the
+ * block, it is *where* it lands: a record can be written while the aggregates
+ * describing it are not, leaving published counts that disagree with the corpus.
+ *
+ * So the ceiling is checked before a batch starts rather than discovered
+ * halfway through. The default sits under the free-tier limit; a paid account
+ * raises it with KV_DAILY_PUT_BUDGET.
+ */
+export const DEFAULT_KV_DAILY_PUTS = 900;
+
+function budgetKey(now = Date.now()) {
+  return `kv:puts:${new Date(now).toISOString().slice(0, 10)}`;
+}
+
+export function kvBudget(env) {
+  const n = Number(env?.KV_DAILY_PUT_BUDGET);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_KV_DAILY_PUTS;
+}
+
+/** Would this batch cross the ceiling? Checked before any write. */
+export async function checkWriteBudget(env, estimatedPuts) {
+  if (!env.KV) return { ok: true, used: 0, budget: 0, remaining: 0 };
+  const budget = kvBudget(env);
+  const used = Number(await env.KV.get(budgetKey(), "text")) || 0;
+  const remaining = Math.max(0, budget - used);
+  return {
+    ok: estimatedPuts <= remaining,
+    used,
+    budget,
+    remaining,
+    estimated: estimatedPuts,
+  };
+}
+
+async function chargeWriteBudget(env, puts) {
+  if (!env.KV) return { used: 0, budget: 0 };
+  const budget = kvBudget(env);
+  const key = budgetKey();
+  const used = (Number(await env.KV.get(key, "text")) || 0) + puts;
+  // +1 for this write itself. Counted, because a budget that does not count its
+  // own bookkeeping drifts under the real ceiling exactly when it matters.
+  await env.KV.put(key, String(used + 1), { expirationTtl: 3 * 86400 });
+  return { used: used + 1, budget };
+}
+
 export async function ingestDiscoveryBatch(env, batch) {
   /**
    * results: [{ ip, port, exposed, version, models, source, stack, country, country_code, asn, ... }]
@@ -622,6 +769,11 @@ export async function ingestDiscoveryBatch(env, batch) {
     results.map((r) => r?.ip).filter(Boolean)
   );
 
+  // One write batch for the whole ingest: aggregate mutations accumulate in
+  // memory and flush as a fixed handful of puts instead of six per host.
+  // Named `writes` because `batch` is already this function's payload.
+  const writes = createWriteBatch();
+
   let exposed = 0;
   const modelHits = [];
   for (const r of results) {
@@ -648,7 +800,7 @@ export async function ingestDiscoveryBatch(env, batch) {
         country_code: r.country_code || null,
         asn: r.asn || null,
         answered: r.answered !== false,
-      });
+      }, writes);
       for (const m of models) {
         if (m.name) {
           modelHits.push({
@@ -666,7 +818,11 @@ export async function ingestDiscoveryBatch(env, batch) {
   // host changes no count, only the "when did we last re-verify anything"
   // stamp, and paying two KV operations per host for that is how a large batch
   // runs out of subrequests.
-  if (exposed) await bumpCorpus(env, "reverified_hosts", 0, new Date().toISOString());
+  if (exposed) await bumpCorpus(env, "reverified_hosts", 0, new Date().toISOString(), writes);
+
+  // Flush the staged aggregates. Must happen before the summary is returned so
+  // a caller that trusts the response also gets the counts it describes.
+  const flushed = await flushWriteBatch(env, writes);
 
   const statsKey = "stats:live";
   const stats = (await env.KV.get(statsKey, "json")) || {
@@ -691,6 +847,8 @@ export async function ingestDiscoveryBatch(env, batch) {
     await setIndexedObserved(env, observed, batch.run_meta?.observed_source || null);
   }
 
+  const spent = await chargeWriteBudget(env, flushed.puts + results.length);
+
   return {
     ingested: results.length,
     exposed,
@@ -698,6 +856,11 @@ export async function ingestDiscoveryBatch(env, batch) {
     // Reported rather than silently dropped: a runner whose exclusion list is
     // stale needs to find that out, and the count is the only signal it gets.
     refused_excluded: refused,
+    // Observability on the constraint that actually binds ingest size. A run
+    // that cannot see what it spent cannot be sized against the daily ceiling.
+    kv_puts: flushed.puts + results.length,
+    kv_puts_today: spent.used,
+    kv_budget: spent.budget,
   };
 }
 
