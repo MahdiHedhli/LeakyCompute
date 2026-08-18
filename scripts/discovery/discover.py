@@ -71,7 +71,11 @@ PROBE_USER_AGENT = "LeakyCompute-SafeProbe/1.0 (+defensive research; read-only G
 
 # Hard safety rails (cannot be overridden above these without editing code)
 HARD_MAX_TOTAL = 128
-PAGES_PER_RUN = 3
+# Pages walked per lane per run. Raised from 3 with the Freelancer plan: at
+# ~14 lanes this is ~140 query credits a run against a 10,000/month allowance,
+# so roughly 70 runs a month. The cursor carries position forward, so each run
+# walks further down the list rather than re-reading the top.
+PAGES_PER_RUN = 10
 HARD_MAX_RATE = 1.0  # probes/sec global absolute ceiling
 HARD_MIN_PREFIX = 28  # never expand wider than /28
 HARD_MAX_HOSTS_PER_ASN = 25

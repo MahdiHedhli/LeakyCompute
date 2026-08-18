@@ -867,7 +867,17 @@ async function handleDiscoveryIngest(request, env) {
     return json({ error: "invalid_json" }, 400, request, env);
   }
   const results = body.results || [];
-  if (!Array.isArray(results) || results.length === 0) {
+  if (!Array.isArray(results)) {
+    return json({ error: "results_required" }, 400, request, env);
+  }
+  // An empty batch is legitimate when the envelope still carries an observation.
+  // A run whose candidates were all skipped by the I-24 interval probed nothing
+  // yet still read what the index lists, and refusing it would make the public
+  // passive count a function of whether we happened to be due a probe.
+  const observedOnly =
+    results.length === 0 &&
+    (body.indexed_observed != null || body.run_meta?.indexed_observed != null);
+  if (results.length === 0 && !observedOnly) {
     return json({ error: "results_required" }, 400, request, env);
   }
   // Keep batches small: KV write budget + Worker CPU on free tier
