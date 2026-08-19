@@ -1,0 +1,90 @@
+name: Scheduled discovery
+
+# TWO RUNS A DAY, sized to fit the free-tier KV ceiling.
+#
+# NOT ENABLED YET — see docs/SECURITY.md I-23 and the note below. The schedule
+# block is present but commented out, so this only runs when a maintainer
+# triggers it by hand. Deciding the attribution question is what turns it on.
+#
+# I-23 requires "forward-and-reverse-confirmed PTR on every source address".
+# A GitHub-hosted runner has neither a stable address nor a PTR we control: an
+# operator who looks up the source IP finds GitHub, not this project. The
+# User-Agent still identifies us and /scanning still explains us, so the promise
+# the page makes holds — the promise the invariant makes does not.
+#
+# Resolve one way or the other before uncommenting:
+#   (a) amend I-23 to say attribution is the User-Agent plus /scanning, and that
+#       PTR applies only where we control the address; or
+#   (b) run from an address with a PTR we own, and keep I-23 as written.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_total:
+        description: "Host cap for this run (KV-safe default)"
+        default: "400"
+      dry_run:
+        description: "Dry run — pull and gate, send no packets"
+        type: boolean
+        default: false
+  # schedule:
+  #   # 02:10 and 14:10 UTC. Offset from the 04:17 retention sweep so the two
+  #   # never contend for the same KV budget window.
+  #   - cron: "10 2 * * *"
+  #   - cron: "10 14 * * *"
+
+concurrency:
+  # Two runs must never overlap: they would each read the probe clock before the
+  # other wrote to it, and both would consider the same hosts due.
+  group: leaky-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run discovery
+        env:
+          SHODAN_API_KEY: ${{ secrets.SHODAN_API_KEY }}
+          LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+          MAX_TOTAL: ${{ github.event.inputs.max_total || '400' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SHODAN_API_KEY:-}" ]; then
+            echo "SHODAN_API_KEY secret is not set — add it before enabling this."
+            exit 1
+          fi
+          MODE="--ingest"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then MODE="--dry-run"; fi
+          python3 -u scripts/discovery/run_multilane.py \
+            $MODE --rate 0.2 --max-total "$MAX_TOTAL" \
+            --output "discovery-run.json"
+
+      - name: Summarise
+        if: always()
+        run: |
+          # The gates' decisions are the interesting part of a run, not the
+          # host count — surface them where a maintainer will actually see them.
+          {
+            echo "### Discovery run"
+            echo '```'
+            grep -E 'I-5:|provenance:|exclusions:|interval \(14d\)|Probing|exposed=|kv_puts|final verification' \
+              discovery-run.log 2>/dev/null || echo "(no log captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload run record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-run
+          path: discovery-run.json
+          retention-days: 14

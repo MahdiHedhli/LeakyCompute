@@ -204,6 +204,16 @@
       // with a "now" attached to it.
       const idx = data.indexed_observed || {};
       $("indexed-hosts").textContent = fmt(idx.hosts);
+
+      // Every component of the composite, including the ones at zero. Censys
+      // shows "0 (future)" rather than being hidden: a source we mean to add
+      // should be visibly missing, so the reader can see the shape of the gap
+      // instead of taking the total on trust.
+      const src = idx.sources || {};
+      $("src-shodan").textContent = fmt(src.shodan);
+      $("src-censys").textContent = src.censys ? fmt(src.censys) : "0 (future)";
+      $("src-other").textContent = fmt(src.other);
+      $("src-user").textContent = fmt(src.user_submitted);
       $("indexed-sub").textContent =
         idx.note || "Counted from public index records. We sent these hosts nothing.";
       $("indexed-stamp").textContent = idx.last_observed_at

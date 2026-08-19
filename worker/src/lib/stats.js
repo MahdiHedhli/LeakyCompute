@@ -117,11 +117,23 @@ export async function publicStatsPayload(env, live) {
       note: "Listed as exposed in an archive-era catalog. Not re-verified, so it says nothing about today.",
     },
     indexed_observed: {
-      label: "Indexed, observed",
+      label: "Indexed now",
       hosts: corpus.indexed_observed_hosts || 0,
+      // Censys is declared at zero rather than omitted: a source we intend to
+      // add should be visibly absent, so the shape of what is missing is on the
+      // page instead of only in the roadmap.
+      sources: {
+        shodan: 0,
+        censys: 0,
+        other: 0,
+        user_submitted: 0,
+        ...(corpus.indexed_observed_sources || {}),
+      },
       source: corpus.indexed_observed_source || "public index records, counted not probed",
       last_observed_at: corpus.last_observed_at || null,
-      note: "Counted from public index records. We sent these hosts nothing (I-21).",
+      note:
+        "Counted from public index records and user-submitted requests. " +
+        "We sent these hosts nothing to arrive at this number (I-21).",
     },
     reverified: {
       label: "Re-verified",
