@@ -75,17 +75,26 @@
         </div>
       </div>
 
-      <p class="footnote" id="exposed-footnote">
-        <span class="ast">*</span> This is only what <strong>we have confirmed as
-        exposed</strong>, as of <span id="confirmed-asof">—</span>, and only within
-        the limits our own rules place on us: we probe a host only if a public
-        index already listed it or its owner asked us to, never more than once
-        per fortnight, never on a port outside a fixed allowlist, and never at
-        all if anyone has asked to be left alone. The true number is larger than
-        this one — necessarily so.
-        <a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md"
-           target="_blank" rel="noopener">Read the rules we hold ourselves to →</a>
-      </p>
+      <div class="footnote" id="methodology-note">
+        <p>
+          <span class="ast">*</span> <strong>Confirmed exposed</strong> counts only
+          what we verified ourselves, as of <span id="confirmed-asof">—</span>, and
+          only within the limits our own rules place on us: we probe a host only if
+          a public index already listed it or its owner asked us to, never more than
+          once per fortnight, never on a port outside a fixed allowlist, and never
+          at all if anyone has asked to be left alone. The true number is larger
+          than this one — necessarily so.
+        </p>
+        <p>
+          <strong>Current</strong> is counted, not probed — we read what public
+          indexes already publish, and sent these hosts nothing to arrive at that
+          figure (I-21). <strong>Research snapshot</strong> is a 2024-era catalog
+          listing we have not re-verified. The three measure different things and
+          are never summed.
+          <a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md"
+             target="_blank" rel="noopener">Read the rules we hold ourselves to →</a>
+        </p>
+      </div>
 
       <div class="exposure-block" id="exposure-block" hidden>
         <h3 class="mini-head">What the open endpoints allow</h3>

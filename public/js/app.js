@@ -216,8 +216,10 @@
       $("src-censys").textContent = fmt(src.censys);
       $("src-other").textContent = fmt(src.other);
       $("src-user").textContent = fmt(src.user_submitted);
-      $("indexed-sub").textContent =
-        idx.note || "Counted from public index records. We sent these hosts nothing.";
+      // Short in the card so the focal number is not competing with a
+      // paragraph; the full provenance sits in the methodology note below,
+      // where it can be read next to the other two numbers it contrasts with.
+      $("indexed-sub").textContent = "Counted from public records. Never probed (I-21).";
       $("indexed-stamp").textContent = idx.last_observed_at
         ? `as of ${stamp(idx.last_observed_at)}`
         : "as of —";
