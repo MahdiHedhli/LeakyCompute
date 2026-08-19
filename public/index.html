@@ -39,17 +39,30 @@
 
     <section class="hero">
       <h2>FIELD PULSE // three measurements, never summed</h2>
-      <p>
-        Three numbers with three different provenances. The archive is what a
-        2024-era catalog listed. The index snapshot is what public sources list
-        <em>right now</em>. The confirmed count is what we personally re-verified
-        under our own rules. Comparing them is the point; adding them would be a lie.
+      <p class="lede">
+        Ollama, Ray, Jupyter, and a dozen stacks like them are answering the whole
+        internet with nothing in front of them. Whoever finds one can spend your GPU,
+        read your models, and on some of them run code on your machine. LeakyCompute
+        counts how much of that is out there and lets you check your own address in
+        one click — no signup, nothing to type.
+      </p>
+      <p class="lede">
+        The three numbers below come from three different places: what a 2024 catalog
+        claimed, what public indexes list today, and what we confirmed ourselves under
+        rules we publish. They are meant to be read against each other. Adding them
+        together would mean nothing.
       </p>
       <div class="counters counters-3">
         <div class="card snapshot">
           <div class="label">Research snapshot · archive</div>
           <div class="value" id="snap-hosts">—</div>
           <div class="sub" id="snap-sub">Loading…</div>
+          <div class="sub src-attrib">
+            from
+            <a href="https://web.archive.org/web/20260727203031/https://stolencompute.com/"
+               target="_blank" rel="noopener noreferrer">stolencompute.com</a>
+            <span class="dim-note">(archived)</span>
+          </div>
           <div class="badge">models: <span id="snap-models">—</span></div>
         </div>
         <div class="card indexed focus">
