@@ -13,11 +13,12 @@ name: Scheduled discovery
 # blocks writes account-wide until 00:00 UTC, which would take the public
 # checker down with it — so the ceiling is not something to run at.
 #
-# KV_DAILY_PUT_BUDGET stays at 950, below the worst case on purpose. On a day
-# where both runs fill their cap the second is refused before it writes
-# anything: that costs a run, where crossing 1,000 would cost the account. In
-# practice the I-24 interval gate keeps actual probes well under the cap — run 3
-# put up 380 candidates and probed 204 — so a maximal day is the exception.
+# KV_DAILY_PUT_BUDGET is 990, so two full runs (~984) fit and the guard still
+# stops short of the 1,000 that would block writes account-wide. That is ~6 puts
+# of slack, so it only holds because the I-24 interval gate keeps real runs well
+# under the cap — run 3 put up 380 candidates and probed 204. Note the guard
+# counts ingest only: public self-checks write outside it, so a busy day on the
+# checker eats headroom the counter cannot see.
 
 on:
   workflow_dispatch:
