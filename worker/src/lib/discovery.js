@@ -13,6 +13,10 @@ const HIT_PREFIX = "discovery:hit:";
 const GEO_KEY = "stats:by_country";
 const ASN_KEY = "stats:by_asn";
 const STACK_KEY = "stats:by_stack";
+// Country x stack, keyed "DE|ollama". Separate by-country and by-stack maps
+// cannot answer "what is exposed in Germany" — the cross-tab is the only way,
+// and it is still an aggregate, so it stays publishable under I-14.
+const COUNTRY_STACK_KEY = "stats:by_country_stack";
 const CORPUS_KEY = "stats:corpus";
 const ATTEMPTS_KEY = "discovery:probe_attempts";
 const SWEEP_STATE_KEY = "discovery:sweep_cursor";
@@ -161,6 +165,21 @@ export async function recordExposedHost(env, hit, batch = null) {
       }
     }
     counted.stacks = [...countedStacks];
+
+    // Cross-tab maintained against the same markers as the two flat maps, so a
+    // host that moves country or gains a stack updates all three consistently
+    // rather than drifting apart over successive re-probes.
+    const prevPairs = new Set(counted.country_stacks || []);
+    const nextPairs = new Set(
+      [...countedStacks].map((st) => `${geoBucket}|${st}`)
+    );
+    for (const pair of prevPairs) {
+      if (!nextPairs.has(pair)) await bumpCounter(env, COUNTRY_STACK_KEY, pair, -1, batch);
+    }
+    for (const pair of nextPairs) {
+      if (!prevPairs.has(pair)) await bumpCounter(env, COUNTRY_STACK_KEY, pair, 1, batch);
+    }
+    counted.country_stacks = [...nextPairs];
     // Keyed off the record's own marker rather than off "is this the first
     // write". stats:corpus is newer than the corpus it counts, so gating on
     // first_seen left every pre-existing host permanently uncounted while
@@ -458,6 +477,9 @@ async function forgetRecord(env, rec, ip) {
   for (const s of stacks) {
     await bumpCounter(env, STACK_KEY, s, -1);
   }
+  for (const pair of counted?.country_stacks || []) {
+    await bumpCounter(env, COUNTRY_STACK_KEY, pair, -1);
+  }
   // No marker means we have no evidence this record was ever counted in, and
   // the corpus counter is younger than most of the corpus. Decrementing on a
   // guess is how the published re-verified figure ended up drifting toward zero
@@ -612,6 +634,11 @@ export async function setIndexedObserved(env, count, source = null) {
   corpus.indexed_observed_source = source || corpus.indexed_observed_source || null;
   corpus.last_observed_at = new Date().toISOString();
   await env.KV.put(CORPUS_KEY, JSON.stringify(corpus));
+}
+
+export async function getCountryStackStats(env) {
+  if (!env.KV) return {};
+  return (await env.KV.get(COUNTRY_STACK_KEY, "json")) || {};
 }
 
 export async function getGeoStats(env) {

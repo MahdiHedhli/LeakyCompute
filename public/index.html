@@ -38,26 +38,49 @@
     </header>
 
     <section class="hero">
-      <h2>FIELD PULSE // dual counters</h2>
+      <h2>FIELD PULSE // three measurements, never summed</h2>
       <p>
-        Public instrument for defenders. We show an archive-era <strong>research snapshot</strong>
-        (filtered STOLEN COMPUTE catalog seed) alongside <strong>live instrumented</strong>
-        counts from voluntary self-checks and researcher-owned scans.
+        Three numbers with three different provenances. The archive is what a
+        2024-era catalog listed. The index snapshot is what public sources list
+        <em>right now</em>. The confirmed count is what we personally re-verified
+        under our own rules. Comparing them is the point; adding them would be a lie.
       </p>
-      <div class="counters">
+      <div class="counters counters-3">
         <div class="card snapshot">
-          <div class="label">Research snapshot · hosts</div>
+          <div class="label">Research snapshot · archive</div>
           <div class="value" id="snap-hosts">—</div>
           <div class="sub" id="snap-sub">Loading…</div>
           <div class="badge">models: <span id="snap-models">—</span></div>
         </div>
-        <div class="card">
-          <div class="label">Live instrumented · exposed</div>
+        <div class="card indexed">
+          <div class="label">Shodan snapshot · indexed now</div>
+          <div class="value" id="indexed-hosts">—</div>
+          <div class="sub" id="indexed-sub">Loading…</div>
+          <div class="badge" id="indexed-stamp">as of —</div>
+        </div>
+        <div class="card live">
+          <div class="label">Live instrumented · confirmed exposed<span class="ast">*</span></div>
           <div class="value" id="live-exposed">—</div>
           <div class="sub" id="live-sub">Loading…</div>
-          <div class="badge">checks: <span id="live-checks">—</span></div>
+          <div class="badge" title="Distinct hosts currently held. Observations count every time a host answered, so a host seen in two runs counts twice there and once here.">
+            <span id="live-observations">—</span> observations ·
+            <span id="live-checks">—</span> checks
+          </div>
         </div>
       </div>
+
+      <p class="footnote" id="exposed-footnote">
+        <span class="ast">*</span> This is only what <strong>we have confirmed as
+        exposed</strong>, as of <span id="confirmed-asof">—</span>, and only within
+        the limits our own rules place on us: we probe a host only if a public
+        index already listed it or its owner asked us to, never more than once
+        per fortnight, never on a port outside a fixed allowlist, and never at
+        all if anyone has asked to be left alone. The true number is larger than
+        this one — necessarily so.
+        <a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md"
+           target="_blank" rel="noopener">Read the rules we hold ourselves to →</a>
+      </p>
+
       <p class="hint" id="api-note" style="margin-top:14px">Connecting to API…</p>
       <div class="row" style="margin-top:10px">
         <button type="button" class="secondary" id="refresh-stats">Refresh stats</button>

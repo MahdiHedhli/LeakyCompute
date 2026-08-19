@@ -1127,9 +1127,26 @@ def main() -> int:
         interval_error = "self-test does not contact the admin API"
     else:
         try:
-            prior_hits = fetch_hits(args.api_base, args.admin_token)
-            # Both halves or neither: a partial clock is the fail-open case.
+            # The clock first, and on its own budget. It is timestamps only —
+            # 0.2s and 15KB against 47s and 92KB for the full hit store at 343
+            # records — and it is the half the interval gate cannot do without.
+            # Reading them together meant a slow corpus fetch could time out and
+            # take the gate down with it, which is what happened at 343 hosts:
+            # the run refused to probe because listing the corpus was slow, not
+            # because the clock was missing.
             attempts = fetch_probe_clock(args.api_base, args.admin_token)
+
+            # The corpus is only a *candidate source*. If it is too slow or
+            # unavailable, the run continues with lane candidates alone — that
+            # narrows what we probe, it never widens it, so it is safe to
+            # degrade here in a way the clock is not.
+            try:
+                prior_hits = fetch_hits(args.api_base, args.admin_token)
+            except IntervalDataUnavailable as e:
+                prior_hits = []
+                print(f"\n[!] corpus unavailable as a candidate source ({e})")
+                print("[!] continuing with index lanes only — the I-24 clock is intact.")
+
             last_seen = last_seen_map(prior_hits, attempts)
             print(
                 f"\n[+] hit store: {len(prior_hits)} host(s); "

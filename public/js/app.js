@@ -3,11 +3,72 @@
   const cfg = window.LEAKY_CONFIG || {};
   const $ = (id) => document.getElementById(id);
 
+  function stamp(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    // UTC on purpose: a timestamp that shifts with the reader's timezone is not
+    // a citable snapshot.
+    return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  }
+
   function fmt(n) {
     return Number(n || 0).toLocaleString("en-US");
   }
 
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[c]);
+  }
+
   let lastGeo = [];
+  let lastCountryStack = {};
+
+  // Regional-indicator pair from the ISO code — no flag assets to ship, and it
+  // degrades to the letters themselves on platforms without the glyphs.
+  function flagFor(cc) {
+    const c = String(cc || "").toUpperCase();
+    if (!/^[A-Z]{2}$/.test(c)) return "\u{1F3F3}";
+    return String.fromCodePoint(
+      0x1f1e6 + c.charCodeAt(0) - 65,
+      0x1f1e6 + c.charCodeAt(1) - 65
+    );
+  }
+
+  // Intl gives us every country name the browser already knows, so there is no
+  // code->name table to ship or keep current.
+  const REGION_NAMES = (() => {
+    try {
+      return new Intl.DisplayNames(["en"], { type: "region" });
+    } catch {
+      return null;
+    }
+  })();
+
+  function countryName(cc) {
+    const c = String(cc || "").toUpperCase();
+    if (c === "ZZ" || !/^[A-Z]{2}$/.test(c)) return "Unattributed";
+    try {
+      return REGION_NAMES?.of(c) || c;
+    } catch {
+      return c;
+    }
+  }
+
+  function stackSummary(cc) {
+    const stacks = lastCountryStack[String(cc || "").toUpperCase()];
+    if (!stacks) return "";
+    const parts = Object.entries(stacks)
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (!parts.length) return "";
+    return parts.map(([k, n]) => `${k} ${n}`).join(" · ");
+  }
 
   function renderGeo(rows, sortMode) {
     const el = $("geo-list");
@@ -18,24 +79,38 @@
     const sorted = rows.slice();
     if (sortMode === "name") {
       sorted.sort((a, b) =>
-        String(a.country || "").localeCompare(String(b.country || ""))
+        countryName(a.country).localeCompare(countryName(b.country))
       );
     } else {
       sorted.sort((a, b) => (b.count || 0) - (a.count || 0));
     }
     const max = Math.max(...sorted.map((r) => r.count || 0), 1);
+
     el.innerHTML = sorted
       .slice(0, 40)
       .map((r) => {
         const cc = r.country || "??";
         const n = r.count || 0;
         const pct = ((n / max) * 100).toFixed(0);
+        const name = countryName(cc);
+        const detail = stackSummary(cc);
+        // I-16: every one of these came from a probed host's metadata.
+        const title = esc(
+          detail
+            ? `${name} — ${n} exposed host${n === 1 ? "" : "s"}\n${detail}`
+            : `${name} — ${n} exposed host${n === 1 ? "" : "s"}`
+        );
         return (
-          `<div style="display:grid;grid-template-columns:48px 1fr 40px;gap:8px;align-items:center;margin:4px 0;font-size:12px">` +
-          `<span style="color:var(--cyan)">${cc}</span>` +
-          `<span style="background:var(--panel2);border-radius:4px;height:8px;overflow:hidden">` +
-          `<span style="display:block;height:100%;width:${pct}%;background:linear-gradient(90deg,var(--cyan),var(--amber))"></span></span>` +
-          `<span style="text-align:right;color:var(--dim)">${fmt(n)}</span></div>`
+          `<div class="geo-row" tabindex="0" title="${title}" ` +
+          `aria-label="${title}">` +
+          `<span class="geo-flag" aria-hidden="true">${flagFor(cc)}</span>` +
+          `<span class="geo-cc">${esc(cc)}</span>` +
+          `<span class="geo-bar"><span style="width:${pct}%"></span></span>` +
+          `<span class="geo-n">${fmt(n)}</span>` +
+          `<span class="geo-pop"><strong>${esc(name)}</strong>` +
+          (detail ? `<span class="geo-pop-detail">${esc(detail)}</span>` : "") +
+          `</span>` +
+          `</div>`
         );
       })
       .join("");
@@ -56,21 +131,46 @@
       const res = await fetch(`${cfg.API_BASE}/v1/stats`, { credentials: "omit" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      snapVal.textContent = fmt(data.research_snapshot?.hosts);
-      $("snap-models").textContent = fmt(data.research_snapshot?.models);
-      liveVal.textContent = fmt(data.live_instrumented?.exposed_total);
-      $("live-checks").textContent = fmt(data.live_instrumented?.checks_total);
+
+      // Archive
+      snapVal.textContent = fmt(data.archive_snapshot?.hosts ?? data.research_snapshot?.hosts);
+      $("snap-models").textContent = fmt(
+        data.archive_snapshot?.models ?? data.research_snapshot?.models
+      );
       snapSub.textContent =
-        data.research_snapshot?.note || "Archive-era filtered seed.";
-      liveSub.textContent =
-        data.live_instrumented?.note ||
-        "Voluntary self-checks + multi-lane discovery.";
-      apiNote.textContent = `API ok · updated ${data.updated_at || "—"}`;
+        data.archive_snapshot?.note || "Archive-era filtered seed. Not re-verified.";
+
+      // Shodan snapshot — timestamped, because "indexed now" is only meaningful
+      // with a "now" attached to it.
+      const idx = data.indexed_observed || {};
+      $("indexed-hosts").textContent = fmt(idx.hosts);
+      $("indexed-sub").textContent =
+        idx.note || "Counted from public index records. We sent these hosts nothing.";
+      $("indexed-stamp").textContent = idx.last_observed_at
+        ? `as of ${stamp(idx.last_observed_at)}`
+        : "as of —";
+
+      // Confirmed exposed
+      const rev = data.reverified || {};
+      // Distinct hosts, not observations. exposed_total is cumulative and counts
+      // a host once per run it answered in, so it drifts above the number of
+      // machines that exist — fine as a secondary figure, wrong as the headline
+      // under a claim that says "confirmed exposed".
+      liveVal.textContent = fmt(rev.hosts);
+      $("live-observations").textContent = fmt(data.live_instrumented?.exposed_total);
+      $("live-checks").textContent = fmt(data.live_instrumented?.checks_total);
+      liveSub.textContent = "Distinct hosts we re-verified with a read-only GET.";
+      $("confirmed-asof").textContent = stamp(
+        rev.last_reverified_at || data.live_instrumented?.last_check_at || data.updated_at
+      );
+
+      apiNote.textContent = `API ok · updated ${stamp(data.updated_at) || "—"}`;
       apiNote.dataset.state = "ok";
+
       lastGeo = data.geography?.by_country || [];
+      lastCountryStack = data.geography?.by_country_stack || {};
       $("geo-note").textContent =
-        data.geography?.note ||
-        "Unique re-verified hosts · sorted · no raw IPs";
+        data.geography?.note || "Unique re-verified hosts · sorted · no raw IPs";
       renderGeo(lastGeo, $("geo-sort").value);
     } catch (err) {
       apiNote.textContent =
@@ -84,16 +184,6 @@
   // Report content includes strings echoed from the probed host (versions,
   // model names). In override mode that host is attacker-controlled, so
   // everything interpolated into markup goes through here first.
-  function esc(s) {
-    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    })[c]);
-  }
-
   const SEV_LABEL = {
     critical: "CRITICAL",
     high: "HIGH",
