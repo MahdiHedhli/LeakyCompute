@@ -78,6 +78,17 @@
         we send to a host carries it, whether it came from the public checker or from
         our background re-verification.
       </p>
+      <p>
+        <strong>Where our probes come from.</strong> The public checker runs on
+        Cloudflare Workers. Background re-verification runs from GitHub-hosted
+        Actions runners and from maintainer systems. None of those are addresses
+        we own, so a reverse lookup on the source IP will not name this project —
+        it will name Cloudflare or GitHub, alongside unrelated traffic from the
+        same shared pools. The User-Agent is the identifier to match on, and this
+        page is what it points to. If we ever move probing onto infrastructure we
+        control, that address will carry a matching forward-and-reverse DNS
+        record and this section will say so.
+      </p>
     </section>
 
     <section class="panel">

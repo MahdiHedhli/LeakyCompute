@@ -57,7 +57,7 @@ CORPUS_EXPIRY_DAYS = "180"
 # writes account-wide until 00:00 UTC. Ingest refuses before its first write
 # rather than failing partway and leaving records without the aggregates that
 # describe them. Raise this on a paid plan.
-KV_DAILY_PUT_BUDGET = "900"
+KV_DAILY_PUT_BUDGET = "950"
 # I-27: days between the first notification attempt and publication of any
 # host-identifying detail. Aggregates are not gated by this window.
 DISCLOSURE_WINDOW_DAYS = "90"

@@ -76,28 +76,35 @@ access. Refusals are logged for abuse review. A requester may only attest for
 address space they control; requests naming third-party space are refused and
 logged, not silently dropped.
 
-**I-23. Our probes are attributable.** A single identifiable User-Agent
-(`LeakyCompute-SafeProbe/*`), forward-and-reverse-confirmed PTR on every source
-address, and a public page at `/scanning` explaining who we are, what we send,
-and how to opt out. An operator who sees us in their logs must be able to find
-out what we are in one search.
+**I-23 (amended 2026-08-19). Our probes are attributable.** A single identifiable
+User-Agent (`LeakyCompute-SafeProbe/*`) on every request, and a public page at
+`/scanning` that names it, states exactly what we send, lists where our probes
+originate, and offers a one-click opt-out. Where we control the source address,
+it carries a forward-and-reverse-confirmed PTR. Where we do not — CI runners,
+maintainer machines — `/scanning` says so plainly rather than implying a lookup
+that would not resolve to us. An operator who sees us in their logs must be able
+to find out what we are in one search.
 
-**Open against I-23 (2026-08-19).** The PTR clause has never actually held: every
-run so far went out from a maintainer's laptop, which has no PTR we control.
-Automating on a GitHub-hosted runner does not introduce the gap, it widens it —
-an operator looking up the source address would find GitHub rather than this
-project, and shared runner addresses mean the lookup implicates unrelated
-traffic too. `.github/workflows/scheduled-discovery.yml` is therefore written
-but left on manual trigger. Two ways out, and the choice is a constitution
-decision rather than a configuration one:
-
-- **Amend I-23** so attribution is the User-Agent plus `/scanning`, with PTR
-  required only where we control the address. Honest, and matches what the page
-  already promises.
-- **Keep I-23 and move the probe source** to an address with a PTR we own, then
-  enable the schedule.
-
-Until one is chosen, scheduled probing stays off.
+> **Amendment.** The original clause required a confirmed PTR on *every* source
+> address.
+>
+> **Reason.** It was never true. Every run to date went out from a maintainer's
+> laptop with no PTR we control, and scheduling on GitHub-hosted runners widens
+> that: an operator resolving the address finds GitHub, and the shared runner
+> pool means the lookup implicates unrelated traffic. An invariant that has never
+> held is worse than one scoped to what we actually do — it leaves a reader
+> unable to tell which clauses are load-bearing.
+>
+> **Compensating control.** The User-Agent becomes the sole identifier and is
+> machine-checked (`probes carry the agent the public page names`, `every agent
+> this project probes under is attributable to it`). `/scanning` gains an
+> explicit statement of where probes originate, so the operator's one search
+> lands on a page that explains the traffic rather than on a WHOIS record that
+> does not. The removal form is unchanged and remains the escape hatch.
+>
+> **What this does not license.** The PTR requirement still binds any address we
+> do control. Moving probes onto owned infrastructure re-engages it; it does not
+> become optional.
 
 **I-24. Probe rate is bounded per target, not per run.** At most one probe cycle
 per host per 14 days; per-/24 and per-ASN concurrency ceilings; global rate
