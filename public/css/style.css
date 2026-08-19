@@ -376,3 +376,17 @@ label.check input { margin-top: 3px; }
 }
 .src-split dt { color: var(--dim); }
 .src-split dd { color: var(--txt); font-variant-numeric: tabular-nums; }
+
+/* --- the card the page is actually about --------------------------- */
+.card.focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 1px rgba(255, 107, 107, 0.25), 0 0 34px rgba(255, 107, 107, 0.14);
+}
+.card.focus .label { color: var(--red); }
+.card.indexed.focus .value {
+  color: var(--red);
+  text-shadow: 0 0 26px rgba(255, 107, 107, 0.55), 0 0 8px rgba(255, 107, 107, 0.35);
+}
+/* Sits next to the source name, not in the value column, so the numbers on the
+   right stay a straight column. */
+.src-split .dim-note { color: var(--dim); opacity: 0.75; font-size: 10.5px; }
