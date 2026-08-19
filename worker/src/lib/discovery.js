@@ -664,10 +664,18 @@ export async function listHits(env, { limit = 500, sort = "last_seen" } = {}) {
   if (!env.KV) return [];
   const index = (await env.KV.get(HITS_INDEX, "json")) || [];
   const ips = (Array.isArray(index) ? index : []).slice(-Math.min(limit, MAX_INDEX));
+
+  // Read in parallel chunks. One await per record is ~140ms of KV latency each,
+  // so 343 records took 47 seconds and the runner's fetch timed out — which
+  // took the corpus out as a candidate source entirely. Chunked so a large
+  // corpus does not open hundreds of concurrent subrequests at once.
+  const CHUNK = 40;
   const out = [];
-  for (const ip of ips) {
-    const row = await env.KV.get(`${HIT_PREFIX}${ip}`, "json");
-    if (row) out.push(row);
+  for (let i = 0; i < ips.length; i += CHUNK) {
+    const rows = await Promise.all(
+      ips.slice(i, i + CHUNK).map((ip) => env.KV.get(`${HIT_PREFIX}${ip}`, "json"))
+    );
+    for (const row of rows) if (row) out.push(row);
   }
   if (sort === "country") {
     out.sort((a, b) =>
