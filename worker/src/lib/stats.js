@@ -93,8 +93,10 @@ export async function publicStatsPayload(env, live) {
   const snapshot_models = parseInt(env.SNAPSHOT_MODELS || "0", 10) || 0;
   const snapshot_hosts = parseInt(env.SNAPSHOT_HOSTS || "0", 10) || 0;
   // lazy import to avoid circular issues at module init
-  const { getGeoStats, getCorpusCounts, RETENTION_DAYS } = await import("./discovery.js");
+  const { getGeoStats, getCorpusCounts, getCountryStackStats, RETENTION_DAYS } =
+    await import("./discovery.js");
   const geo = await getGeoStats(env);
+  const countryStack = await getCountryStackStats(env);
   const corpus = await getCorpusCounts(env);
   return {
     // Spec §4: three provenance-separated numbers, never summed. They answer
@@ -158,6 +160,14 @@ export async function publicStatsPayload(env, live) {
       by_country: geo.by_country || [],
       by_asn: (geo.by_asn || []).slice(0, 20),
       by_stack: geo.by_stack || [],
+      // Country x stack, so the UI can answer "what is exposed here" on hover
+      // without another request. Aggregate counts only — no addresses (I-14).
+      by_country_stack: Object.entries(countryStack).reduce((acc, [pair, n]) => {
+        const [cc, stack] = String(pair).split("|");
+        if (!cc || !stack || !(n > 0)) return acc;
+        (acc[cc] ||= {})[stack] = n;
+        return acc;
+      }, {}),
     },
     updated_at: live.updated_at || new Date().toISOString(),
   };
