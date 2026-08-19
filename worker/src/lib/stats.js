@@ -93,10 +93,12 @@ export async function publicStatsPayload(env, live) {
   const snapshot_models = parseInt(env.SNAPSHOT_MODELS || "0", 10) || 0;
   const snapshot_hosts = parseInt(env.SNAPSHOT_HOSTS || "0", 10) || 0;
   // lazy import to avoid circular issues at module init
-  const { getGeoStats, getCorpusCounts, getCountryStackStats, RETENTION_DAYS } =
+  const { getGeoStats, getCorpusCounts, getCountryStackStats, getVulnSummary, RETENTION_DAYS } =
     await import("./discovery.js");
+  const { exposureClassCounts } = await import("./exposure.js");
   const geo = await getGeoStats(env);
   const countryStack = await getCountryStackStats(env);
+  const vulnSummary = await getVulnSummary(env);
   const corpus = await getCorpusCounts(env);
   return {
     // Spec §4: three provenance-separated numbers, never summed. They answer
@@ -169,6 +171,12 @@ export async function publicStatsPayload(env, live) {
         return acc;
       }, {}),
     },
+    // What each open endpoint enables. Derived from by_stack, so it covers the
+    // whole corpus rather than the minority that discloses a version.
+    exposure: exposureClassCounts(geo.by_stack || []),
+    // Secondary, and labelled with its own denominator: only ~1 host in 8
+    // publishes a version, so this cannot describe the corpus.
+    known_cves: vulnSummary,
     updated_at: live.updated_at || new Date().toISOString(),
   };
 }

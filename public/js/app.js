@@ -70,6 +70,66 @@
     return parts.map(([k, n]) => `${k} ${n}`).join(" · ");
   }
 
+
+  const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+
+  function renderExposure(exposure, cves) {
+    const block = $("exposure-block");
+    const wrap = $("exposure-bubbles");
+    const classes = exposure?.classes || [];
+    if (!classes.length) {
+      block.hidden = true;
+      return;
+    }
+    block.hidden = false;
+
+    // Severity first, then size — a critical class must not sink below a bigger
+    // medium one just because more hosts run it.
+    const sorted = classes.slice().sort((a, b) => {
+      const s = (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9);
+      return s !== 0 ? s : b.hosts - a.hosts;
+    });
+
+    wrap.innerHTML = sorted
+      .map((c) => {
+        const title = esc(`${c.detail}\n\n${c.stacks}`);
+        return (
+          `<div class="bubble sev-${esc(c.severity)}" tabindex="0" ` +
+          `title="${title}" aria-label="${esc(c.label)}: ${c.hosts} hosts. ${title}">` +
+          `<span class="bubble-n">${fmt(c.hosts)}</span>` +
+          `<span class="bubble-label">${esc(c.label)}</span>` +
+          `<span class="bubble-sev">${esc(c.severity)}</span>` +
+          `<span class="bubble-pop"><strong>${esc(c.label)}</strong>` +
+          `<span class="bubble-pop-detail">${esc(c.detail)}</span>` +
+          `<span class="bubble-pop-stacks">${esc(c.stacks)}</span></span>` +
+          `</div>`
+        );
+      })
+      .join("");
+
+    $("exposure-note").textContent = exposure.note || "";
+
+    // The CVE line always carries its denominator. Only a minority of hosts
+    // disclose a version, so a bare count here would imply coverage we do not
+    // have — which is the mistake this whole row is arranged to avoid.
+    const line = $("cve-line");
+    if (!cves || !cves.hosts_with_version) {
+      line.hidden = true;
+      return;
+    }
+    const top = (cves.top_cves || [])
+      .slice(0, 5)
+      .map((v) => `${v.id} (${v.hosts})`)
+      .join(" · ");
+    line.hidden = false;
+    line.textContent =
+      `Known advisories: ${fmt(cves.hosts_with_known_cve)} of the ` +
+      `${fmt(cves.hosts_with_version)} hosts that disclose a version run a release ` +
+      `with a published CVE${top ? ` — ${top}` : ""}. ` +
+      `Running an affected version is not the same as being exploitable: we report ` +
+      `reachability, never demonstrated impact.`;
+  }
+
   function renderGeo(rows, sortMode) {
     const el = $("geo-list");
     if (!rows || !rows.length) {
@@ -166,6 +226,8 @@
 
       apiNote.textContent = `API ok · updated ${stamp(data.updated_at) || "—"}`;
       apiNote.dataset.state = "ok";
+
+      renderExposure(data.exposure, data.known_cves);
 
       lastGeo = data.geography?.by_country || [];
       lastCountryStack = data.geography?.by_country_stack || {};

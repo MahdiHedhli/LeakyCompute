@@ -774,6 +774,88 @@ async function chargeWriteBudget(env, puts) {
   return { used: used + 1, budget };
 }
 
+/* ------------------------------------------------------------------ */
+/* Known-CVE summary (secondary to exposure classes)                   */
+/* ------------------------------------------------------------------ */
+
+const VULN_SUMMARY_KEY = "stats:vuln_summary";
+
+export async function getVulnSummary(env) {
+  if (!env.KV) return null;
+  return (await env.KV.get(VULN_SUMMARY_KEY, "json")) || null;
+}
+
+/**
+ * Aggregate known CVEs across the hosts that disclose a version.
+ *
+ * Deliberately a *secondary* figure. Only about one host in eight publishes a
+ * version string, so this can never describe the corpus the way the exposure
+ * classes do — and a CVE count that silently covered an eighth of the hosts
+ * while looking like it covered all of them is the failure this project exists
+ * to avoid. The denominator travels with the number for that reason.
+ *
+ * Counts hosts running a version with a published advisory. It does not mean
+ * exploitable: we never test, and several of these services are unauthenticated
+ * by design, where no upgrade changes anything (I-3).
+ *
+ * Queried per distinct (stack, version), not per host, and OSV responses are
+ * KV-cached, so a run costs a handful of lookups rather than one per record.
+ */
+export async function summariseVulns(env, results, { queryOsv, packages } = {}) {
+  if (!env.KV || !queryOsv || !packages) return null;
+
+  const pairs = new Map(); // "stack|version" -> host count
+  let withVersion = 0;
+  for (const r of results || []) {
+    if (!r?.exposed || !r.version || !r.stack) continue;
+    withVersion++;
+    const key = `${r.stack}|${r.version}`;
+    pairs.set(key, (pairs.get(key) || 0) + 1);
+  }
+  if (!pairs.size) return null;
+
+  const byCve = new Map();
+  let hostsWithCve = 0;
+  let pairsChecked = 0;
+
+  for (const [key, hosts] of pairs) {
+    const [stack, version] = key.split("|");
+    const pkg = packages[stack];
+    if (!pkg) continue; // OSV covers a subset of the stacks we probe
+    pairsChecked++;
+    let vulns = [];
+    try {
+      vulns = await queryOsv(pkg, version, env);
+    } catch {
+      continue; // never fail an ingest over an enrichment lookup
+    }
+    if (!Array.isArray(vulns) || !vulns.length) continue;
+    hostsWithCve += hosts;
+    for (const v of vulns) {
+      const id = v?.id || v?.aliases?.[0];
+      if (!id) continue;
+      byCve.set(id, (byCve.get(id) || 0) + hosts);
+    }
+  }
+
+  const summary = {
+    hosts_with_version: withVersion,
+    hosts_with_known_cve: hostsWithCve,
+    version_pairs_checked: pairsChecked,
+    top_cves: [...byCve.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([id, hosts]) => ({ id, hosts })),
+    updated_at: new Date().toISOString(),
+    note:
+      "Counted only across hosts that disclose a version, and only for stacks " +
+      "OSV indexes. Running an affected version is not the same as being " +
+      "exploitable — we report reachability, never demonstrated impact.",
+  };
+  await env.KV.put(VULN_SUMMARY_KEY, JSON.stringify(summary));
+  return summary;
+}
+
 export async function ingestDiscoveryBatch(env, batch) {
   /**
    * results: [{ ip, port, exposed, version, models, source, stack, country, country_code, asn, ... }]
@@ -880,6 +962,14 @@ export async function ingestDiscoveryBatch(env, batch) {
   const observed = batch.indexed_observed ?? batch.run_meta?.indexed_observed;
   if (observed != null) {
     await setIndexedObserved(env, observed, batch.run_meta?.observed_source || null);
+  }
+
+  // Best-effort enrichment: never let a lookup failure cost us the ingest.
+  try {
+    const { queryOsv, OSV_PACKAGES } = await import("./osv.js");
+    await summariseVulns(env, results, { queryOsv, packages: OSV_PACKAGES });
+  } catch {
+    // leave the previous summary in place rather than blanking it
   }
 
   const spent = await chargeWriteBudget(env, flushed.puts + results.length);
