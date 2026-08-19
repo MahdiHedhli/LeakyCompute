@@ -1,37 +1,39 @@
 name: Scheduled discovery
 
-# TWO RUNS A DAY, sized to fit the free-tier KV ceiling.
+# TWO RUNS A DAY, sized to the free-tier KV ceiling.
 #
-# NOT ENABLED YET — see docs/SECURITY.md I-23 and the note below. The schedule
-# block is present but commented out, so this only runs when a maintainer
-# triggers it by hand. Deciding the attribution question is what turns it on.
+# Enabled 2026-08-19 under amended I-23: attribution is the User-Agent plus the
+# /scanning page, with PTR required only where we control the source address.
+# A GitHub-hosted runner has neither a stable address nor a PTR we own, and
+# /scanning now says so rather than implying a lookup that would not resolve
+# to us.
 #
-# I-23 requires "forward-and-reverse-confirmed PTR on every source address".
-# A GitHub-hosted runner has neither a stable address nor a PTR we control: an
-# operator who looks up the source IP finds GitHub, not this project. The
-# User-Agent still identifies us and /scanning still explains us, so the promise
-# the page makes holds — the promise the invariant makes does not.
+# Budget arithmetic, because it is tight: ~1.09 KV puts per probed host, so
+# 2 x 445 is ~984 puts against a free-tier hard limit of 1,000. Crossing that
+# blocks writes account-wide until 00:00 UTC, which would take the public
+# checker down with it — so the ceiling is not something to run at.
 #
-# Resolve one way or the other before uncommenting:
-#   (a) amend I-23 to say attribution is the User-Agent plus /scanning, and that
-#       PTR applies only where we control the address; or
-#   (b) run from an address with a PTR we own, and keep I-23 as written.
+# KV_DAILY_PUT_BUDGET stays at 950, below the worst case on purpose. On a day
+# where both runs fill their cap the second is refused before it writes
+# anything: that costs a run, where crossing 1,000 would cost the account. In
+# practice the I-24 interval gate keeps actual probes well under the cap — run 3
+# put up 380 candidates and probed 204 — so a maximal day is the exception.
 
 on:
   workflow_dispatch:
     inputs:
       max_total:
         description: "Host cap for this run (KV-safe default)"
-        default: "400"
+        default: "445"
       dry_run:
         description: "Dry run — pull and gate, send no packets"
         type: boolean
         default: false
-  # schedule:
-  #   # 02:10 and 14:10 UTC. Offset from the 04:17 retention sweep so the two
-  #   # never contend for the same KV budget window.
-  #   - cron: "10 2 * * *"
-  #   - cron: "10 14 * * *"
+  schedule:
+    # 02:10 and 14:10 UTC. Offset from the 04:17 retention sweep so the two
+    # never contend for the same KV budget window.
+    - cron: "10 2 * * *"
+    - cron: "10 14 * * *"
 
 concurrency:
   # Two runs must never overlap: they would each read the probe clock before the
@@ -55,7 +57,7 @@ jobs:
           SHODAN_API_KEY: ${{ secrets.SHODAN_API_KEY }}
           LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
           LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
-          MAX_TOTAL: ${{ github.event.inputs.max_total || '400' }}
+          MAX_TOTAL: ${{ github.event.inputs.max_total || '445' }}
         run: |
           set -euo pipefail
           if [ -z "${SHODAN_API_KEY:-}" ]; then
