@@ -265,7 +265,7 @@ label.check input { margin-top: 3px; }
    bare `.footnote` is (0,1,0), so the 62ch readability cap on body copy won
    and pinned this to 466px. The footnote is a caption for the counter row, not
    body copy, so it spans the full grid instead. */
-.hero p.footnote {
+.hero .footnote {
   width: 100%; max-width: none; box-sizing: border-box;
   margin-top: 14px; padding: 12px 16px;
   border-left: 2px solid var(--amber);
@@ -390,3 +390,13 @@ label.check input { margin-top: 3px; }
 /* Sits next to the source name, not in the value column, so the numbers on the
    right stay a straight column. */
 .src-split .dim-note { color: var(--dim); opacity: 0.75; font-size: 10.5px; }
+
+/* The methodology note carries two paragraphs now: the asterisk on the confirmed
+   number, then how the other two were arrived at. Spaced so it reads as one
+   block rather than two stacked warnings. */
+.footnote p { margin: 0; }
+.footnote p + p {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.footnote p { max-width: none; }
