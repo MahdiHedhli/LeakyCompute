@@ -91,7 +91,10 @@ a:hover { text-decoration: underline; color: var(--amber); }
   padding: 16px;
 }
 .card .label {
-  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  /* 0.1em spacing pushed the dated label to 239px inside a 221px card. 0.05em
+     still missed by a single pixel; 0.03em leaves ~5px of margin while keeping
+     the spaced-caps look. */
+  font-size: 11px; letter-spacing: 0.03em; text-transform: uppercase;
   color: var(--dim); margin-bottom: 8px;
 }
 .card .value {
@@ -408,3 +411,6 @@ label.check input { margin-top: 3px; }
 .hero p.lede + p.lede { margin-top: 10px; }
 .src-attrib { font-size: 11.5px; }
 .src-attrib a { border-bottom: 1px dotted var(--line2); }
+/* A date is one token to a reader. If a label ever does wrap it should break at
+   the separator, never mid-date as "(07-27-" / "2026)". */
+.nowrap { white-space: nowrap; }
