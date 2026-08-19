@@ -14,6 +14,10 @@ ALLOWED_ORIGINS = "http://localhost:8787,http://127.0.0.1:8787,http://localhost:
 # Research snapshot (archive seed) — dual counter "C"
 SNAPSHOT_MODELS = "1864"
 SNAPSHOT_HOSTS = "19348"
+# Wayback capture date of the catalog the seed came from. The capture is the only
+# date the source carries — the catalog itself is undated, so this is not a claim
+# about when the hosts were observed.
+SNAPSHOT_AS_OF = "2026-07-27"
 # Rate limits (public self-check)
 RL_OWN_WINDOW_SEC = "900"
 RL_OWN_MAX = "3"
