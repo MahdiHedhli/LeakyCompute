@@ -82,6 +82,23 @@ address, and a public page at `/scanning` explaining who we are, what we send,
 and how to opt out. An operator who sees us in their logs must be able to find
 out what we are in one search.
 
+**Open against I-23 (2026-08-19).** The PTR clause has never actually held: every
+run so far went out from a maintainer's laptop, which has no PTR we control.
+Automating on a GitHub-hosted runner does not introduce the gap, it widens it —
+an operator looking up the source address would find GitHub rather than this
+project, and shared runner addresses mean the lookup implicates unrelated
+traffic too. `.github/workflows/scheduled-discovery.yml` is therefore written
+but left on manual trigger. Two ways out, and the choice is a constitution
+decision rather than a configuration one:
+
+- **Amend I-23** so attribution is the User-Agent plus `/scanning`, with PTR
+  required only where we control the address. Honest, and matches what the page
+  already promises.
+- **Keep I-23 and move the probe source** to an address with a PTR we own, then
+  enable the schedule.
+
+Until one is chosen, scheduled probing stays off.
+
 **I-24. Probe rate is bounded per target, not per run.** At most one probe cycle
 per host per 14 days; per-/24 and per-ASN concurrency ceilings; global rate
 ceiling enforced in the runner. Re-verification is a slow background process,

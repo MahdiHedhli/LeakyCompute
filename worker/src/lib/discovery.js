@@ -626,12 +626,24 @@ export async function getCorpusCounts(env) {
  * stored per host, so there is no record whose deletion could decrement it, and
  * accumulating would inflate it every time the same lane is counted again.
  */
-export async function setIndexedObserved(env, count, source = null) {
+export async function setIndexedObserved(env, count, source = null, sources = null) {
   const n = Number(count);
   if (!env.KV || !Number.isFinite(n) || n < 0) return;
   const corpus = (await env.KV.get(CORPUS_KEY, "json")) || {};
   corpus.indexed_observed_hosts = Math.floor(n);
   corpus.indexed_observed_source = source || corpus.indexed_observed_source || null;
+  // Per-source breakdown. The headline is a composite, so every component has
+  // to be visible or the total stops being auditable — someone reading "18,686
+  // indexed" must be able to see which index said what, and which of it we were
+  // asked to look at rather than found listed.
+  if (sources && typeof sources === "object") {
+    const clean = {};
+    for (const [k, v] of Object.entries(sources)) {
+      const num = Number(v);
+      if (Number.isFinite(num) && num >= 0) clean[k] = Math.floor(num);
+    }
+    if (Object.keys(clean).length) corpus.indexed_observed_sources = clean;
+  }
   corpus.last_observed_at = new Date().toISOString();
   await env.KV.put(CORPUS_KEY, JSON.stringify(corpus));
 }
@@ -961,7 +973,12 @@ export async function ingestDiscoveryBatch(env, batch) {
   // can never be read as a larger number of hosts we touched.
   const observed = batch.indexed_observed ?? batch.run_meta?.indexed_observed;
   if (observed != null) {
-    await setIndexedObserved(env, observed, batch.run_meta?.observed_source || null);
+    await setIndexedObserved(
+      env,
+      observed,
+      batch.run_meta?.observed_source || null,
+      batch.indexed_observed_sources ?? batch.run_meta?.indexed_observed_sources ?? null
+    );
   }
 
   // Best-effort enrichment: never let a lookup failure cost us the ingest.

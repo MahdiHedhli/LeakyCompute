@@ -1117,7 +1117,14 @@ def main() -> int:
 
     # I-22(b): approved requests are the only way a host that no index lists can
     # become a target, and only inside the space its owner attested for.
-    all_cands.extend(candidates_for_requests(approved, 11434, "/api/ps"))
+    operator_cands = candidates_for_requests(approved, 11434, "/api/ps")
+    all_cands.extend(operator_cands)
+    # I-22 path (b): hosts an owner asked us to check. Counted separately from
+    # index listings because the entitlement is different, even though both feed
+    # the same headline.
+    approved_host_count = len({c["ip"] for c in operator_cands if c.get("ip")})
+    if approved_host_count:
+        print(f"[+] operator-requested hosts: {approved_host_count}")
 
     # --- I-24: the hit store is both a candidate source and the last-seen clock
     prior_hits: list[dict] = []
@@ -1372,7 +1379,17 @@ def main() -> int:
         # What the public index lists. This is the key the Worker publishes as
         # indexed_observed, so it has to be the population figure — sending the
         # pulled count here is how that counter ended up measuring our budget.
-        "indexed_observed": sum(index_listed.values()) or indexed_observed,
+        "indexed_observed": (sum(index_listed.values()) or indexed_observed)
+        + approved_host_count,
+        # Per-source split for the public card. The headline is a composite, so
+        # each component ships with it — a total nobody can decompose is a total
+        # nobody can check.
+        "indexed_observed_sources": {
+            "shodan": sum(index_listed.values()) or indexed_observed,
+            "censys": 0,
+            "other": 0,
+            "user_submitted": approved_host_count,
+        },
         "observed_source": (
             "public index records matching our lane fingerprints, counted not probed"
         ),
