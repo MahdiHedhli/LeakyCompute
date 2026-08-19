@@ -211,7 +211,9 @@
       // instead of taking the total on trust.
       const src = idx.sources || {};
       $("src-shodan").textContent = fmt(src.shodan);
-      $("src-censys").textContent = src.censys ? fmt(src.censys) : "0 (future)";
+      // "(future)" now lives beside the label, so the value column stays a
+      // clean column of numbers.
+      $("src-censys").textContent = fmt(src.censys);
       $("src-other").textContent = fmt(src.other);
       $("src-user").textContent = fmt(src.user_submitted);
       $("indexed-sub").textContent =
