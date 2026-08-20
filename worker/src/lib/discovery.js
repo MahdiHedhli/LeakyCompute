@@ -1119,3 +1119,83 @@ export async function setLaneCursor(env, lane, { page, exhausted = false, observ
   await env.KV.put(CURSOR_KEY, JSON.stringify(all));
   return all[lane];
 }
+
+/* ------------------------------------------------------------------ */
+/* Reconciliation                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Recompute the published aggregates from the records themselves.
+ *
+ * Every counter here is derived: incremented once per record, gated on a marker
+ * stored on that record and set in the same breath as the increment. When the
+ * two do not land together — a failed batch flush, a blocked KV write — the
+ * record keeps the marker and the counter never gets its increment back. The
+ * drift is therefore one-directional and permanent: reverified_hosts read 478
+ * against 629 actual records, and nothing in the system could notice.
+ *
+ * A derived number with no path back to its source is a number that will be
+ * wrong eventually. This is that path: the index is authoritative, so walk it
+ * and rewrite the totals to match.
+ *
+ * Bounded per invocation for the same reason the sweep is — a corpus larger than
+ * one window is reconciled over successive runs rather than throwing partway.
+ */
+export async function reconcileCorpusCounts(env, { limit = 2000 } = {}) {
+  if (!env.KV) return { ok: false, reason: "no_kv" };
+
+  const index = (await env.KV.get(HITS_INDEX, "json")) || [];
+  const ips = (Array.isArray(index) ? index : []).slice(-limit);
+
+  const geo = {};
+  const asn = {};
+  const stack = {};
+  const countryStack = {};
+  let records = 0;
+  let orphanedIndexEntries = 0;
+
+  const CHUNK = 40;
+  for (let i = 0; i < ips.length; i += CHUNK) {
+    const rows = await Promise.all(
+      ips.slice(i, i + CHUNK).map((ip) => env.KV.get(`${HIT_PREFIX}${ip}`, "json"))
+    );
+    for (const rec of rows) {
+      if (!rec) {
+        orphanedIndexEntries++;
+        continue;
+      }
+      records++;
+      const g = rec.country_code || rec.country || "ZZ";
+      geo[g] = (geo[g] || 0) + 1;
+      if (rec.asn) asn[rec.asn] = (asn[rec.asn] || 0) + 1;
+      const stacks = rec.stacks?.length ? rec.stacks : rec.stack ? [rec.stack] : [];
+      for (const s of stacks) {
+        stack[s] = (stack[s] || 0) + 1;
+        const pair = `${g}|${s}`;
+        countryStack[pair] = (countryStack[pair] || 0) + 1;
+      }
+    }
+  }
+
+  const corpus = (await env.KV.get(CORPUS_KEY, "json")) || {};
+  const before = corpus.reverified_hosts || 0;
+  corpus.reverified_hosts = records;
+  corpus.reconciled_at = new Date().toISOString();
+
+  await env.KV.put(CORPUS_KEY, JSON.stringify(corpus));
+  await env.KV.put(GEO_KEY, JSON.stringify(geo));
+  await env.KV.put(ASN_KEY, JSON.stringify(asn));
+  await env.KV.put(STACK_KEY, JSON.stringify(stack));
+  await env.KV.put(COUNTRY_STACK_KEY, JSON.stringify(countryStack));
+
+  return {
+    ok: true,
+    records,
+    reverified_before: before,
+    reverified_after: records,
+    drift: records - before,
+    orphaned_index_entries: orphanedIndexEntries,
+    scanned: ips.length,
+    complete: ips.length >= (Array.isArray(index) ? index.length : 0),
+  };
+}
