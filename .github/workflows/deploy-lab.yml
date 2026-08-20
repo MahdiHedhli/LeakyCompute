@@ -32,6 +32,11 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # secrets.* cannot be referenced from a step-level `if`; surfacing them as
+    # job env is what makes the conditional legal.
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -54,10 +59,7 @@ jobs:
       # quietly. Access blocks reading lab content unauthenticated, so this
       # compares deployed commit to HEAD via the API instead.
       - name: Deployed commit must match HEAD
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
-        env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        if: env.CF_TOKEN != ''
         run: |
           set -euo pipefail
           live=$(curl -s --max-time 25 \
