@@ -132,6 +132,15 @@ globally. Client-side limits are not limits.
 **I-13. A caller's IP is never echoed back to them.** `own_ip` mode returns the
 literal string `your_egress_ip`.
 
+**Identity note — what Access actually asserts.** The lab signs in through
+Cloudflare Access with GitHub as the IdP, and the assertion carries the GitHub
+account's **primary email address**, not the username. There is no
+`github_login` claim to read. The approval workflow records a username (that is
+what an issue can carry), so an entry holds the username plus the email as an
+alias, and every gate matches on all identities an assertion presents. Checking
+one string is what produced a session that passed `/v1/research/me` and was
+refused by every lab query — see the cross-gate test in `routes.test.mjs`.
+
 **I-14. Raw IPs never reach a public endpoint.** They exist only in the
 admin-token-gated hit store. Public aggregates are counts by country, ASN, and
 stack.

@@ -25,15 +25,16 @@ body:
   - type: input
     id: access_email
     attributes:
-      label: Access sign-in email
+      label: Primary email on your GitHub account
       description: >-
-        The email you will sign in to Cloudflare Access with. Optional, but
-        supplying it avoids a specific failure: the approval records your GitHub
-        username, while Access may present your email instead — and the mismatch
-        shows up as "not on the allowlist" after a successful sign-in.
+        Cloudflare Access signs you in through GitHub and asserts your account's
+        primary email — not your username. Approval records the username, so
+        without this the two never meet and you get "not on the allowlist" after
+        a sign-in that otherwise succeeded. Find it at
+        github.com/settings/emails; it is not published anywhere by us.
       placeholder: "you@example.com"
     validations:
-      required: false
+      required: true
   - type: input
     id: affiliation
     attributes:
