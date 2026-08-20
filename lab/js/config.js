@@ -1,5 +1,10 @@
 window.LEAKY_LAB_CONFIG = {
-  API_BASE: "https://leakycompute-api.mhedhli.workers.dev",
+  // Same-origin by default. The lab now reaches the API through the Pages
+  // Function at /v1/research/*, which is what lets Cloudflare Access attach an
+  // identity to the request — a cross-origin call to workers.dev cannot carry
+  // the Access cookie, so it always arrived unauthenticated.
+  // Local dev against wrangler: append ?api=http://127.0.0.1:8787
+  API_BASE: "",
   SEED_URL: "data/seed-models.json",
   PUBLIC_URL: "https://mahdihedhli.github.io/LeakyCompute/",
   REPO_URL: "https://github.com/MahdiHedhli/LeakyCompute",
