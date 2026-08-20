@@ -1,5 +1,35 @@
 # Deploy guide (free tier)
 
+
+## Registering a researcher's email privately
+
+Cloudflare Access asserts a GitHub account's **primary email**, not its username,
+so an allowlist entry needs both. The access-request template asks for the
+address but does not require it in the issue — publishing an email to get access
+is a bad trade, so requesters are told they may send it to the maintainer
+instead.
+
+When one arrives that way, register it without putting it in the thread:
+
+```bash
+# ADMIN_TOKEN is the Worker's ADMIN_SYNC_TOKEN
+curl -fsS -X POST "$LEAKY_API_BASE/v1/admin/allowlist" \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"op":"approve","login":"THEIR_GITHUB_LOGIN",
+       "aliases":["their-primary@example.com"],
+       "approved_by":"maintainer"}'
+```
+
+Approving again is how you add an alias — the call is idempotent on the login and
+replaces the entry, so the researcher does not need a second issue. Revoking the
+login clears its aliases too, so there is no second door left open.
+
+Confirm it took by asking the researcher to reload; a refusal now lists the
+identities the session presented, so a remaining mismatch is visible rather than
+mysterious.
+
+
 ## Live endpoints (bootstrap deploy)
 
 | Resource | URL |

@@ -69,25 +69,47 @@ jobs:
         env:
           LOGIN: ${{ steps.user.outputs.login }}
           LAB_URL: ${{ secrets.LEAKY_LAB_URL }}
+          HAS_EMAIL: ${{ steps.user.outputs.access_email != '' }}
         with:
           script: |
             const login = process.env.LOGIN;
+            const hasEmail = process.env.HAS_EMAIL === 'true';
             const lab = process.env.LAB_URL || 'https://leakycompute-lab.pages.dev';
             const issue_number = context.issue.number;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number,
-              body: [
+              body: (hasEmail ? [
                 `### Access approved for \`@${login}\``,
                 '',
                 `Lab: ${lab}`,
                 '',
                 'Sign in with **GitHub** using **this same account** (Cloudflare Access).',
-                'If you see “authenticated but not allowlisted”, wait ~1 minute and hard-refresh.',
+                'Both your username and the email you supplied are registered, so either',
+                'identity resolves.',
+                '',
+                'If you see "not on the allowlist", wait ~1 minute and hard-refresh.',
                 '',
                 '_LeakyCompute · evidence first · panic never_',
-              ].join('\n'),
+              ] : [
+                `### Approved for \`@${login}\` — one thing still needed`,
+                '',
+                'Your username is registered, but **access will not work yet.**',
+                '',
+                'Cloudflare Access signs you in through GitHub and asserts your account\'s',
+                '**primary email address**, not your username. Until that address is on the',
+                'allowlist, your sign-in will succeed and every query will still be refused.',
+                '',
+                `Send it to **@${context.repo.owner}** on GitHub — do not post it here unless`,
+                'you are comfortable doing so. It is registered privately and never republished.',
+                '',
+                'Find it at <https://github.com/settings/emails>.',
+                '',
+                `Lab (once registered): ${lab}`,
+                '',
+                '_LeakyCompute · evidence first · panic never_',
+              ]).join('\n'),
             });
             try {
               await github.rest.issues.removeLabel({

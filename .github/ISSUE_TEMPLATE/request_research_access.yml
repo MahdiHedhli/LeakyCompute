@@ -14,6 +14,12 @@ body:
         You will sign in with **GitHub SSO** (same user).
 
         Public self-check does **not** require access.
+
+        **Access needs the primary email on your GitHub account**, not just your
+        username — that is the identity Cloudflare Access asserts when you sign
+        in. You can put it in the field below, or leave that blank and send it to
+        **@MahdiHedhli** on GitHub after opening the issue. Nothing forces you to
+        publish an address to get access, and we never republish it.
   - type: input
     id: github_login
     attributes:
@@ -25,16 +31,19 @@ body:
   - type: input
     id: access_email
     attributes:
-      label: Primary email on your GitHub account
+      label: Primary email on your GitHub account (or leave blank and send it privately)
       description: >-
-        Cloudflare Access signs you in through GitHub and asserts your account's
-        primary email — not your username. Approval records the username, so
-        without this the two never meet and you get "not on the allowlist" after
-        a sign-in that otherwise succeeded. Find it at
-        github.com/settings/emails; it is not published anywhere by us.
-      placeholder: "you@example.com"
+        Required to gain access, but not required *here*. Cloudflare Access signs
+        you in through GitHub and asserts your account's primary email rather than
+        your username, so the allowlist needs that address or your sign-in will
+        succeed and every query will still be refused. Find it at
+        github.com/settings/emails.
+        If you would rather not post it in a public issue — a reasonable thing not
+        to want — leave this blank, open the issue, and send the address to
+        @MahdiHedhli on GitHub instead. Approval waits for it either way.
+      placeholder: "you@example.com  ·  or leave blank and message @MahdiHedhli"
     validations:
-      required: true
+      required: false
   - type: input
     id: affiliation
     attributes:
