@@ -130,6 +130,43 @@ justification required, and it never expires. Email works equally well if you'd
 rather not use GitHub; needing an account in order to be left alone would not be
 an opt-out.
 
+## Scanning a range you own
+
+The web checker answers for **one address at a time** — the one you connected
+from, or a single host you attest to owning. That is deliberate: it probes on
+our infrastructure, so it is rate limited, and a rate limit is the wrong tool
+for someone who needs to check a hundred machines.
+
+If you own more than one, run the checker yourself. It executes on your network,
+answers immediately, has no rate limit, and never asks us for permission to look
+at your own infrastructure.
+
+```bash
+git clone https://github.com/MahdiHedhli/LeakyCompute
+cd LeakyCompute
+
+# a single host
+python3 src/check_ollama_exposure.py --check-url http://10.0.0.5:11434
+
+# everything listening on this machine
+python3 src/check_ollama_exposure.py --scan-local
+
+# a range you own — the attestation flag is required, not decorative
+python3 src/check_ollama_exposure.py \
+  --scan-cidr 203.0.113.0/24 --i-own-this-range \
+  --max-hosts 256 --output-json exposure.json
+```
+
+Stdlib Python 3 only — no install step, nothing to trust beyond a file you can
+read in full before running it.
+
+**Only scan address space you control.** `--i-own-this-range` exists to make that
+a deliberate act rather than a default. Pointing this at someone else's network
+is unauthorised scanning wherever you are, and it is not what this tool is for.
+
+Results stay on your machine. Nothing is sent to us — which also means a clean
+result here does not add to the public counters, and is not meant to.
+
 ## Repo layout
 
 ```
