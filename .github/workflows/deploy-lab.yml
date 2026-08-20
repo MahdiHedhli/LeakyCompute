@@ -1,57 +1,90 @@
-name: Deploy researcher lab
+name: Lab gate + deploy fallback
 
-# The lab had drifted a week behind the repo because nothing deployed it:
-# deploy-pages.yml publishes public/ only, and lab/ was last pushed by hand.
-# The Access gate in front of it was working perfectly — it was guarding a
-# stale build. A gate over the wrong content is worse than no gate, because
-# it looks solved.
+# The lab is deployed by Cloudflare Pages' own Git integration (project
+# leakycompute-lab, build output `lab`). This workflow deliberately does NOT
+# deploy on push — two deployers racing the same project is worse than one.
+#
+# It exists because of how that integration failed: on 2026-08-13 the project
+# became "disconnected from your Git account" and simply stopped deploying.
+# Nothing broke loudly. Ten commits later the lab was still serving a week-old
+# build behind a working Access gate — a gate guarding the wrong content, which
+# is the failure that looks solved.
+#
+# So the job here is to notice, not to deploy.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "lab/**"
-      - ".github/workflows/deploy-lab.yml"
+    paths: ["lab/**"]
+  schedule:
+    - cron: "35 5 * * *"      # daily, after the retention sweep
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Also deploy lab/ (fallback for when Git integration is down)"
+        type: boolean
+        default: false
 
 concurrency:
-  group: leaky-lab-deploy
-  cancel-in-progress: true
+  group: leaky-lab
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Publish lab/ to Cloudflare Pages
+      # No credentials needed, and this is the check that matters most: if an
+      # unauthenticated request ever reaches lab content instead of the Access
+      # login, the corpus is public.
+      - name: The gate must stand
+        run: |
+          set -euo pipefail
+          loc=$(curl -s -I --max-time 20 https://leakycompute-lab.pages.dev/ | tr -d '\r' | grep -i '^location:' || true)
+          if echo "$loc" | grep -q 'cloudflareaccess.com'; then
+            echo "OK — unauthenticated request redirects to Access."
+          else
+            echo "::error::GATE MISSING. An unauthenticated request was not redirected to Cloudflare Access."
+            echo "Location was: ${loc:-<none>}"
+            exit 1
+          fi
+
+      # Catches the failure that actually happened: the deployer stopping
+      # quietly. Access blocks reading lab content unauthenticated, so this
+      # compares deployed commit to HEAD via the API instead.
+      - name: Deployed commit must match HEAD
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          live=$(curl -s --max-time 25 \
+            -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/leakycompute-lab/deployments?per_page=1" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('result') or [{}])[0].get('deployment_trigger',{}).get('metadata',{}).get('commit_hash','')[:7])")
+          head=$(git rev-parse --short=7 HEAD)
+          echo "live=$live head=$head"
+          if [ -z "$live" ]; then
+            echo "::warning::Could not read the deployed commit — check the token's Pages:Read permission."
+          elif [ "$live" != "$head" ]; then
+            echo "::error::Lab is behind. Deployed $live, HEAD is $head — the Pages Git integration is probably disconnected again."
+            exit 1
+          else
+            echo "OK — deployed commit matches HEAD."
+          fi
+
+      - name: Fallback deploy (manual only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-            echo "Missing CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID."
-            echo "Token needs the 'Cloudflare Pages: Edit' permission."
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Needs CLOUDFLARE_API_TOKEN with Cloudflare Pages: Edit."
             exit 1
           fi
           npx --yes wrangler@4 pages deploy lab \
-            --project-name=leakycompute-lab \
-            --branch=main \
-            --commit-dirty=true
-
-      - name: Confirm the gate still stands
-        run: |
-          set -euo pipefail
-          # Deploying content must never be able to remove the Access gate. If an
-          # unauthenticated request ever returns 200 instead of redirecting to
-          # cloudflareaccess.com, the lab is serving raw addresses to the world.
-          sleep 10
-          loc=$(curl -s -I --max-time 20 https://leakycompute-lab.pages.dev/ | grep -i '^location:' || true)
-          if echo "$loc" | grep -q 'cloudflareaccess.com'; then
-            echo "Access gate confirmed in front of the lab."
-          else
-            echo "GATE MISSING — unauthenticated request was not redirected to Access."
-            echo "Location header was: ${loc:-<none>}"
-            exit 1
-          fi
+            --project-name=leakycompute-lab --branch=main --commit-dirty=true
