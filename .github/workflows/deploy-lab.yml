@@ -55,11 +55,25 @@ jobs:
             exit 1
           fi
 
+      - name: Fallback deploy (manual only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Needs CLOUDFLARE_API_TOKEN with Cloudflare Pages: Edit."
+            exit 1
+          fi
+          npx --yes wrangler@4 pages deploy lab \
+            --project-name=leakycompute-lab --branch=main --commit-dirty=true
+
       # Catches the failure that actually happened: the deployer stopping
       # quietly. Access blocks reading lab content unauthenticated, so this
       # compares deployed commit to HEAD via the API instead.
       - name: Deployed commit must match HEAD
-        if: env.CF_TOKEN != ''
+        if: always() && env.CF_TOKEN != ''
         run: |
           set -euo pipefail
           live=$(curl -s --max-time 25 \
@@ -76,17 +90,3 @@ jobs:
           else
             echo "OK — deployed commit matches HEAD."
           fi
-
-      - name: Fallback deploy (manual only)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error::Needs CLOUDFLARE_API_TOKEN with Cloudflare Pages: Edit."
-            exit 1
-          fi
-          npx --yes wrangler@4 pages deploy lab \
-            --project-name=leakycompute-lab --branch=main --commit-dirty=true
