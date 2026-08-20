@@ -656,4 +656,31 @@ section("identity: approval and assertion must agree on who someone is");
   });
 }
 
+/* ------------------------------------------------------------------ */
+// /v1/research/me said "researcher access" while every lab query returned 403
+// on the same session, because the two gates checked different things. Any
+// route that gates on identity has to agree with every other one.
+section("every gated route resolves identity the same way");
+
+{
+  const src = fs.readFileSync(path.join(SRC, "lib", "lab.js"), "utf8");
+  const idx = fs.readFileSync(path.join(SRC, "index.js"), "utf8");
+
+  await check("no gate checks a single login instead of all candidates", async () => {
+    const offenders = [];
+    for (const [name, code] of [["lab.js", src], ["index.js", idx]]) {
+      // isAllowed(env, <something>.login) is the shape of the bug: one string
+      // where the assertion offered several.
+      if (/isAllowed\(\s*env\s*,\s*\w+\.login\s*\)/.test(code)) offenders.push(name);
+    }
+    assert.deepEqual(offenders, [],
+      `these gate on a single identity: ${offenders.join(", ")}`);
+  });
+
+  await check("both gates use matchAllowEntry", async () => {
+    assert.ok(src.includes("matchAllowEntry"), "lab.js must match all candidates");
+    assert.ok(idx.includes("matchAllowEntry"), "index.js must match all candidates");
+  });
+}
+
 finish();

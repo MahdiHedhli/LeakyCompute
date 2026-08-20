@@ -26,7 +26,7 @@ import { json } from "./cors.js";
 import { consume, intEnv } from "./ratelimit.js";
 import { logAbuse } from "./abuse.js";
 import { resolveResearcher } from "./access.js";
-import { isAllowed } from "./allowlist.js";
+import { matchAllowEntry } from "./allowlist.js";
 import { listHits } from "./discovery.js";
 import { getLiveStats } from "./stats.js";
 import { loadExclusions, isExcluded, parseExclusionEntry } from "./exclusions.js";
@@ -275,7 +275,13 @@ async function gate(request, env, action) {
       "Sign in via Cloudflare Access (GitHub). Lab calls must carry Cf-Access-Jwt-Assertion."
     );
   }
-  if (!(await isAllowed(env, identity.login))) {
+  // Match on every identity the assertion presented, not just the first.
+  // identity.login is only the display name — with no github_login claim it is
+  // the email address, while the allowlist may hold the handle or the local
+  // part. Checking one string here is what let /v1/research/me say "researcher
+  // access" while every lab query returned 403 on the same session.
+  const match = await matchAllowEntry(env, identity.candidates || [identity.login]);
+  if (!match) {
     await logAbuse(env, {
       action,
       result: "forbidden",
@@ -286,7 +292,11 @@ async function gate(request, env, action) {
     throw new LabError(
       403,
       "forbidden",
-      "GitHub identity recognised but not allowlisted. Open a research access issue and wait for approval."
+      "Signed in, but none of the identities this session presents are on the " +
+        "researcher allowlist: " +
+        (identity.candidates || []).join(", ") +
+        ". Quote that list on a research access issue and a maintainer can add " +
+        "the right one."
     );
   }
 
@@ -294,7 +304,7 @@ async function gate(request, env, action) {
   // not be able to spend the Worker's whole KV budget.
   const rl = await consume(
     env,
-    `lab:${identity.login}`,
+    `lab:${match.entry.login}`,
     intEnv(env, "RL_LAB_MAX", 120),
     intEnv(env, "RL_LAB_WINDOW_SEC", 300)
   );
