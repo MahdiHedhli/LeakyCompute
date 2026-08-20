@@ -414,3 +414,13 @@ label.check input { margin-top: 3px; }
 /* A date is one token to a reader. If a label ever does wrap it should break at
    the separator, never mid-date as "(07-27-" / "2026)". */
 .nowrap { white-space: nowrap; }
+
+/* --- pointer for people who own more than one address ---------------- */
+.more-than-one {
+  margin-top: 16px; padding: 12px 14px;
+  background: var(--panel2); border: 1px solid var(--line2);
+  border-radius: 10px;
+  font-size: 12.5px; line-height: 1.6; color: var(--dim);
+}
+.more-than-one strong { color: var(--txt); display: block; margin-bottom: 3px; }
+.more-than-one a { color: var(--cyan); white-space: nowrap; }
