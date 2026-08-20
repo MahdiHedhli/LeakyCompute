@@ -51,6 +51,7 @@ import {
   purgeExcluded,
   getProbeAttempts,
   checkWriteBudget,
+  reconcileCorpusCounts,
   RETENTION_DAYS,
 } from "./lib/discovery.js";
 import { enrichServicesWithOsv } from "./lib/osv.js";
@@ -137,6 +138,10 @@ export default {
         return handleDiscoverySweep(request, env);
       }
 
+      if (path === "/v1/admin/discovery/reconcile" && request.method === "POST") {
+        return handleReconcile(request, env);
+      }
+
       if (path === "/v1/admin/discovery/expiring" && request.method === "GET") {
         return handleExpiring(request, env);
       }
@@ -184,6 +189,14 @@ export default {
         // A retention sweep that fails silently is indistinguishable from one
         // that found nothing due — which is the wrong thing to believe about
         // I-26. Nothing else can surface this, so it goes to the log.
+        // Reconcile after the sweep, so the recount reflects the deletions it
+        // just made rather than the state before them.
+        .then(() => reconcileCorpusCounts(env))
+        .then((r) => {
+          if (r?.ok && r.drift) {
+            console.log(`aggregates reconciled: ${r.reverified_before} -> ${r.reverified_after} (drift ${r.drift})`);
+          }
+        })
         .catch((err) => console.error("retention sweep failed:", err?.message || err))
     );
   },
@@ -748,6 +761,19 @@ async function handleListExclusions(request, env) {
  * every gate, so a host whose provenance was only ever a self-check is dropped
  * here exactly as it would be anywhere else.
  */
+/**
+ * Recount the published aggregates from the records themselves. Every counter
+ * we publish is derived and can only drift downward when a write fails; without
+ * this there is no way back to the truth.
+ */
+async function handleReconcile(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const res = await reconcileCorpusCounts(env);
+  return json({ ok: true, ...res }, 200, request, env);
+}
+
 async function handleExpiring(request, env) {
   if (!requireAdmin(request, env)) {
     return json({ error: "unauthorized" }, 401, request, env);

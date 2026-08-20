@@ -25,6 +25,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Stamp asset URLs with a content hash
+        run: |
+          # A returning visitor keeps the stylesheet their browser cached, so a
+          # shipped change reads as work that never landed. Stamping in CI means
+          # it cannot be forgotten on a hurried commit.
+          python3 scripts/stamp_assets.py
+          if ! git diff --quiet -- public; then
+            echo "::notice::Asset hashes were stale in the commit; stamped during build."
+          fi
+
       - name: Upload public/ artifact
         uses: actions/upload-pages-artifact@v3
         with:

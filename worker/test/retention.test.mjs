@@ -855,4 +855,61 @@ section("KV write budget: refuse before the first write, not partway through");
   });
 }
 
+/* ------------------------------------------------------------------ */
+// reverified_hosts read 478 against 629 real records. It increments once per
+// record, gated on a marker stored on that record and set in the same breath as
+// the increment — so when a write batch fails, the record keeps the marker and
+// the counter never gets its increment back. Drift is one-directional and, until
+// this existed, permanent.
+section("aggregates can be recounted from the records themselves");
+
+{
+  const { recordExposedHost, reconcileCorpusCounts, getCorpusCounts } =
+    await import("../src/lib/discovery.js");
+  const env = await freshEnv();
+
+  for (let i = 0; i < 12; i++) {
+    await recordExposedHost(env, {
+      ip: `203.0.113.${i}`, port: 11434, stack: "ollama",
+      country_code: i % 2 ? "DE" : "US", asn: "AS6449" + (i % 3),
+      source: "shodan:ollama",
+    });
+  }
+
+  // Simulate exactly the failure: records exist, the counter lost its increments.
+  const corpus = await env.KV.get("stats:corpus", "json");
+  await env.KV.put("stats:corpus", JSON.stringify({ ...corpus, reverified_hosts: 4 }));
+
+  const before = await getCorpusCounts(env);
+  await check("drift is present before reconciling", async () => {
+    assert.equal(before.reverified_hosts, 4);
+  });
+
+  const res = await reconcileCorpusCounts(env);
+
+  await check("recount matches the actual record count", async () => {
+    assert.equal(res.records, 12);
+    assert.equal(res.reverified_after, 12);
+    assert.equal(res.drift, 8);
+  });
+
+  await check("the published counter is corrected", async () => {
+    const after = await getCorpusCounts(env);
+    assert.equal(after.reverified_hosts, 12);
+  });
+
+  await check("country and stack maps are rebuilt from the records too", async () => {
+    const geo = await env.KV.get("stats:by_country", "json");
+    assert.equal(geo.DE + geo.US, 12);
+    const stack = await env.KV.get("stats:by_stack", "json");
+    assert.equal(stack.ollama, 12);
+  });
+
+  await check("reconciling twice changes nothing — it is idempotent", async () => {
+    const again = await reconcileCorpusCounts(env);
+    assert.equal(again.records, 12);
+    assert.equal(again.drift, 0);
+  });
+}
+
 finish();

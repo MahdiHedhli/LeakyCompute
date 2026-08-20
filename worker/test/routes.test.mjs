@@ -114,6 +114,9 @@ const ADMIN_ROUTES = [
   { method: "GET", path: "/v1/admin/discovery/clock" },
   { method: "POST", path: "/v1/admin/discovery/ingest", body: { results: [] } },
   { method: "POST", path: "/v1/admin/discovery/sweep", body: {} },
+  // Recount of published aggregates — admin-gated because it rewrites what the
+  // public page reports.
+  { method: "POST", path: "/v1/admin/discovery/reconcile", body: {} },
   // Final-verification queue: hosts one day from retention deletion. Admin-gated
   // because it is a list of addresses (I-14), same as /hits and /clock.
   { method: "GET", path: "/v1/admin/discovery/expiring" },
