@@ -32,6 +32,7 @@ import {
 import { resolveResearcher } from "./lib/access.js";
 import {
   isAllowed,
+  matchAllowEntry,
   getAllowEntry,
   approveResearcher,
   revokeResearcher,
@@ -529,8 +530,10 @@ async function handleResearchMe(request, env) {
       env
     );
   }
-  const allowed = await isAllowed(env, identity.login);
-  const entry = allowed ? await getAllowEntry(env, identity.login) : null;
+  // Match against every identity the assertion presented, not just the first.
+  const match = await matchAllowEntry(env, identity.candidates || [identity.login]);
+  const allowed = !!match;
+  const entry = match?.entry || null;
   return json(
     {
       authenticated: true,
@@ -542,6 +545,18 @@ async function handleResearchMe(request, env) {
       message: allowed
         ? "Welcome, researcher."
         : "GitHub identity recognized but not allowlisted. Open a research access issue and wait for approval.",
+      matched_as: match?.matched || null,
+      // A denial that does not say which name was checked is a support ticket.
+      // This is the field whose absence cost an afternoon: the approval issue
+      // records a GitHub handle, the assertion may present an email, and the
+      // researcher had no way to see that those disagreed.
+      identities_presented: allowed ? undefined : identity.candidates,
+      hint: allowed
+        ? undefined
+        : "Signed in, but none of the identities above are on the researcher " +
+          "allowlist. The approval issue records a GitHub username; your Access " +
+          "assertion may present an email instead. Quote this list on the access " +
+          "issue and a maintainer can add the right one.",
     },
     allowed ? 200 : 403,
     request,
@@ -621,6 +636,11 @@ async function handleAdminAllowlist(request, env) {
     issue: body.issue_number,
     approved_by: body.approved_by,
     meta: body.meta || null,
+    // Forwarded so an approval can record the identity Access will actually
+    // assert. Without this the field was accepted by the API and silently
+    // dropped before it reached storage — the approval would look successful
+    // and the researcher would still be locked out.
+    aliases: Array.isArray(body.aliases) ? body.aliases : [],
   });
   return json({ ok: true, entry }, 200, request, env);
 }

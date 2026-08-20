@@ -23,6 +23,18 @@ body:
     validations:
       required: true
   - type: input
+    id: access_email
+    attributes:
+      label: Access sign-in email
+      description: >-
+        The email you will sign in to Cloudflare Access with. Optional, but
+        supplying it avoids a specific failure: the approval records your GitHub
+        username, while Access may present your email instead — and the mismatch
+        shows up as "not on the allowlist" after a successful sign-in.
+      placeholder: "you@example.com"
+    validations:
+      required: false
+  - type: input
     id: affiliation
     attributes:
       label: Affiliation
