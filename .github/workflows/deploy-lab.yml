@@ -1,0 +1,57 @@
+name: Deploy researcher lab
+
+# The lab had drifted a week behind the repo because nothing deployed it:
+# deploy-pages.yml publishes public/ only, and lab/ was last pushed by hand.
+# The Access gate in front of it was working perfectly — it was guarding a
+# stale build. A gate over the wrong content is worse than no gate, because
+# it looks solved.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lab/**"
+      - ".github/workflows/deploy-lab.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: leaky-lab-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish lab/ to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "Missing CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID."
+            echo "Token needs the 'Cloudflare Pages: Edit' permission."
+            exit 1
+          fi
+          npx --yes wrangler@4 pages deploy lab \
+            --project-name=leakycompute-lab \
+            --branch=main \
+            --commit-dirty=true
+
+      - name: Confirm the gate still stands
+        run: |
+          set -euo pipefail
+          # Deploying content must never be able to remove the Access gate. If an
+          # unauthenticated request ever returns 200 instead of redirecting to
+          # cloudflareaccess.com, the lab is serving raw addresses to the world.
+          sleep 10
+          loc=$(curl -s -I --max-time 20 https://leakycompute-lab.pages.dev/ | grep -i '^location:' || true)
+          if echo "$loc" | grep -q 'cloudflareaccess.com'; then
+            echo "Access gate confirmed in front of the lab."
+          else
+            echo "GATE MISSING — unauthenticated request was not redirected to Access."
+            echo "Location header was: ${loc:-<none>}"
+            exit 1
+          fi
