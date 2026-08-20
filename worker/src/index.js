@@ -569,8 +569,23 @@ async function handleResearchCatalog(request, env) {
   if (!identity) {
     return json({ error: "unauthorized" }, 401, request, env);
   }
-  if (!(await isAllowed(env, identity.login))) {
-    return json({ error: "forbidden", login: identity.login }, 403, request, env);
+  // Same rule as every other gate: match all presented identities, and say
+  // which ones were checked when refusing.
+  const catalogMatch = await matchAllowEntry(
+    env,
+    identity.candidates || [identity.login]
+  );
+  if (!catalogMatch) {
+    return json(
+      {
+        error: "forbidden",
+        login: identity.login,
+        identities_presented: identity.candidates,
+      },
+      403,
+      request,
+      env
+    );
   }
 
   // Validated catalog from KV if present; else empty (lab UI loads static seed client-side)
