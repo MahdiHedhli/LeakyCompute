@@ -28,6 +28,11 @@ jobs:
             if (!/^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/.test(login)) {
               core.setFailed(`Invalid GitHub login: ${login}`);
             }
+            // Optional: the email the requester signs into Access with. Parsed
+            // leniently because it is a convenience, not a gate — a missing one
+            // just means only the GitHub handle is allowlisted.
+            const em = body.match(/###\s*Access sign-in email[^\n]*\n+\s*([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)/i);
+            core.setOutput('access_email', em ? em[1].trim().toLowerCase() : '');
             core.setOutput('login', login);
             core.setOutput('issue_number', String(issue.number));
 
@@ -38,6 +43,7 @@ jobs:
           LOGIN: ${{ steps.user.outputs.login }}
           ISSUE: ${{ steps.user.outputs.issue_number }}
           APPROVER: ${{ github.actor }}
+          ACCESS_EMAIL: ${{ steps.user.outputs.access_email }}
         run: |
           set -euo pipefail
           if [ -z "${API_BASE:-}" ] || [ -z "${ADMIN_TOKEN:-}" ]; then
@@ -45,10 +51,18 @@ jobs:
             exit 1
           fi
           API_BASE="${API_BASE%/}"
+          # Aliases matter: the assertion Cloudflare Access presents may carry an
+          # email rather than a GitHub login, and approving only the handle left
+          # the researcher authenticated but unmatched. ACCESS_EMAIL is optional
+          # — when the requester supplies it on the issue, either name resolves.
+          ALIASES="[]"
+          if [ -n "${ACCESS_EMAIL:-}" ]; then
+            ALIASES="[\"$ACCESS_EMAIL\"]"
+          fi
           curl -fsS -X POST "$API_BASE/v1/admin/allowlist" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Token: $ADMIN_TOKEN" \
-            -d "{\"op\":\"approve\",\"login\":\"$LOGIN\",\"issue_number\":$ISSUE,\"approved_by\":\"$APPROVER\"}"
+            -d "{\"op\":\"approve\",\"login\":\"$LOGIN\",\"issue_number\":$ISSUE,\"approved_by\":\"$APPROVER\",\"aliases\":$ALIASES}"
 
       - name: Comment and relabel
         uses: actions/github-script@v7

@@ -106,16 +106,47 @@ export async function resolveResearcher(request, env) {
 
   const p = verified.payload || {};
   const email = p.email || null;
-  // Prefer explicit claim if present; else header asserted login checked against allowlist only
-  const claimed =
-    p.github_login ||
-    p.login ||
-    request.headers.get("X-GitHub-Login") ||
-    (email ? email.split("@")[0] : null);
 
-  if (!claimed) return null;
+  // Collect every identity string this assertion supports, rather than picking
+  // one and hoping the allowlist agrees.
+  //
+  // The bug this replaces: with GitHub configured as the IdP, the assertion
+  // still arrived with no github_login/login claim, so resolution fell through
+  // to email.split("@")[0]. Meanwhile approve-research-access.yml writes the
+  // GitHub username parsed from the issue form. Those two strings differ for
+  // almost everyone, so an approved researcher signed in and was told they were
+  // not on the allowlist — with nothing on screen to say which name was checked.
+  //
+  // Claim names vary by Access IdP configuration, so this reads all of the ones
+  // that carry a handle instead of betting on one.
+  const candidates = [];
+  const push = (v) => {
+    if (v == null) return;
+    const s = String(v).trim().toLowerCase().replace(/^@/, "");
+    if (s && !candidates.includes(s)) candidates.push(s);
+  };
+
+  push(p.github_login);
+  push(p.login);
+  push(p.preferred_username);
+  push(p.nickname);
+  push(p.identity_nickname);
+  push(request.headers.get("X-GitHub-Login"));
+  // Custom claims land under different shapes depending on the IdP.
+  if (p.custom && typeof p.custom === "object") {
+    push(p.custom.github_login);
+    push(p.custom.login);
+    push(p.custom.nickname);
+  }
+  push(email);
+  if (email && email.includes("@")) push(email.split("@")[0]);
+
+  if (!candidates.length) return null;
+
   return {
-    login: String(claimed).toLowerCase().replace(/^@/, ""),
+    // The first candidate is what we display; every candidate is what we match.
+    login: candidates[0],
+    candidates,
     email,
     dev: false,
     payload: p,

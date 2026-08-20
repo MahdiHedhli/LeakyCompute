@@ -577,4 +577,83 @@ section("CORS preflight allows the headers the clients send");
   });
 }
 
+/* ------------------------------------------------------------------ */
+// The failure this reproduces: an approved researcher signs in successfully and
+// is told they are not on the allowlist, because the approval recorded a GitHub
+// handle and the Access assertion presented an email. It only ever worked for
+// the maintainer, who had hand-written both spellings.
+section("identity: approval and assertion must agree on who someone is");
+
+{
+  const { approveResearcher, matchAllowEntry, isAllowed } =
+    await import("../src/lib/allowlist.js");
+
+  const env = await seededEnv();
+  await approveResearcher(env, {
+    login: "MahdiHedhli",
+    aliases: ["mhedhli@42-corp.com"],
+    approved_by: "test",
+  });
+
+  await check("the GitHub handle resolves", async () => {
+    assert.equal(await isAllowed(env, "mahdihedhli"), true);
+  });
+
+  await check("the email alias resolves to the same entry", async () => {
+    const m = await matchAllowEntry(env, ["mhedhli@42-corp.com"]);
+    assert.ok(m, "email alias should match");
+    assert.equal(m.entry.login, "mahdihedhli");
+  });
+
+  await check("the email local-part resolves — the case that actually broke", async () => {
+    // access.js pushes both the address and its local part as candidates, so an
+    // assertion carrying only an email still lands on the entry.
+    const m = await matchAllowEntry(env, ["mhedhli", "mhedhli@42-corp.com"]);
+    assert.ok(m, "local-part or address should match");
+  });
+
+  await check("an unrelated identity still does not", async () => {
+    assert.equal(await matchAllowEntry(env, ["someone-else", "x@y.com"]), null);
+  });
+
+  await check("matching reports which name matched", async () => {
+    const m = await matchAllowEntry(env, ["nope", "mahdihedhli"]);
+    assert.equal(m.matched, "mahdihedhli");
+  });
+}
+
+{
+  const { approveResearcher, revokeResearcher, matchAllowEntry } =
+    await import("../src/lib/allowlist.js");
+  const env = await seededEnv();
+  await approveResearcher(env, {
+    login: "someone", aliases: ["someone@example.com"], approved_by: "test",
+  });
+  await revokeResearcher(env, "someone");
+
+  await check("revoking takes the aliases with it — no second door", async () => {
+    assert.equal(await matchAllowEntry(env, ["someone"]), null);
+    assert.equal(await matchAllowEntry(env, ["someone@example.com"]), null);
+  });
+}
+
+{
+  const { approveResearcher, matchAllowEntry } = await import("../src/lib/allowlist.js");
+  const env = await seededEnv();
+  await approveResearcher(env, {
+    login: "narrow",
+    // An alias is an identity, not a wildcard: approving one person must not be
+    // a way to admit a class of people.
+    aliases: ["*", "", "  ", "a b c", "../etc/passwd", "ok@example.com"],
+    approved_by: "test",
+  });
+
+  await check("junk aliases are refused, legitimate ones kept", async () => {
+    assert.equal(await matchAllowEntry(env, ["ok@example.com"]) !== null, true);
+    for (const bad of ["*", "a b c", "../etc/passwd"]) {
+      assert.equal(await matchAllowEntry(env, [bad]), null, `alias ${bad} must not match`);
+    }
+  });
+}
+
 finish();
