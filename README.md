@@ -212,12 +212,40 @@ python3 scripts/discovery/run_multilane.py --ingest      # all four gates live
 clock. That is the design, not a bug: an opt-out that stops being consulted when
 the network hiccups is not an opt-out.
 
+## Roadmap
+
+Ordered by what closes a question the project already admits is open, then by
+value per hour. Full detail, including what would make each item *wrong*, in
+**[docs/ROADMAP.md](docs/ROADMAP.md)**.
+
+**Next, and they outrank everything else** — both settle open questions in our own
+constitution:
+
+| | |
+|---|---|
+| **Disclosure routing** *(settles Q-2)* | The policy is written — notify before host-identifying publication, 90-day window. The routing is not wired. Route is the Shadowserver Foundation, who already notify network owners and national CSIRTs daily. We can identify hundreds of exposed hosts and cannot yet tell their operators. |
+| **A second index** *(settles Q-3)* | Every number here is Shodan-shaped and our limitations say so. Censys first, then certificate transparency and favicon lanes. The point is cross-checking where Shodan is blind — not summing two sources into a bigger figure. |
+
+Then, in order:
+
+1. **Threat and exposure model** — what an unauthenticated endpoint actually enables, and which services carry *configuration* risk rather than *version* risk. Mostly extraction: the exposure classes and that distinction already live in the code.
+2. **Local-first tooling** — extend the CLI to the full lane set, plus a generated hardening checklist. The only substantial engineering item, and it is what keeps item 3 from becoming permanent content debt.
+3. **Operator hardening playbooks** — generated from what the tool observed wherever possible. The Kubernetes version is the one worth authoring by hand.
+4. **Detection guidance** — only the verifiable slice: exactly what our probe looks like in your logs. Alerting rules wait until there is telemetry to test them against.
+5. **Architecture patterns for shared GPU infrastructure** — deliberately last. We measure exposure; we have not operated this at scale, and the people who would read it have.
+
+**Not on the roadmap, on purpose:** an operator-requested scan queue (the checker
+answers one attested host synchronously, the CLI answers a whole range inside
+your own boundary), anything that proves impact (I-3), and proxying inference
+through discovered hosts (I-20, in any phase).
+
 ## Documentation
 
 - **[Security policy & constitution](docs/SECURITY.md)** — the numbered invariants, and which are machine-checked. Read this before adding any probe or source.
 - [API reference](docs/API.md) — the `/v1/*` contract, findings, severities, rate limits
 - [Re-verification & disclosure spec](docs/specs/001-reverification-and-disclosure.md) — the corpus expansion plan and the disclosure policy
 - [Discovery model](docs/DISCOVERY.md) — passive lanes, source registry, local fingerprint lab
+- [Roadmap](docs/ROADMAP.md) — what is next, why it is next, and what would make each item wrong
 - [Deploy](docs/DEPLOY.md) · [Research background](docs/research.md)
 
 ## Reporting a problem
