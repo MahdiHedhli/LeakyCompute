@@ -15,7 +15,7 @@ We reuse the **UX pattern** (sidebar catalog, counters, stats modal) for **defen
 | Pirate / “free AI” | DON'T PANIC cyberpunk noir |
 | Random third-party host pool | Corpus we re-verified ourselves, with provenance |
 | Weaponized model names | Filtered out of seed; safe `/api/ps` only |
-| Opaque host pool | Dual counters: archive snapshot + live instrumented |
+| Opaque host pool | Three counters, never summed: archive snapshot, indexed today, re-verified by us |
 
 ## Seed methodology
 

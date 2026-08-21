@@ -159,8 +159,15 @@ override mode. Any client rendering them must escape them.
 
 ## 4. Scope invariants
 
-**I-18. The Worker does not scan the internet.** One target per request, on
-request. Bulk discovery runs off-Worker, slowly, capped.
+**I-18 (amended 2026-08-10). The Worker does not scan the internet.** One target
+per request, on request. Bulk re-verification runs off-Worker, rate-limited, and
+only against hosts already listed in a public index (I-22).
+
+> The original read "slowly, capped". A fixed per-lane total was never the
+> control that mattered — it limited how much we could honestly say without
+> limiting any behaviour that would make us indistinguishable from the tooling we
+> study. Replaced by the provenance rule and the rate governance in I-22–I-26.
+> Amendment recorded in [specs/001](specs/001-reverification-and-disclosure.md).
 
 **I-19. No mass scanning from any machine associated with this project.**
 No masscan/zmap sweeps of third-party address space, at any rate, for any reason.
@@ -175,7 +182,88 @@ public notebooks) are **counted, never probed**.
 
 ---
 
-## 4a. Which invariants are machine-checked
+## 5. Re-verification and disclosure invariants
+
+Introduced by [specs/001](specs/001-reverification-and-disclosure.md), which
+replaced a fixed volume cap with a provenance rule plus behavioural discipline.
+They belong here rather than only in the spec: §6 already tests four of them,
+and a test table citing rules this document never states is not an auditable
+constitution.
+
+**I-22. We never discover a host by probing.** Every active probe target must be
+eligible under exactly one of: **(a)** the host already appears in a public index
+(Shodan, Censys, or an equivalent OSINT source used within its terms), or
+**(b)** the network owner asked us to check it. If neither holds, we do not touch
+it. This is the bright line that replaced the volume cap — our traffic reveals
+nothing that was not already published, so scaling it up cannot expand the
+attack surface we are measuring.
+
+**I-22a. Path (b) is gated, not self-service.** A scan request is never
+auto-actioned: it carries the same ownership attestation the public checker
+requires (I-10), is refused for private and reserved ranges (I-11), is rate
+limited, and needs maintainer approval before the first probe. A requester may
+attest only for space they control; requests naming third-party space are
+refused and logged.
+
+*Intake status:* the issue template described in specs/001 does not exist.
+Approved requests are a maintainer-curated manifest passed to the runner, so
+path (b) yields nothing unless that flag is supplied. The gate is real; the
+front door is unbuilt.
+
+**I-23 (amended 2026-08-19). Our probes are attributable.** A single identifiable
+User-Agent (`LeakyCompute-SafeProbe/*`) on every request, and a public
+`/scanning` page naming it, stating exactly what we send, listing where our
+probes originate, and offering a one-click opt-out. Where we control the source
+address it carries a forward-and-reverse-confirmed PTR; where we do not — CI
+runners, maintainer machines — `/scanning` says so plainly rather than implying a
+lookup that would not resolve to us.
+
+> The original required a confirmed PTR on *every* source address. It was never
+> true: runs went out from a laptop, and scheduling on hosted runners widened
+> that. An invariant that has never held is worse than one scoped to what we
+> actually do. The PTR requirement still binds any address we do control.
+
+**I-24. Probe rate is bounded per target, not per run.** At most one probe cycle
+per host per 14 days; per-/24 and per-ASN concurrency ceilings and minimum
+spacing; a global rate ceiling below `HARD_MAX_RATE` that no flag can raise.
+Missing last-seen data fails closed: no clock, no probe.
+
+**I-25. Opt-out is honoured before the probe, not after.** An exclusion list (IP,
+CIDR, or ASN) is consulted before any request is emitted, and the runner refuses
+to probe when it cannot read that list. Exclusions never expire and require no
+justification. Intake is `.github/ISSUE_TEMPLATE/request_removal.yml` plus an
+email route, because needing an account in order to be left alone is not an
+opt-out.
+
+The verification asymmetry is deliberate and runs opposite to I-22a: a *scan*
+request is actioned only after approval, because a bad-faith one aims our traffic
+at a stranger; a *removal* request is actioned on receipt and reviewed
+afterwards, because the worst case of a bad-faith one is that we fail to probe a
+host we were never entitled to probe. Where the two conflict, the exclusion wins.
+
+**I-26. Corpus records are minimised and expire on silence.** Per host we retain
+address, port, service, version string, first and last seen, and geo/ASN. Not
+model lists, job records, or page bodies. A record is deleted 180 days after its
+**last successful probe** — a host that answers resets the clock; one that has
+gone quiet ages out. Expiry is measured from last contact, never from creation.
+
+**I-27. We notify before we publish.** No host-identifying finding is published,
+shared, or shown outside the gated lab before a notification attempt has been
+made and the disclosure window (90 days) has elapsed. Aggregates — counts by
+country, ASN, stack — are not host-identifying and are not gated by the window.
+
+> **Enforcement status: partial, and this is the one to know about.** The
+> withholding logic is implemented and tested — the lab marks records
+> not-for-publication and strips the address of an unnotified host. The
+> *notification routing* is not wired: we can identify hundreds of exposed hosts
+> and have no way to tell their operators. Route is the Shadowserver Foundation,
+> who already notify network owners and national CSIRTs daily. Until it is wired,
+> the practical effect of I-27 is that we publish aggregates and notify nobody —
+> which settles Q-2's policy question while leaving its operational one open.
+
+---
+
+## 6. Which invariants are machine-checked
 
 `npm test` enforces the following. **The rest are review-only** — that is the
 honest state, and closing the gaps is tracked work, not a claim.
@@ -200,6 +288,10 @@ honest state, and closing the gaps is tracked work, not a claim.
 | I-24 re-probe interval | `a re-probe inside the interval is skipped, outside it is due`, `the interval is a floor a flag cannot lower` (driven through the CLI), `a host that did not answer still lands in the probe clock` |
 | I-26 expiry + minimisation | the `retention.test.mjs` suite: expiry from last contact, minimised record shape, aggregates that follow deletion down |
 
+**I-22** is enforced in the runner and covered by `governance_gates.py`; **I-22a**
+has no intake to test. **I-27**'s withholding logic is tested, its notification
+routing does not exist.
+
 **Not machine-checked yet:** I-3 (no impact proof — the *probe paths* are
 asserted against a reviewed list, but "we never send a request to prove impact"
 is a property of every future change, not of the current table), I-7 (body cap
@@ -210,7 +302,7 @@ invariants that live outside the Worker).
 
 ---
 
-## 5. Decision procedure for new capability
+## 7. Decision procedure for new capability
 
 Before adding a service, probe path, discovery source, or data field, answer in
 the PR or spec:
@@ -228,7 +320,7 @@ the PR or spec:
 
 ---
 
-## 6. Open questions — settle before shipping, not after
+## 8. Open questions — settle before shipping, not after
 
 **Q-1. Certificate Transparency yields named organizations.**
 CT-derived hostnames identify *whose* infrastructure is exposed — a materially
@@ -237,10 +329,13 @@ ships: decide retention, decide whether hostnames may appear in any aggregate,
 and confirm I-14 extends to them. Default if undecided: treat hostnames exactly
 as raw IPs — admin-gated, never public.
 
-**Q-2. Coordinated disclosure has no policy.**
-We can identify exposed hosts and, via OSV, versions with known CVEs. There is no
-documented position on whether or how operators are notified. Until there is, we
-do not contact operators.
+**Q-2. Coordinated disclosure — policy settled, routing open.**
+*Settled by I-27:* we notify before host-identifying publication, with a 90-day
+window; aggregates are ungated. *Still open:* the routing. We can identify
+hundreds of exposed hosts and have no channel to their operators, and notifying
+at scale ourselves is how a research project gets reclassified as the threat.
+Blocked on confirming the Shadowserver Foundation's researcher intake. Until it
+is wired, we publish aggregates and contact nobody.
 
 **Q-3. Published counts inherit their source's bias.**
 The by-country chart is Shodan-shaped. Broaden sources or caveat the chart —
@@ -251,7 +346,7 @@ Tailscale Funnel). Published totals must say so rather than imply completeness.
 
 ---
 
-## 7. What this project is not
+## 9. What this project is not
 
 - Not a mass internet scanner as a service
 - Not STOLEN COMPUTE — no random anonymous host proxy, ever

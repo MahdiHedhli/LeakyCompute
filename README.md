@@ -177,6 +177,7 @@ worker/test/       # the invariant suite — npm test
 scripts/discovery/ # off-Worker re-verification runner + gates
 src/               # defensive Python CLI
 docs/              # constitution, API contract, discovery model, specs
+docs/archive/      # unmaintained: session handoffs, write-up notes
 .github/           # access + removal templates and their Actions
 ```
 
@@ -247,6 +248,7 @@ through discovered hosts (I-20, in any phase).
 - [Discovery model](docs/DISCOVERY.md) — passive lanes, source registry, local fingerprint lab
 - [Roadmap](docs/ROADMAP.md) — what is next, why it is next, and what would make each item wrong
 - [Deploy](docs/DEPLOY.md) · [Research background](docs/research.md)
+- [Archive](docs/archive/) — session handoffs and write-up notes, kept for their reasoning. Unmaintained; the constitution wins over anything in there.
 
 ## Reporting a problem
 
