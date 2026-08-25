@@ -16,6 +16,12 @@ implementation. Immediate containment is now fail-closed:
 - discovery workflow artifacts are no longer uploaded;
 - the researcher identity bypass is closed.
 
+The hardened Worker was deployed through the documented local Wrangler OAuth
+path on 2026-08-25 as version
+`ead92748-81ef-4035-b838-f1bcc3189c13`. A packet-free live discriminator
+confirmed that `/v1/check` returns `503 hosted_checks_temporarily_disabled`
+before parsing the request body.
+
 Dry-run discovery, the local operator-owned CLI, aggregate statistics, and the
 Access-gated lab remain available.
 
@@ -24,7 +30,7 @@ Access-gated lab remain available.
 | Severity | Finding | Resolution |
 |---|---|---|
 | Critical | Any valid Access user could add `X-GitHub-Login` naming an allowlisted researcher and read the raw corpus. Email local-parts and mutable display claims created equivalent identity collisions. | Production identity now comes only from the exact email in a cryptographically verified Access app JWT. JWT issuer, audience, type, lifetime, algorithm, signature and exact key ID are checked. Behavioral token tests cover spoofing and tampering. |
-| Critical | Scheduled workflow artifacts and console output exposed raw candidate/target addresses in a public repository, bypassing I-14/I-27. | Artifact upload removed; all per-address console paths redacted; the root output filename is ignored. Existing remote artifacts/logs require separate incident response below. |
+| Critical | Scheduled workflow artifacts and console output exposed raw candidate/target addresses in a public repository, bypassing I-14/I-27. | Artifact upload removed; all per-address console paths redacted; the root output filename is ignored. Historical artifacts and logs were removed and verified as described below. |
 | High | The hosted checker targets IP literals, but Cloudflare Workers global `fetch` does not support direct IP-literal destinations. A platform refusal could appear as a clean result. | `HOSTED_CHECKS_ENABLED=false` in production; `/v1/check` returns an honest 503 before parsing or writing KV. See Cloudflare's [known issue](https://developers.cloudflare.com/workers/platform/known-issues/#fetch-to-ip-addresses). |
 | High | Target validation missed documentation, benchmarking, multicast and reserved ranges; accepted ambiguous numeric encodings; and hostname resolution enabled DNS rebinding and CIDR opt-out bypass. | Canonical IPv4/IPv6 parser, public-unicast classification, hostname rejection, and exhaustive boundary tests added. Overrides remain suspended because target-ASN opt-outs cannot yet be proven. |
 | High | Active discovery writes the I-24 attempt clock only after a completed run. A crash after sending packets could leave targets eligible on the next run. The ledger capacity could also evict entries before 14 days. | Scheduled and local active modes now refuse to run. Ledger bound increased as defense in depth, but live operation stays blocked until a durable pre-probe lease exists. |
@@ -106,26 +112,26 @@ probing must stay disabled until the first three are complete.
 - Enforce clickjacking headers for the GitHub Pages site at a proxy/CDN that can
   set response headers; its in-document CSP cannot enforce `frame-ancestors`.
 
-## Incident response still requiring authorization
+## Incident response completed
 
-The review found existing public Actions artifacts and likely historical log
-lines containing raw address-level discovery data. Local code changes stop new
-leakage but cannot retract old copies.
+The review found public Actions artifacts and historical log lines containing
+raw address-level discovery data. The response was completed on 2026-08-25:
 
-Recommended containment:
+1. Captured an ignored, local incident inventory containing only run/artifact
+   IDs, timestamps and commit SHAs. Artifact contents were not downloaded.
+2. Deleted all 13 `discovery-run` artifacts from the affected August 19–25
+   window. A paginated repository query then returned zero matching artifacts.
+3. Deleted the log sets for all 13 corresponding workflow runs. HEAD checks on
+   every log endpoint returned HTTP 404 after deletion.
+4. Removed the scheduled active workflow and artifact-upload path; future
+   operation is packet-free dry-run only.
+5. Reviewed source and workflow output paths for credential disclosure. No
+   Shodan, admin or Cloudflare credential leak was confirmed, so credential
+   rotation was not indicated by the available evidence.
 
-1. enumerate all `Scheduled discovery` workflow runs and artifacts;
-2. preserve only a private, access-controlled incident inventory containing run
-   IDs and dates — not the raw addresses in this repository;
-3. delete affected artifacts;
-4. delete affected workflow runs/logs where GitHub requires run deletion to
-   remove logs;
-5. rotate the discovery/admin tokens if review shows any secret-bearing error
-   output (no token leak was confirmed from source inspection);
-6. document the exposure window and notify affected operators before any future
-   host-identifying publication under I-27.
-
-Those are destructive remote operations and were not performed by this review.
+Deletion cannot revoke copies downloaded or cached before containment. That
+residual exposure remains part of the incident record and must inform any future
+host-identifying publication or operator notification under I-27.
 
 ## Re-enable criteria
 
@@ -146,3 +152,8 @@ write budget are implemented and adversarially tested.
 - Python and JavaScript syntax checks pass.
 - `.secrets.local.json`, address-level local outputs, and `discovery-run.json`
   are ignored; the local secrets file remains mode `0600`.
+- Live `/v1/check` returned `503 hosted_checks_temporarily_disabled` for a body
+  that the prior deployment handled as `400 authorization_required`; the
+  discriminator cannot emit a target request in either version.
+- The public pause notice, Access redirect, zero remaining discovery artifacts,
+  and 13 deleted log endpoints were verified remotely.
