@@ -57,10 +57,13 @@ prerequisites are explicit.
 
 ### 1a. Bounded hardening — do regardless of measurement mode
 
-1. **Enforce CI and pin the supply chain.** Run `npm test` as a required check;
-   pin GitHub Actions to reviewed commit SHAs, Wrangler/npm packages to exact
-   versions with a lockfile, and local-lab containers to image digests. Scope
-   credentials to the step that needs them.
+1. **CI and supply-chain pinning — implemented in the repository.** The
+   invariant suite now runs on pushes and pull requests; GitHub Actions use
+   reviewed commit SHAs and Node 24 releases; Wrangler is exact and integrity
+   locked; local-lab images use registry manifest digests; and a regression test
+   rejects mutable references. Dependabot proposes explicit updates. **Operator
+   setting still open:** the repository has no branch protection or ruleset, so
+   `CI / Invariant suite` is not yet a required status check.
 2. **Isolate public statistics reads.** Materialize `/v1/stats` behind the Cache
    API and an edge rate limit so public traffic cannot exhaust the KV allowance
    used by authorization, exclusions, and retention.

@@ -15,6 +15,10 @@
 #   Verify after starting:  docker compose ps --format '{{.Name}} {{.Ports}}'
 #   Every mapping must read 127.0.0.1:PORT->..., never 0.0.0.0:PORT->...
 #
+# Images are pinned to registry manifest digests. Refresh them deliberately and
+# review upstream release notes before replacing a digest; do not remove the
+# digest while troubleshooting a pull.
+#
 # Usage:
 #   docker compose -f scripts/discovery/local-lab/docker-compose.yml up -d
 #   python3 scripts/discovery/favicon_hash.py --yaml \
@@ -29,7 +33,7 @@ services:
   # Serves no favicon by default. Here for fingerprint validation:
   # GET /api/version, GET /api/tags, GET / ("Ollama is running").
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:latest@sha256:57d60e686821ea81a7748a3ec8141308c8b8f95b27105713954abf7a6529e700
     ports: ["127.0.0.1:11434:11434"]
     volumes: ["ollama:/root/.ollama"]
     restart: "no"
@@ -42,7 +46,7 @@ services:
   # Reproduces the jupyter-no-token-auth finding: GET /tree renders the file
   # browser with no redirect to /login.
   jupyter-open:
-    image: quay.io/jupyter/base-notebook:latest
+    image: quay.io/jupyter/base-notebook:latest@sha256:23fbe16371af3c0fdc833fa0962b42fd07811e152b821ff51d19a8d6e9cc86cf
     ports: ["127.0.0.1:8888:8888"]
     command: >
       start-notebook.py
@@ -56,7 +60,7 @@ services:
   # Also the case to check /api/status auth behaviour on — it varies across
   # jupyter_server releases and our confirm step depends on it.
   jupyter-token:
-    image: quay.io/jupyter/base-notebook:latest
+    image: quay.io/jupyter/base-notebook:latest@sha256:23fbe16371af3c0fdc833fa0962b42fd07811e152b821ff51d19a8d6e9cc86cf
     ports: ["127.0.0.1:8889:8888"]
     command: >
       start-notebook.py
@@ -67,7 +71,7 @@ services:
   # dashboard-host 0.0.0.0 is INSIDE the container only; the host mapping above
   # still pins it to loopback. Ray refuses to serve the dashboard otherwise.
   ray:
-    image: rayproject/ray:latest
+    image: rayproject/ray:latest@sha256:61fee5839b2c5e640059a132be3312019c61badbb2396b513d8536b6db82ac4d
     ports: ["127.0.0.1:8265:8265"]
     command: >
       bash -c "ray start --head --dashboard-host=0.0.0.0 --disable-usage-stats
@@ -77,13 +81,13 @@ services:
 
   # --- favicon donors (tier-2 lanes) ---------------------------------------
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:main@sha256:c792953395b43d4f49085fa4026850c5e923578345ebeaf56eabd980bcfc273a
     ports: ["127.0.0.1:3000:8080"]
     environment: ["WEBUI_AUTH=False"]
     restart: "no"
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
+    image: ghcr.io/mlflow/mlflow:latest@sha256:9f9276e57cda1593cfa0fe8519145cd49328e119e85951851b9244e82e3769be
     ports: ["127.0.0.1:5000:5000"]
     command: mlflow server --host 0.0.0.0 --port 5000
     restart: "no"
@@ -91,10 +95,10 @@ services:
   # tensorflow/tensorflow is amd64-only (slow emulation on Apple silicon) and
   # no longer ships the tensorboard CLI. Install the package on a native base.
   tensorboard:
-    image: python:3.11-slim
+    image: python:3.11-slim@sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76
     ports: ["127.0.0.1:6006:6006"]
     command: >
-      bash -c "pip install --quiet --no-cache-dir tensorboard &&
+      bash -c "pip install --quiet --no-cache-dir tensorboard==2.21.0 &&
       mkdir -p /tmp/logs &&
       tensorboard --logdir /tmp/logs --host 0.0.0.0 --port 6006"
     restart: "no"

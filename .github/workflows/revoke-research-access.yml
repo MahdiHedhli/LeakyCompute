@@ -7,14 +7,14 @@ on:
 jobs:
   revoke:
     if: github.event.label.name == 'access-revoked'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
       contents: read
     steps:
       - name: Resolve GitHub login
         id: user
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const issue = context.payload.issue;
@@ -44,7 +44,7 @@ jobs:
             --data-binary @-
 
       - name: Comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           LOGIN: ${{ steps.user.outputs.login }}
         with:

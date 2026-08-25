@@ -29,16 +29,21 @@ concurrency:
   group: leaky-lab
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # secrets.* cannot be referenced from a step-level `if`; surfacing them as
     # job env is what makes the conditional legal.
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # No credentials needed, and this is the check that matters most: if an
       # unauthenticated request ever reaches lab content instead of the Access
@@ -66,7 +71,7 @@ jobs:
             echo "::error::Needs CLOUDFLARE_API_TOKEN with Cloudflare Pages: Edit."
             exit 1
           fi
-          npx --yes wrangler@4 pages deploy lab \
+          npx --yes wrangler@4.126.0 pages deploy lab \
             --project-name=leakycompute-lab --branch=main --commit-dirty=true
 
       # Catches the failure that actually happened: the deployer stopping

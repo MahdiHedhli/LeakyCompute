@@ -1,5 +1,32 @@
 # Deploy guide (free tier)
 
+## Supply-chain baseline
+
+Install tooling from the committed lockfile and run the invariant suite before
+deploying:
+
+```bash
+npm ci --ignore-scripts
+npm test
+```
+
+The repository deliberately pins:
+
+- GitHub Actions to full, reviewed commit SHAs (with release comments);
+- the CI runner family to `ubuntu-24.04` and Node to an exact patch release;
+- Wrangler to the reviewed version in both `package.json`/`package-lock.json`
+  and every one-shot `npx` command;
+- local fingerprint-lab images to registry manifest digests.
+
+`npm run test:supply-chain` rejects mutable Action refs, `*-latest` runner
+labels, ranged npm dependencies, unpinned Wrangler invocations, and local-lab
+images without a digest. Dependabot opens update PRs, but an update is not
+self-approving: inspect upstream release notes and the resulting diff, preserve
+the version comment beside an Action SHA, and rerun the full suite.
+
+The exact references reviewed on 2026-08-25 are recorded in
+[`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md).
+
 
 ## Registering a researcher's email privately
 

@@ -262,6 +262,7 @@ unindexed address space (I-19).
 - [Re-verification & disclosure spec](docs/specs/001-reverification-and-disclosure.md) — historical active-measurement design and the disclosure policy
 - [Discovery model](docs/DISCOVERY.md) — passive lanes, source registry, local fingerprint lab
 - [2026-08-25 security review](docs/SECURITY_REVIEW_2026-08-25.md) — adversarial findings, containment, open blockers, incident response
+- [Supply-chain baseline](docs/SUPPLY_CHAIN.md) — reviewed Action SHAs, dependency and image digests, update procedure
 - [Roadmap](docs/ROADMAP.md) — what is next, why it is next, and what would make each item wrong
 - [Deploy](docs/DEPLOY.md) · [Research background](docs/research.md)
 - [Archive](docs/archive/) — session handoffs and write-up notes, kept for their reasoning. Unmaintained; the constitution wins over anything in there.
