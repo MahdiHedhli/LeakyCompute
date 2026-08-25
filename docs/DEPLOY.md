@@ -41,20 +41,43 @@ mysterious.
 
 **Still manual:** Cloudflare Access (GitHub SSO) on the lab hostname, Turnstile site keys (optional).
 
+## Deployment ownership — important
+
+The Cloudflare OAuth/Git integration belongs to the **Pages lab only**. It does
+not deploy `worker/src/index.js`. The API Worker is deployed locally with
+Wrangler's OAuth login. The GitHub `CLOUDFLARE_API_TOKEN` is scoped for the Pages
+fallback and cannot deploy Worker scripts.
+
+Do not add a token-based Worker deployment workflow or broaden the Pages token
+as a workaround. These paths are separate by design:
+
+| Surface | Owner |
+|---|---|
+| API Worker | Local Wrangler OAuth + `wrangler deploy` |
+| Research lab | Cloudflare Pages Git/OAuth integration |
+| Public site | GitHub Pages workflow |
+
 ## 1. Cloudflare Worker API
 
 Already deployed as `leakycompute-api`. To redeploy from this repo:
 
 ```bash
-npm i -g wrangler   # or use npx
-wrangler login
+npx --yes wrangler@4.126.0 login \
+  --scopes account:read \
+  --scopes user:read \
+  --scopes workers_scripts:write \
+  --use-keyring
 # wrangler.toml already has KV ids
-wrangler secret put ADMIN_SYNC_TOKEN
-wrangler secret put ABUSE_LOG_SALT  # high-entropy HMAC key; required for abuse logs
+npx --yes wrangler@4.126.0 secret put ADMIN_SYNC_TOKEN
+npx --yes wrangler@4.126.0 secret put ABUSE_LOG_SALT  # high-entropy HMAC key; required for abuse logs
 # optional:
-wrangler secret put TURNSTILE_SECRET_KEY
-wrangler deploy
+npx --yes wrangler@4.126.0 secret put TURNSTILE_SECRET_KEY
+npx --yes wrangler@4.126.0 deploy
 ```
+
+The restricted scope list is intentional. Wrangler's default login currently
+requests write access across many unrelated Cloudflare products; inspect and
+minimise OAuth scopes rather than approving that default.
 
 URLs are set in:
 
