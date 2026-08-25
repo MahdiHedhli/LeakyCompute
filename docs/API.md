@@ -9,7 +9,7 @@ describes the contract; when they disagree, the code wins and this file is a bug
 |---|---|---|---|
 | `/` , `/v1/health` | GET | none | liveness |
 | `/v1/stats` | GET | none | public aggregate counters |
-| `/v1/check` | POST | Turnstile (if configured) | the self-check |
+| `/v1/check` | POST | Turnstile (if configured) | suspended hosted self-check |
 | `/v1/research/me` | GET | Cloudflare Access | researcher identity + allowlist state |
 | `/v1/research/catalog` | GET | Access + allowlist | gated catalog |
 | `/v1/admin/allowlist` | POST | `X-Admin-Token` | approve / revoke researchers |

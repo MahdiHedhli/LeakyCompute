@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="referrer" content="no-referrer" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'" />
-  <title>LeakyCompute — about our scanning</title>
-  <meta name="description" content="Who we are, exactly what we send, and how to have your address space excluded from LeakyCompute probing." />
+  <title>LeakyCompute — measurement and opt-out</title>
+  <meta name="description" content="LeakyCompute's suspended active-measurement policy, historical request shape, and permanent address-space opt-out." />
   <meta name="theme-color" content="#0a0e17" />
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="css/style.css?v=e9b6d61c" />
@@ -20,8 +20,8 @@
         <a class="eyebrow" href="https://mahdihedhli.com/dont-panic/" target="_blank" rel="noopener noreferrer"
           >DON'T PANIC // Threat Research</a
         >
-        <h1>ABOUT OUR SCANNING</h1>
-        <div class="tag">you found us in your logs — here is exactly what we are</div>
+        <h1>MEASUREMENT &amp; OPT-OUT</h1>
+        <div class="tag">active probing is suspended — exclusions remain permanent</div>
       </div>
       <nav class="nav">
         <a href="index.html">Home</a>
@@ -33,12 +33,12 @@
     </header>
 
     <section class="hero">
-      <h2>OPT OUT // no justification required</h2>
+      <h2>ACTIVE PROBING SUSPENDED // OPT OUT STILL HONORED</h2>
       <p>
-        If you do not want us touching your address space, say so and we stop. You do
-        not have to explain why, and we will not ask you to justify it. Exclusions are
-        applied when we receive them — not when we finish reviewing them — and they do
-        not expire.
+        LeakyCompute currently sends no active discovery or hosted-check traffic.
+        If you do not want your address space included in any future measurement,
+        say so now. You do not have to explain why. Exclusions are applied when we
+        receive them, do not expire, and also trigger deletion of retained records.
       </p>
       <p>
         <a class="primary"
@@ -53,11 +53,12 @@
     </section>
 
     <section class="panel">
-      <h3>What we send</h3>
+      <h3>What historical probes sent</h3>
       <p>
-        Every request is a read-only <code>GET</code> against a version, health, or
-        listing endpoint. We are checking whether a service answers an unauthenticated
-        request. We never send one to prove what that would allow.
+        Active measurement is suspended. When it operated, every request was a
+        read-only <code>GET</code> against a version, health, or listing endpoint.
+        It checked whether a service answered an unauthenticated request and never
+        sent an action to prove what that access would allow.
       </p>
       <table class="probe-table">
         <thead>
@@ -70,36 +71,32 @@
         </tbody>
       </table>
       <p>
-        We never submit a job, pull a model, send a prompt, start a kernel, read a
-        file, or attempt to authenticate. We do not follow redirects, so we cannot be
-        bounced onto a different host. We do not scan ports: each service is only ever
-        contacted on its own known port.
+        Probes never submitted a job, pulled a model, sent a prompt, started a
+        kernel, read a file, or attempted to authenticate. They did not follow
+        redirects or scan ports; each service was contacted only on a reviewed port.
       </p>
       <p>
-        Identify us by the User-Agent <code>LeakyCompute-SafeProbe</code>. Everything
-        we send to a host carries it, whether it came from the public checker or from
-        our background re-verification.
+        Historical traffic used the User-Agent <code>LeakyCompute-SafeProbe</code>.
+        If active measurement is ever redesigned and re-enabled, attributable traffic
+        remains a requirement and this page will be updated before it starts.
       </p>
       <p>
-        <strong>Where our probes come from.</strong> The public checker runs on
-        Cloudflare Workers. Background re-verification runs from GitHub-hosted
-        Actions runners and from maintainer systems. None of those are addresses
-        we own, so a reverse lookup on the source IP will not name this project —
-        it will name Cloudflare or GitHub, alongside unrelated traffic from the
-        same shared pools. The User-Agent is the identifier to match on, and this
-        page is what it points to. If we ever move probing onto infrastructure we
-        control, that address will carry a matching forward-and-reverse DNS
-        record and this section will say so.
+        <strong>Where historical probes came from.</strong> Completed runs used
+        maintainer systems and GitHub-hosted Actions runners; the hosted checker was
+        designed for Cloudflare Workers but is disabled because that platform cannot
+        reliably fetch IP-literal targets. These are shared source pools, so the
+        User-Agent—not reverse DNS—was the project identifier. Any future source
+        architecture must be documented here before traffic resumes.
       </p>
     </section>
 
     <section class="panel">
       <h3>How your host came to our attention</h3>
       <p>
-        We do not find hosts by scanning. Every address we contact either already
-        appeared in a public index such as Shodan or Censys, or its owner asked us to
-        check it. Our traffic never reveals anything that was not already published by
-        someone else.
+        We did not find hosts by scanning. Every address historically contacted
+        already appeared in a public index such as Shodan or was supplied by its
+        owner. Current internet measurement reads public records and sends the listed
+        hosts no traffic.
       </p>
       <p>
         This also means opting out here does not remove you from those indexes. Shodan
@@ -112,11 +109,11 @@
     <section class="panel">
       <h3>What we keep</h3>
       <p>
-        Per host: address, port, service, version string, first and last seen, and
-        geo/ASN metadata. We do not retain model lists, job records, or page contents.
-        Records are deleted 180 days after we last saw the host answer. Raw addresses
-        are never published — public figures are aggregate counts by country, ASN, and
-        stack.
+        Retained historical records may contain address, port, service, version
+        string, first and last seen, and geo/ASN metadata. We do not retain model
+        lists, job records, or page contents. Records expire 180 days after last
+        contact. Raw addresses are never published; public figures are aggregate
+        counts by country, ASN, and stack.
       </p>
     </section>
 
@@ -126,10 +123,10 @@
         The fastest fixes, in order: bind the service to <code>127.0.0.1</code> instead
         of <code>0.0.0.0</code>; restrict the port at your host firewall and cloud
         security group; put an authenticating reverse proxy in front if you need remote
-        access. The
-        <a href="index.html">self-check on the home page</a> reports the specific
-        remediation for whatever it finds, and runs against your own connecting IP with
-        no input from you.
+        access. Use the
+        <a href="https://github.com/MahdiHedhli/LeakyCompute#scanning-a-range-you-own"
+           target="_blank" rel="noopener">local defensive CLI</a> from infrastructure
+        you control. It keeps results on your machine.
       </p>
     </section>
 
@@ -140,9 +137,9 @@
         checked against the code rather than taken on trust:
         <a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md"
            target="_blank" rel="noopener">SECURITY.md</a>.
-        If you can make this checker probe something it should not, that is a security
-        issue in our software and we want to hear about it — open a private advisory on
-        the repository.
+        If you find a way for a dormant or future probe path to bypass these rules,
+        that is a security issue in our software and we want to hear about it — open a
+        private advisory on the repository.
       </p>
     </section>
 

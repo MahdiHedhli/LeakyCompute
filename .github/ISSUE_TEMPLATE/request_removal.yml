@@ -11,8 +11,9 @@ body:
         ## Opt out of LeakyCompute probing
 
         **This request is honored when we receive it, not when we finish reviewing it.**
-        Probing of the listed space stops and existing records are deleted. You do
-        not need to explain why, and we will not ask you to justify it.
+        The listed space is excluded from any future probing and existing records
+        are deleted. Active probing is currently suspended. You do not need to
+        explain why, and we will not ask you to justify it.
 
         Exclusions are permanent and do not expire. You can add to them later.
 
@@ -20,10 +21,11 @@ body:
         weight by email — see the contact on the maintainer's profile, or the
         `/scanning` page. A GitHub account is not required to be left alone.
 
-        **What we probe:** read-only `GET` requests to version, health, and
-        listing endpoints on hosts that already appear in public indexes such as
-        Shodan or Censys. We never send a payload, submit a job, or attempt to
-        authenticate. See [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md).
+        **Current status:** active probing and hosted checks are suspended. Historical
+        probes used read-only `GET` requests to version, health, and listing endpoints
+        on hosts already present in public indexes. We never sent a payload, submitted
+        a job, or attempted to authenticate. See
+        [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md).
   - type: textarea
     id: scope
     attributes:
@@ -68,9 +70,9 @@ body:
     attributes:
       value: |
         ---
-        **Note on scope:** exclusion stops *our* probing and deletes *our* records.
+        **Note on scope:** exclusion prevents any future probing and deletes *our* records.
         It cannot remove your hosts from Shodan, Censys, or any third-party index —
         those are separate services with their own removal processes. If a host is
         exposed, opting out of our measurement does not close it. The remediation
-        guidance in [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md) and on the public checker
+        guidance in [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md) and local checker
         applies regardless.

@@ -1,4 +1,10 @@
-# Discovery model (passive-first, slow active)
+# Discovery model (passive/local-first; active suspended)
+
+**Current status:** passive reports, index comparisons, local-container
+validation, and dry-run governance plans are available. Active discovery and
+ingest are disabled. The active design below is retained only where it explains
+the safety model or a future re-enable prerequisite; it is not an operating
+instruction. The authoritative order is [`ROADMAP.md`](ROADMAP.md).
 
 ## Critical fact about the archive seed
 
@@ -57,7 +63,8 @@ port:11434 "Ollama"
 
 Prefer **`product:Ollama`** for seeding. Banner-only under-indexes; bare `port:11434` over-indexes (~183k).
 
-Safe probe: `GET /api/ps` or `GET /api/tags` only.
+Reviewed metadata path for local validation or a future re-enable:
+`GET /api/ps` or `GET /api/tags` only.
 
 ### 2) Ray — port 8265
 
@@ -77,26 +84,28 @@ Then fingerprint `/api/version` or dashboard HTML. Exposure story: reachable das
 http.title:"Jupyter" port:8888 -http.html:"token"
 ```
 
-Safe probe: `GET /` only (no kernel exec).
+Reviewed metadata path for local validation or a future re-enable: `GET /`
+only (no kernel exec).
 
 ---
 
-## Coverage is probe-bound, not discovery-bound
+## Coverage was probe-bound; active verification is now suspended
 
 Read this before adding any source.
 
-At 0.25/sec, 1 worker, 48–128 hosts/run, active verification tops out around a
-few hundred hosts/day. Pouring six more discovery sources into that funnel does
-not increase coverage — it changes *which* hosts get sampled. Split the pipeline
-and the numbers stay honest:
+The historical design allowed 0.25/sec, one worker, and bounded runs. That made
+active verification the bottleneck: more indexes changed which hosts were
+sampled, not how much could be verified. The architectural distinction remains
+important even with active traffic off:
 
 | Lane | Cost | Rule |
 |---|---|---|
 | **Passive census** — counts, facets, candidate hostnames | zero probes | More sources is strictly better. Anchor published totals here. |
-| **Active verification** — slow safe GETs | capped | Stratified sample *of* the census, not "whatever the query returned first". |
+| **Active verification** — read-only metadata GETs | **suspended** | Requires the strong state and deletion architecture in the roadmap before it can return. |
 
-Today these are fused, which means the by-country chart silently inherits
-Shodan's scan bias. Either add non-Western sources (below) or caveat the chart.
+Historical runs fused these lanes, and the by-country chart still inherits
+Shodan's scan bias. New source work is passive and must publish source-specific
+overlap/disagreement rather than imply an internet-wide population.
 
 ---
 
@@ -120,9 +129,11 @@ provider's ToS on automated querying — several are stricter than Shodan's.
 | Quake | ✅ | key | **high** | ⚠ signup has required a mainland-China mobile number — keep off the critical path |
 | Shadowserver | ✅ | n/a | **high** | ⚠ free reports **only for netblocks you can prove you own** — not a third-party discovery source; verification takes days |
 
-**Suggested queue.** Day 1 needs no signups at all: favicon hashes + crt.sh.
-Start the Censys/Netlas/FOFA registrations in parallel on day 1 so the keys have
-landed by the time the lanes are written.
+**Suggested queue.** Validate favicon hashes only against local containers, then
+add Censys as the first independent census. CT query experiments may begin
+without retaining results, but hostname persistence waits for Q-1's retention,
+deletion, and publication decision. Netlas/FOFA are later bias checks, not a way
+to manufacture a larger combined total.
 
 ---
 
@@ -170,7 +181,9 @@ patterns live per-lane in `profiles.yaml` as `ct_patterns`.
    turning the lane on — at minimum, hostnames should never reach a public
    endpoint, same as raw IPs today.
 2. **A CT hit is not an exposure.** The cert proves the name existed, nothing
-   more. Resolve → single safe GET → only then does it count.
+   more. Under the current passive mode it remains a source record, not a target.
+   Resolution and a metadata GET would require both Q-1 settlement and the active
+   re-enable architecture.
 
 ---
 
@@ -199,16 +212,16 @@ config, not a host we have any standing to touch.
 
 ## Broader stack (each its own lane)
 
-| Service | Preferred query | Port | Safe probe |
-|---------|-----------------|------|------------|
+| Service | Preferred query | Port | Reviewed metadata path (local/future) |
+|---------|-----------------|------|-----------------------------------------|
 | Open WebUI | `http.title:"Open WebUI"` | varies | `GET /` |
 | ComfyUI | `http.title:"ComfyUI"` | 8188 | `GET /system_stats` |
 | Gradio | `http.title:"Gradio"` | 7860 | `GET /` |
 | LocalAI | `http.html:"LocalAI"` | 8080 | `GET /v1/models` |
-| LiteLLM | `http.html:"LiteLLM"` | 4000 | `GET /health` |
+| LiteLLM | `http.html:"LiteLLM"` | 4000 | `GET /health/liveliness` |
 | vLLM | `http.html:"vLLM"` or `port:8000 http.html:"/v1/models"` | 8000 | `GET /v1/models` |
 | OpenAI-compat | `http.html:"/v1/models"` | 8000/8080 | `GET /v1/models` |
-| MLflow | `http.title:"MLflow"` | 5000 | `GET /` |
+| MLflow | `http.title:"MLflow"` | 5000 | `GET /health` |
 | TensorBoard | `http.title:"TensorBoard"` | 6006 | `GET /` |
 
 Machine-readable profiles: [`scripts/discovery/profiles.yaml`](../scripts/discovery/profiles.yaml).
@@ -244,7 +257,9 @@ Paste the output into the matching `favicon:` block in `profiles.yaml`.
 
 **2. Validate tier-1 fingerprints against real services.** `worker/test/` proves
 the engine's *logic* against fakes; it does not prove the *fingerprints* match
-real responses. Point `wrangler dev` at the lab and diff:
+real responses. Use an explicitly local test harness against the loopback-bound
+lab; do not weaken the production Worker's public-IP validation to reach it.
+Compare the captured responses with the service fingerprints:
 
 - `jupyter-open` (8888) must come back `exposed: true`, finding `jupyter-no-token-auth`
 - `jupyter-token` (8889) must come back `detected: true, authenticated: true` — **not** exposed
@@ -259,9 +274,9 @@ concludes they're fine when they aren't.
 `/api/version` actually returns, and confirm the tier-2 OSV lookups behave
 sanely across them (including the no-known-vulns case).
 
-**4. CT backfill** needs no containers and no accounts — start collecting
-`ct_patterns` matches from crt.sh into a local candidate file today. It is pure
-census work, so it costs no probe budget.
+**4. CT pattern evaluation** needs no containers or account, but do not retain a
+hostname candidate corpus until Q-1 is settled. Query counts and pattern quality
+can be evaluated without turning named organizations into a new stored dataset.
 
 ### What not to do locally
 
@@ -276,26 +291,21 @@ address space is not, at any rate.
 
 ---
 
-## Pipeline (implementation)
+## Current pipeline
 
 ```text
-Shodan facets → top ASNs (Hetzner, Contabo, OVH, AWS, …)
+Public indexes ──► source-specific passive counts/facets
        │
-       ├─► limited hosts per ASN (e.g. 8 each)
-Prior hits ──► re-check known exposed IPs
+       ├─► compare overlap, disagreement, freshness, and bias
        │
-       ▼
-Optional /29–/30 neighborhood expand (never wider than /28)
-       │
-       ▼
-SLOW stack-aware GET probes on YOUR machine
-  default ~0.2–0.25/sec, 1 worker, max 48–64 hosts/run
-       │
-       ▼
-Worker ingest (batches ≤150, ≤10/hour) → private hits + public counters
+       └─► governance dry-run plan (private local file)
+                         │
+                         └─► STOP — no target request, no ingest
 ```
 
-**Cloudflare Worker does not scan the internet.**
+The historical active pipeline remains fail-closed in code so its gates can be
+tested, but it is not an available mode. See the roadmap before retaining or
+removing that dormant implementation.
 
 ---
 

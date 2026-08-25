@@ -13,7 +13,9 @@ body:
         Approvals grant **Cloudflare Access + allowlist** entry for **this GitHub account**.
         You will sign in with **GitHub SSO** (same user).
 
-        Public self-check does **not** require access.
+        Public aggregate statistics do **not** require access. The hosted
+        self-check is currently suspended; use the local defensive CLI for
+        infrastructure you control.
 
         **Access needs the primary email on your GitHub account**, not just your
         username — that is the identity Cloudflare Access asserts when you sign

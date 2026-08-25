@@ -1,143 +1,232 @@
 # Roadmap
 
-Ordered by what closes a question this project has already admitted is open,
-then by value per hour of work. Items are described with the reason they matter
-and the thing that would make them wrong, because a roadmap that only lists
-features is a wishlist.
+**Status date:** 2026-08-25
+**Authority:** this is the current execution order. `SECURITY.md` remains the
+constitution; the 2026-08-25 security review supplies the open security
+requirements. Older specs and archived handoffs preserve reasoning, not current
+authorization to run active traffic.
 
-Two notes on how to read it:
+## Current operating state
 
-- **Nothing here widens what we probe.** Every item is about making the
-  measurement more useful or more honest. Expanding the *sources* we read is
-  planned (item 0b); expanding what we *touch* is not.
-- **Content is not free.** Five of these produce documents rather than code, and
-  a wrong hardening recommendation is worse than none. Where a document can be
-  generated from something the tool actually observed, it should be.
+| Surface | Current state |
+|---|---|
+| Public site and aggregate statistics | Available |
+| Research lab | Available behind Cloudflare Access and the researcher allowlist |
+| Local defensive CLI | Available for infrastructure the operator controls |
+| Passive discovery reports and dry-run plans | Available; send no target traffic |
+| Hosted `/v1/check` | Suspended; production returns `503 hosted_checks_temporarily_disabled` |
+| Active discovery and ingest | Suspended; scheduled active runs were removed |
+| 2026-08 discovery incident | Contained; 13 artifacts and 13 log sets deleted and verified |
+
+Nothing on this roadmap silently widens what the project touches. Passive source
+breadth, local operator-owned checks, and active third-party traffic are separate
+decisions and must stay separate in code, documentation, and metrics.
 
 ---
 
-## 0. Closing our own open questions
+## 0. Decide the measurement mode
 
-These outrank everything below because `SECURITY.md` §6 already names them as
-unsettled, and unsettled questions constrain what the published numbers may
+This decision determines whether the large storage/control-plane project in
+section 1b is necessary.
+
+### Option A — passive and local-first (current default)
+
+Keep internet measurement to index-derived counts and comparisons. Keep live
+checks inside infrastructure the operator controls. Retire dormant active paths
+that no longer serve a committed product direction.
+
+This is the lower-risk, lower-cost path and is the default until a written
+decision says otherwise.
+
+### Option B — restore governed active re-verification
+
+Retain the public-index provenance rule and read-only metadata probes, but rebuild
+the state model before sending traffic again. Choosing this option authorizes a
+design phase, not a probe run.
+
+**Decision output:** a short architecture decision record stating which option
+the project is taking, why, and which dormant code should be kept or removed.
+
+**What would make this step wrong:** allowing the existing dormant runner to
+become the de facto decision. It remains fail-closed until the choice and its
+prerequisites are explicit.
+
+---
+
+## 1. Security and reliability prerequisites
+
+### 1a. Bounded hardening — do regardless of measurement mode
+
+1. **Enforce CI and pin the supply chain.** Run `npm test` as a required check;
+   pin GitHub Actions to reviewed commit SHAs, Wrangler/npm packages to exact
+   versions with a lockfile, and local-lab containers to image digests. Scope
+   credentials to the step that needs them.
+2. **Isolate public statistics reads.** Materialize `/v1/stats` behind the Cache
+   API and an edge rate limit so public traffic cannot exhaust the KV allowance
+   used by authorization, exclusions, and retention.
+3. **Tighten the public perimeter.** Put the Worker behind a controlled custom
+   hostname/WAF before removing direct `workers.dev` exposure. Add enforceable
+   clickjacking headers for the GitHub Pages site through a hosting layer that
+   can set response headers.
+
+These are useful whether the project remains passive or later restores active
+measurement.
+
+### 1b. Strong state model — required only before active discovery returns
+
+Treat this as one storage/control-plane migration, not a series of KV patches:
+
+1. **Durable pre-probe lease.** Acquire a strongly consistent per-host 14-day
+   attempt lease before a packet is sent. A crash must not make a target eligible
+   again.
+2. **Authoritative pageable corpus.** Replace the capped `discovery:hits_index`
+   array with queryable storage for host records, attempt clocks, provenance,
+   deletion state, and due dates.
+3. **Resumable opt-out deletion.** Purge IP/CIDR/ASN matches with persisted
+   cursors, retries, verification, and a completion receipt. Attempt records must
+   carry enough metadata to be purged too.
+4. **Retention that scales.** Schedule records by due date; do not rely on a
+   bounded sweep racing a seven-day TTL grace period.
+5. **Strong security state and counters.** Move allowlist/revocation and critical
+   rate limits away from eventually consistent KV. Reserve capacity for opt-outs
+   and revocations ahead of telemetry.
+6. **Resumable reconciliation.** Recount into versioned staging state and switch
+   generations only after the entire corpus is processed.
+7. **Conservative unknown-ASN handling.** Missing ASN belongs to a shared bounded
+   bucket; it never skips the per-ASN safety gate.
+
+D1, Durable Objects, or a combination are candidates. The design must be chosen
+from transactional/query requirements, not from attachment to the current KV
+schema.
+
+**Exit criteria:** the re-enable tests in the security review pass under
+concurrency, interruption, a corpus larger than every page limit, and a matching
+record beyond the first purge page. Until then, active discovery stays off.
+
+### 1c. Hosted checks are a separate architecture
+
+Cloudflare Workers global `fetch` cannot reliably target IP literals, while
+hostnames reintroduce DNS rebinding and CIDR/ASN opt-out ambiguity. Hosted checks
+may return only behind a trusted probe service that can pin validated public
+addresses, apply IP/CIDR/ASN exclusions, enforce strong rate limits, and
+distinguish platform failures from clean results.
+
+This work is not a prerequisite for the local CLI or passive research. A missing
+hosted checker is not a reason to weaken target validation.
+
+---
+
+## 2. Close the project's open research questions
+
+These constrain what the published numbers and any host-identifying output may
 claim.
 
-### 0a. Disclosure routing — settles Q-2
+### 2a. Disclosure routing — settles Q-2 operationally
 
-The policy is written (I-27: notify before host-identifying publication, 90-day
-window, aggregates ungated). The routing is not wired. We can identify hundreds
-of exposed hosts and cannot tell their operators, and notifying at scale
-ourselves is how a research project gets reclassified as the threat.
+The policy is already settled: notify before host-identifying publication, wait
+90 days, and leave aggregates ungated. The delivery route is not wired.
 
-Route is the Shadowserver Foundation, who already run free daily notification to
-network owners and national CSIRTs. Below that: national CSIRTs via the FIRST
-directory routed on the country data we hold, CERT/CC's VINCE for the
-multi-party case, and provider abuse channels — which reach more operators per
-message than host-level contact ever will.
+Confirm Shadowserver Foundation's current researcher intake and required format.
+Use national CSIRTs through FIRST, CERT/CC VINCE for multi-party cases, and
+provider abuse channels as fallbacks. Do not build a home-grown mass contact
+discovery or notification system.
 
-**Blocked on:** confirming Shadowserver's current researcher intake and format.
+**Output:** an accepted external route, a documented fallback, and a testable
+handoff format that contains only the minimum host-identifying data required.
 
-**What would make it wrong:** building our own notification pipeline instead.
-Contact discovery at scale is the part we cannot do responsibly, and it is
-exactly what they already do.
+### 2b. Independent passive index — settles Q-3
 
-### 0b. A second index — settles Q-3
+Every current count is Shodan-shaped. Add Censys first and publish disagreement
+between sources rather than summing them into a larger-looking population.
 
-Every number we publish is Shodan-shaped, and our own limitations say so. Censys
-first (free tier, genuinely independent), then certificate transparency and
-favicon-hash lanes.
+Certificate Transparency and favicon lanes can follow as passive census inputs.
+Index records are counts/candidates, not standing permission to probe.
 
-This does not widen probing: index records are counted, never probed, unless a
-candidate passes all four gates like any other.
+**Output:** source-specific counts, overlap, disagreement, freshness, and query
+limitations. A single combined total is explicitly not the deliverable.
 
-**What would make it wrong:** treating a second source as more coverage rather
-than as a cross-check. The point is to find out where Shodan is blind, which
-means publishing the disagreement, not summing the two.
+### 2c. Hostname handling — settles Q-1 before CT identifiers persist
+
+CT yields organizational hostnames, a more identifying class than an address in
+a hosting ASN. Before storing them, decide retention, lab visibility, deletion,
+and whether any hostname-derived aggregate can be public. Default while
+undecided: treat hostnames exactly like raw IPs—private and never public.
+
+Q-4, tunnelled exposure, is a permanent measurement limitation rather than a
+lane to chase. Published totals must continue to name it.
 
 ---
 
-## 1. Threat and exposure model for AI stacks
+## 3. Threat and exposure model for AI stacks
 
-A short living document mapping what an unauthenticated endpoint actually
-enables — inference theft, model theft, RCE on Ray and Jupyter, cost abuse,
-pivot potential — which services carry *configuration* risk versus *version*
-risk, and where the measurement is structurally blind.
+Create a short living document mapping what an unauthenticated endpoint enables:
+inference theft, model theft, execution on Ray/Jupyter, cost abuse, and pivot
+potential. Separate configuration risk from version risk and name structural
+blind spots.
 
-Mostly **extraction, not authorship**. The four exposure classes already exist in
-`worker/src/lib/exposure.js` with the prose explaining each. Configuration-versus-
-version is already encoded: Ray is flagged on configuration precisely because
-CVE-2023-48022 is disputed and no upgrade closes it, and the CVE line carries its
-own denominator because only a minority of hosts disclose a version. The blind
-spots are Q-3 and Q-4.
+This is mostly extraction from `worker/src/lib/exposure.js`, service findings,
+and the existing limitations—not unsupported threat inflation.
 
-Highest value per hour on this list, and the piece a security engineer at a GPU
-provider could hand to a customer.
+---
 
-## 2. Local-first tooling expansion
+## 4. Local-first tooling expansion
 
-`src/check_ollama_exposure.py` already runs inside an operator's boundary and
-already forces an ownership attestation. Extend it:
+Extend `src/check_ollama_exposure.py` inside the operator's boundary:
 
-- the full lane set, not just Ollama
-- a `--hardening-checklist` mode that emits a prioritised list from what it found
-- optional export of detection patterns for the services it detects
+- support the full reviewed service set, not only Ollama;
+- add `--hardening-checklist` generated from observed findings;
+- optionally export detection patterns for services actually detected;
+- preserve ownership attestation, no redirects, URL validation, and body caps.
 
-This is the only substantial engineering item here, and it is what makes item 3
-sustainable: a checklist generated from observed findings is a formatter, where a
-hand-maintained guide per service is a permanent content debt.
+This is the main product-engineering track if option A remains the measurement
+mode.
 
-## 3. Operator hardening playbooks
+---
 
-Copy-pasteable guides per service — bind address, authenticating reverse proxy
-patterns, non-root and read-only rootfs, no route to cloud metadata, alerting on
-the endpoints that matter. Linked from findings so the output moves from "you are
-exposed" to "here is how to close it in your environment."
+## 5. Operator hardening playbooks
 
-**Generated from item 2 wherever possible.** Written by hand this is five-plus
-services and ongoing accuracy maintenance, and an incorrect hardening
-recommendation does more harm than silence.
+Produce copy-pasteable guidance per service: bind address, authenticated reverse
+proxy, non-root/read-only containers, metadata isolation, and relevant alerts.
+Generate it from item 4 wherever possible so guidance stays tied to observed
+findings.
 
-The exception worth authoring directly is the **Kubernetes-flavoured** version —
-NetworkPolicy and Cilium, Service type, Ingress auth, pod security standards.
-That is not in our remediation strings today and it is the shape most relevant to
-anyone running inference on shared GPU infrastructure.
+Author the Kubernetes version deliberately: Service type, Ingress auth,
+NetworkPolicy/Cilium, pod security, and workload identity boundaries.
 
-## 4. Detection guidance — only the part we can verify
+---
 
-We measure from outside; detection is an inside-the-host discipline. Sigma rules
-we cannot test against real telemetry would be speculation formatted as guidance,
-which is the one thing this project has never done.
+## 6. Detection guidance — only what can be verified
 
-The defensible slice, and the one to publish: **exactly what our probe looks like
-in your logs** — the User-Agent, the paths, the cadence. First-party,
-verifiable, and already half-written on `/scanning`.
+Publish exactly what LeakyCompute traffic looks like in operator logs: User-Agent,
+paths, method, cadence, and source-attribution limitations. Do not publish Sigma
+or broader telemetry rules until they can be validated against representative
+logs.
 
-Broader alerting guidance waits until we have telemetry to validate it against.
+---
 
-## 5. Architecture patterns for inference on shared GPU infrastructure
+## 7. Shared-GPU architecture patterns
 
-Patterns for exposing inference only through authenticated gateways, isolation
-expectations, and how a tenant should think about the boundary between their
-workload and the public internet.
-
-**Deliberately last.** This is the item furthest from our evidence base — we
-measure exposure, we have not operated shared GPU infrastructure at scale, and
-the people who would read it have. Authoritative-sounding architecture guidance
-without operating experience is where credibility gets spent rather than earned.
-
-Worth writing once there is experience behind it.
+Document authenticated inference gateways, tenant isolation, metadata/network
+boundaries, and safe exposure patterns only after the project has sufficient
+operational evidence. This remains last because authoritative guidance without
+operating experience spends credibility rather than earning it.
 
 ---
 
 ## Deliberately not on this roadmap
 
-- **An operator-requested scan queue.** I-22a specifies it, and building it would
-  mean a request intake, an approval path, and a way to deliver results to
-  someone who is not a researcher. The web checker already answers a single
-  attested host synchronously, and the CLI answers a whole range with no rate
-  limit, inside the operator's own boundary. Neither requires us to scan address
-  space on request. See `docs/specs/001-reverification-and-disclosure.md`.
-- **Anything that proves impact.** I-3 is permanent. We report that an endpoint
-  answers an unauthenticated request; we never send the request that would show
-  what that access allows.
-- **Proxying inference through discovered hosts.** I-20. Not in any phase.
+- **An operator-requested remote scan queue.** The local CLI covers address space
+  the operator controls. The hosted checker is suspended, but its absence does
+  not justify making the project originate bulk traffic for requesters.
+- **Anything that proves impact.** I-3 is permanent. Report reachability; never
+  send the action that demonstrates what the access permits.
+- **Proxying inference through discovered hosts.** I-20, in every phase.
+- **Sweeping unindexed address space.** I-19 remains a bright line even if active
+  re-verification eventually returns.
+
+## Definition of done
+
+An item is complete only when its behavior, limits, failure mode, verification,
+and documentation agree. A feature that exists in code but is disabled or not
+deployed is not described as available. A partial purge, recount, census, or
+notification is not described as complete.

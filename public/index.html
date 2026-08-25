@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://leakycompute-api.mhedhli.workers.dev; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <title>LeakyCompute — DON'T PANIC // exposed AI case file</title>
-  <meta name="description" content="Defensive research pulse for internet-exposed Ollama endpoints. Dual counters, safe self-check, and a gated researcher lab. Evidence first. Panic never." />
+  <meta name="description" content="Defensive research pulse for internet-exposed AI services, with passive index measurements, historical re-verification, and local operator-owned checks." />
   <meta name="theme-color" content="#0a0e17" />
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="css/style.css?v=e9b6d61c" />
@@ -45,13 +45,13 @@
         Ollama, Ray, Jupyter, and a dozen stacks like them are answering the whole
         internet with nothing in front of them. Whoever finds one can spend your GPU,
         read your models, and on some of them run code on your machine. LeakyCompute
-        counts how much of that is out there and lets you check your own address in
-        one click — no signup, nothing to type.
+        measures how much of that is visible in public indexes and provides a local
+        checker for infrastructure you control.
       </p>
       <p class="lede">
         The three numbers below come from three different places: what an archived
-        catalog claimed, what public indexes list today, and what we confirmed
-        ourselves under rules we publish.
+        catalog claimed, what public indexes list today, and what bounded historical
+        re-verification confirmed before active probing was suspended.
       </p>
       <div class="counters counters-3">
         <div class="card snapshot">
@@ -79,7 +79,7 @@
           <div class="badge" id="indexed-stamp">as of —</div>
         </div>
         <div class="card live">
-          <div class="label">Live instrumented · confirmed exposed<span class="ast">*</span></div>
+          <div class="label">Historical re-verification · confirmed exposed<span class="ast">*</span></div>
           <div class="value" id="live-exposed">—</div>
           <div class="sub" id="live-sub">Loading…</div>
           <div class="badge" title="Distinct hosts currently held. Observations count every time a host answered, so a host seen in two runs counts twice there and once here.">
@@ -91,13 +91,12 @@
 
       <div class="footnote" id="methodology-note">
         <p>
-          <span class="ast">*</span> <strong>Confirmed exposed</strong> counts only
-          what we verified ourselves, as of <span id="confirmed-asof">—</span>, and
-          only within the limits our own rules place on us: we probe a host only if
-          a public index already listed it or its owner asked us to, never more than
-          once per fortnight, never on a port outside a fixed allowlist, and never
-          at all if anyone has asked to be left alone. The true number is larger
-          than this one — necessarily so.
+          <span class="ast">*</span> <strong>Confirmed exposed</strong> is a retained
+          historical count from bounded read-only re-verification, last updated
+          <span id="confirmed-asof">—</span>. Active probing is suspended, so this
+          number is not a live census and will become stale. When the measurements
+          were collected, targets had to be present in a public index or supplied
+          by their owner, and the exclusion, cadence, rate, and port gates applied.
         </p>
         <p>
           <strong>Current</strong> is counted, not probed — we read what public
@@ -125,7 +124,7 @@
       </div>
       <div class="geo-block" style="margin-top:20px">
         <h3 style="font-size:12px;letter-spacing:0.1em;color:var(--amber);text-transform:uppercase;margin-bottom:10px">
-          Exposure by country
+          Historical re-verification by country
         </h3>
         <p class="hint" id="geo-note">Unique re-verified hosts · sorted by count · no raw IPs</p>
         <div class="row" style="margin:8px 0;gap:8px;align-items:center">
@@ -140,9 +139,9 @@
     </section>
 
     <section class="panel">
-      <h3>Safe self-check</h3>
+      <h3>Local self-check</h3>
       <p class="hint" style="margin-bottom:12px">
-        <strong>Hosted checks are temporarily paused.</strong> This deployment
+        <strong>Hosted checks are suspended.</strong> This deployment
         cannot reliably connect to IP-literal targets, so a hosted “clean” result
         would be false assurance. Run the local defensive CLI inside infrastructure
         you control; results stay on your machine.
@@ -171,10 +170,9 @@
       <div id="result" class="result">Use the local CLI linked below.</div>
 
       <div class="more-than-one">
-        <strong>Need more than one address checked?</strong>
-        This checker probes from our infrastructure, so it is rate limited — which
-        is the wrong tool for a range. Run the same checks yourself instead: on
-        your network, no rate limit, results stay with you.
+        <strong>Need an address or range checked?</strong>
+        Run the local CLI from infrastructure you control. It sends no request to
+        LeakyCompute, has no service-side rate limit, and keeps results with you.
         <a href="https://github.com/MahdiHedhli/LeakyCompute#scanning-a-range-you-own"
            target="_blank" rel="noopener">How to scan a range you own →</a>
       </div>
@@ -194,8 +192,9 @@
     <section class="panel">
       <h3>Methodology &amp; ethics</h3>
       <p class="hint">
-        LeakyCompute is a defensive research project. The public surface does not mass-scan the internet
-        and does not ship exploit payloads.
+        LeakyCompute is a defensive research project. Active internet probing and
+        hosted checks are suspended. The public surface does not mass-scan the
+        internet and does not ship exploit payloads.
         Researchers request GitHub-SSO lab access via issue; approval writes an allowlist entry used by the gated lab.
       </p>
     </section>
@@ -212,6 +211,6 @@
     </footer>
   </div>
   <script src="js/config.js?v=92e0ac53"></script>
-  <script src="js/app.js?v=901180e8"></script>
+  <script src="js/app.js?v=ebeb2857"></script>
 </body>
 </html>

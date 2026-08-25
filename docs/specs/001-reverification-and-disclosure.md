@@ -1,9 +1,18 @@
 # Spec: re-verification corpus + coordinated disclosure
 
-**Status:** draft · **Date:** 2026-08-10
+**Status:** historical design record; active execution superseded by the
+[2026-08-25 security review](../SECURITY_REVIEW_2026-08-25.md) and current
+[roadmap](../ROADMAP.md) · **Date:** 2026-08-10
 
 > Amends I-18. Adds I-22…I-27. Settles Q-2. Supersedes the fixed `max_hosts`
 > volume cap with a provenance rule plus behavioural discipline.
+
+This spec explains why I-22…I-27 exist and preserves the original measurement
+design. It is not authorization to run active discovery. Historical active runs
+occurred from August 19–25, 2026; the adversarial review then suspended active
+operation, removed the schedule, and closed the public artifact/log incident.
+The current roadmap decides whether this active design is rebuilt on strong
+state or retired in favor of passive/local-first measurement.
 
 ## Problem
 
@@ -251,20 +260,20 @@ operator request, and a row whose only provenance is our own prior traffic is
 refused — "we probed it before" is not an entitlement. Verified by
 `governance_gates.py`, which runs under `npm test` via `provenance.test.mjs`.
 
-Still open against this section:
+Still open against any future active re-enable path:
 
-- **I-22a has no intake.** Operator scan requests are a maintainer-curated JSON
-  manifest passed with `--approved-requests`. Without that flag, zero candidates
-  are eligible by that path. The gate is real; the front door is unbuilt, so the
-  issue template, requester rate limit, and refusal log described in I-22a do not
-  exist yet.
+- **I-22a has no intake, deliberately.** Operator scan requests are a
+  maintainer-curated JSON manifest passed with `--approved-requests`. The gate
+  exists, but the current roadmap explicitly excludes a remote scan queue; the
+  local CLI is the supported path for infrastructure an operator controls.
 - **Provenance is not persisted.** The corpus stores `source`, so a replayed
   row's entitlement is re-derived from a string rather than read from a record.
-  A worker-side provenance field would make it auditable after the fact.
-- **No real run has occurred.** Steps 1–4 are all enforcement. Nothing has been
-  measured, and until the Worker is deployed a real `--ingest` run cannot even
-  start: the exclusion and interval gates fail closed against endpoints that
-  exist only in the undeployed code.
+  A future authoritative store must persist the complete provenance record.
+- **Historical runs did occur.** Active runs between August 19 and 25 exposed a
+  crash-before-clock gap and wrote address-level data to public artifacts/logs.
+  The schedule and active entry points are now disabled; all 13 artifacts and
+  13 log sets were deleted and verified. See the security review for the
+  incident record and re-enable criteria.
 
 Steps 1–3 were the cost of step 4. Shipping 4 first would have been the version
 of this project that its own §0 warns about.
@@ -280,22 +289,19 @@ of this project that its own §0 warns about.
   self-run notification without an established channel is how research projects
   get classified as the threat.
 
-## Verification
+## Verification status
 
-New tests required before this ships:
+| Invariant | Current status | Remaining work |
+|---|---|---|
+| I-22 | Synthetic provenance refusal and freshness tests pass. | Persist the complete provenance record if active measurement returns. |
+| I-22a | Unapproved requests fail closed. | No remote intake is planned; the local CLI is the supported operator path. |
+| I-24 | Interval, neighborhood, ASN, and hard-ceiling tests pass. | Acquire a strongly consistent 14-day lease **before** sending a packet. |
+| I-25 | Exclusions are checked before probes and ingest; immediate suppression works. | Make large IP/CIDR/ASN deletion resumable and verifiable across records and attempts. |
+| I-26 | Minimization and last-success retention tests pass. | Replace bounded index sweeps and short TTL grace with due-date/queryable storage. |
+| I-27 | Publication-window stripping is machine-checked. | Wire an external notification route; a window calculation is not notification. |
 
-| Invariant | Test |
-|---|---|
-| I-22 | Probe target traceable to neither an index record nor an approved request → runner refuses; assert on a synthetic target |
-| I-22a | Unapproved request is never probed; request naming third-party space is refused and logged; private ranges refused (I-11) |
-| I-24 | Re-probe inside 14 days is skipped; per-ASN ceiling enforced |
-| I-25 | Exclusion consulted before the first request is emitted, not after; exclusion beats an approved scan request for the same space |
-| I-26 | Retained record contains no model list / job record / body; expiry measured from last **successful** probe, and a successful probe resets it |
-| I-27 | Host-identifying field is withheld from the public payload before window elapse |
-
-I-23 is process, not code, except the User-Agent constant — assert that.
-I-27's window logic is machine-checkable; the notification *attempt* is not.
-Say so in §4a rather than implying coverage we do not have.
+I-23 remains process plus the tested User-Agent. None of these tests override
+the production kill switches or the current roadmap's architecture decision.
 
 ## Limitations
 

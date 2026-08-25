@@ -35,15 +35,15 @@ assurance. The local CLI runs inside the operator's own boundary instead.
 | | |
 |---|---|
 | 🔎 **[Public status page](https://mahdihedhli.github.io/LeakyCompute/)** | Hosted checks are paused; exposure statistics and local CLI guidance remain available. |
-| 📄 **[About our scanning](https://mahdihedhli.github.io/LeakyCompute/scanning.html)** | Found us in your logs? Exactly what we send, and a one-click opt-out. |
+| 📄 **[Measurement & opt-out](https://mahdihedhli.github.io/LeakyCompute/scanning.html)** | Found us in your logs? What historical probes sent, current suspension status, and a one-click opt-out. |
 | 🔬 **[Researcher lab](https://leakycompute-lab.pages.dev)** | Corpus browser and exposure maps. GitHub SSO, [approval required](https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_research_access.yml). |
 | ⚙️ **[API](https://leakycompute-api.mhedhli.workers.dev/v1/health)** | `/v1/*` — see the [contract](docs/API.md). |
 
-## How a probe gets permission
+## How the dormant active path gates a probe
 
-The interesting part of this project is not the scanner. It's what stands
-between a candidate host and a packet. Four gates, all of them ahead of the
-dry-run branch, so the plan a run writes down is the plan it executes:
+Active discovery is suspended. The dormant implementation remains fail-closed
+behind four gates, all ahead of the dry-run branch. They are retained for audit
+and testing, not as authorization to run it:
 
 ```
   candidate host
@@ -68,12 +68,11 @@ dry-run branch, so the plan a run writes down is the plan it executes:
    read-only GET   ← the only thing we ever send
 ```
 
-**We never discover a host by probing.** Every address we contact was already
-published in a public index, or its owner asked us to look. That single rule is
-what separates this from the tooling it studies, and it holds whether the corpus
-is 300 hosts or 300,000.
+**We never discover a host by probing.** Every address historically contacted
+was already published in a public index, or its owner asked us to look. Current
+internet measurement is passive and sends those indexed hosts nothing.
 
-## What it checks
+## What active checks are limited to
 
 Confirm the service, then run one read-only exposure check. Never a job
 submission, model pull, prompt, kernel start, or file read.
@@ -84,9 +83,10 @@ submission, model pull, prompt, kernel start, or file read.
 | **Ray** | 8265 | `GET /api/version` | `GET /api/jobs/` |
 | **Jupyter** | 8888 | `GET /api/status` | `GET /tree` |
 
-Background re-verification covers a wider set — vLLM, Triton, Open WebUI,
-LocalAI, LiteLLM, ComfyUI, MLflow, TensorBoard, Gradio — every probe path listed
-and justified under invariant I-2 in [SECURITY.md](docs/SECURITY.md).
+The suspended background re-verification implementation covers a wider set —
+vLLM, Triton, Open WebUI, LocalAI, LiteLLM, ComfyUI, MLflow, TensorBoard,
+Gradio — every dormant probe path listed and justified under invariant I-2 in
+[SECURITY.md](docs/SECURITY.md).
 
 Ray is flagged on **configuration, not version**: CVE-2023-48022 is disputed
 because the vendor considers missing auth intended, so upgrading will not fix it.
@@ -100,16 +100,17 @@ because collapsing them into one would be the easiest lie to tell:
 |---|---|
 | **Archive snapshot** | What a Wayback-era catalog listed. Counted, never probed by us. |
 | **Indexed, observed** | Hosts in public index records today. Counted, not probed. |
-| **Re-verified** | Hosts that answered a read-only GET *from us*, inside the re-probe window. |
+| **Historical re-verification** | Retained hosts that answered a bounded read-only GET before active probing was suspended. |
 
-The third number is the only one we stand behind directly, and it is the
-smallest. That gap is the honest finding, not a shortfall to engineer away.
+The third number is direct but historical; it is not a live census. That gap and
+its increasing staleness are limitations to publish, not shortfalls to conceal.
 
 ## Safety rails
 
 Every rule below is a numbered invariant in
 **[docs/SECURITY.md](docs/SECURITY.md)**, the document each change is reviewed
-against. Most are enforced by `npm test` rather than by good intentions.
+against. Most are enforced by `npm test` rather than by good intentions. The
+remote paths are suspended, but their constraints remain testable and binding.
 
 - **Read-only `GET` only** — never `/api/pull`, `/api/generate`, a Ray job, or a traversal payload
 - **We report that an endpoint answers unauthenticated requests. We never send one to prove impact**
@@ -132,14 +133,13 @@ an opt-out.
 
 ## Scanning a range you own
 
-The web checker answers for **one address at a time** — the one you connected
-from, or a single host you attest to owning. That is deliberate: it probes on
-our infrastructure, so it is rate limited, and a rate limit is the wrong tool
-for someone who needs to check a hundred machines.
+The hosted checker is suspended. Cloudflare Workers cannot reliably connect to
+IP-literal destinations, so a hosted failure could look like a clean result. We
+will not offer false assurance.
 
-If you own more than one, run the checker yourself. It executes on your network,
-answers immediately, has no rate limit, and never asks us for permission to look
-at your own infrastructure.
+Run the checker inside infrastructure you control. It executes on your network,
+answers immediately, has no service-side rate limit, and never asks us for
+permission to inspect your own systems.
 
 ```bash
 git clone https://github.com/MahdiHedhli/LeakyCompute
@@ -171,11 +171,11 @@ result here does not add to the public counters, and is not meant to.
 ## Repo layout
 
 ```
-public/            # GitHub Pages checker + /scanning disclosure page
+public/            # GitHub Pages status + /scanning disclosure page
 lab/               # Access-gated researcher UI (corpus, maps, validation)
 worker/src/        # Cloudflare Worker API
 worker/test/       # the invariant suite — npm test
-scripts/discovery/ # off-Worker re-verification runner + gates
+scripts/discovery/ # passive planner + dormant gated re-verification runner
 src/               # defensive Python CLI
 docs/              # constitution, API contract, discovery model, specs
 docs/archive/      # unmaintained: session handoffs, write-up notes
@@ -219,15 +219,30 @@ Ordered by what closes a question the project already admits is open, then by
 value per hour. Full detail, including what would make each item *wrong*, in
 **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
-**Next, and they outrank everything else** — both settle open questions in our own
-constitution:
+**Current default:** passive internet measurement plus live checks inside the
+operator's own boundary. Hosted checks and active discovery remain suspended.
+
+The next decision is whether active re-verification is still a product goal. If
+yes, it requires the strong state/storage migration in the security review. If
+no, the dormant active paths should be retired rather than maintained
+indefinitely.
+
+Bounded work that is valuable either way:
+
+1. Required CI and pinned Actions, packages, and container images.
+2. A cached public statistics snapshot that cannot exhaust security-state KV
+   reads.
+3. A controlled Worker hostname/WAF and enforceable browser framing policy.
+
+Then close the research questions that constrain publication:
 
 | | |
 |---|---|
 | **Disclosure routing** *(settles Q-2)* | The policy is written — notify before host-identifying publication, 90-day window. The routing is not wired. Route is the Shadowserver Foundation, who already notify network owners and national CSIRTs daily. We can identify hundreds of exposed hosts and cannot yet tell their operators. |
-| **A second index** *(settles Q-3)* | Every number here is Shodan-shaped and our limitations say so. Censys first, then certificate transparency and favicon lanes. The point is cross-checking where Shodan is blind — not summing two sources into a bigger figure. |
+| **An independent passive index** *(settles Q-3)* | Every number here is Shodan-shaped. Censys comes first; publish overlap and disagreement rather than summing sources into a larger figure. |
+| **Hostname policy before CT** *(settles Q-1)* | Certificate Transparency produces organizational hostnames. Decide retention, deletion, and publication rules before persisting them. |
 
-Then, in order:
+Product and content work follows:
 
 1. **Threat and exposure model** — what an unauthenticated endpoint actually enables, and which services carry *configuration* risk rather than *version* risk. Mostly extraction: the exposure classes and that distinction already live in the code.
 2. **Local-first tooling** — extend the CLI to the full lane set, plus a generated hardening checklist. The only substantial engineering item, and it is what keeps item 3 from becoming permanent content debt.
@@ -235,16 +250,16 @@ Then, in order:
 4. **Detection guidance** — only the verifiable slice: exactly what our probe looks like in your logs. Alerting rules wait until there is telemetry to test them against.
 5. **Architecture patterns for shared GPU infrastructure** — deliberately last. We measure exposure; we have not operated this at scale, and the people who would read it have.
 
-**Not on the roadmap, on purpose:** an operator-requested scan queue (the checker
-answers one attested host synchronously, the CLI answers a whole range inside
-your own boundary), anything that proves impact (I-3), and proxying inference
-through discovered hosts (I-20, in any phase).
+**Not on the roadmap, on purpose:** an operator-requested remote scan queue (the
+local CLI covers systems the operator controls), anything that proves impact
+(I-3), proxying inference through discovered hosts (I-20), and sweeping
+unindexed address space (I-19).
 
 ## Documentation
 
 - **[Security policy & constitution](docs/SECURITY.md)** — the numbered invariants, and which are machine-checked. Read this before adding any probe or source.
 - [API reference](docs/API.md) — the `/v1/*` contract, findings, severities, rate limits
-- [Re-verification & disclosure spec](docs/specs/001-reverification-and-disclosure.md) — the corpus expansion plan and the disclosure policy
+- [Re-verification & disclosure spec](docs/specs/001-reverification-and-disclosure.md) — historical active-measurement design and the disclosure policy
 - [Discovery model](docs/DISCOVERY.md) — passive lanes, source registry, local fingerprint lab
 - [2026-08-25 security review](docs/SECURITY_REVIEW_2026-08-25.md) — adversarial findings, containment, open blockers, incident response
 - [Roadmap](docs/ROADMAP.md) — what is next, why it is next, and what would make each item wrong

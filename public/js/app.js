@@ -133,7 +133,7 @@
   function renderGeo(rows, sortMode) {
     const el = $("geo-list");
     if (!rows || !rows.length) {
-      el.textContent = "No geo data yet — run multi-lane discovery ingest.";
+      el.textContent = "No historical re-verification geography is available.";
       return;
     }
     const sorted = rows.slice();
@@ -233,7 +233,8 @@
       liveVal.textContent = fmt(rev.hosts);
       $("live-observations").textContent = fmt(data.live_instrumented?.exposed_total);
       $("live-checks").textContent = fmt(data.live_instrumented?.checks_total);
-      liveSub.textContent = "Distinct hosts we re-verified with a read-only GET.";
+      liveSub.textContent =
+        "Retained historical hosts re-verified with a read-only GET; active probing is suspended.";
       $("confirmed-asof").textContent = stamp(
         rev.last_reverified_at || data.live_instrumented?.last_check_at || data.updated_at
       );
@@ -253,7 +254,7 @@
         "API offline or not configured — showing snapshot fallback. Set public/js/config.js API_BASE after deploy.";
       apiNote.dataset.state = "err";
       snapSub.textContent = "Local snapshot fallback (seed).";
-      liveSub.textContent = "Connect API to accumulate live counts.";
+      liveSub.textContent = "Historical re-verification data unavailable.";
     }
   }
 
