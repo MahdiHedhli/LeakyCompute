@@ -20,7 +20,10 @@ const COUNTRY_STACK_KEY = "stats:by_country_stack";
 const CORPUS_KEY = "stats:corpus";
 const ATTEMPTS_KEY = "discovery:probe_attempts";
 const SWEEP_STATE_KEY = "discovery:sweep_cursor";
-const MAX_INDEX = 5000;
+// Must cover at least a full I-24 interval at the maximum historical schedule
+// volume (2 x 445 x 14 = 12,460). Falling below that silently evicts a recent
+// probe clock and makes the host eligible again before 14 days.
+const MAX_INDEX = 20000;
 
 /** I-26: 180 days from the last *successful* probe, never from creation. */
 export const RETENTION_DAYS = 180;
@@ -882,7 +885,11 @@ export async function ingestDiscoveryBatch(env, batch) {
   // may be holding a list that predates a removal filed mid-run. Re-checking
   // here is what stops an ingest from writing an excluded operator straight
   // back into the corpus a purge just cleared.
-  const exclusions = batch.exclusions || (await loadExclusionsSafe(env));
+  // The stored list is authoritative and must be readable. A caller-provided
+  // snapshot can add exclusions, never replace or weaken the current list.
+  const authoritativeExclusions = await loadExclusions(env);
+  const suppliedExclusions = Array.isArray(batch.exclusions) ? batch.exclusions : [];
+  const exclusions = [...authoritativeExclusions, ...suppliedExclusions];
   const results = [];
   let refused = 0;
   for (const r of all) {
@@ -1004,19 +1011,6 @@ export async function ingestDiscoveryBatch(env, batch) {
     kv_puts_today: spent.used,
     kv_budget: spent.budget,
   };
-}
-
-/**
- * I-25 fails closed in the runner, where the alternative is emitting packets.
- * Here the alternative is refusing to store a finding we already have, which
- * helps nobody, so an unreadable list degrades to the runner's own filtering.
- */
-async function loadExclusionsSafe(env) {
-  try {
-    return await loadExclusions(env);
-  } catch {
-    return [];
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1145,6 +1139,18 @@ export async function reconcileCorpusCounts(env, { limit = 2000 } = {}) {
   if (!env.KV) return { ok: false, reason: "no_kv" };
 
   const index = (await env.KV.get(HITS_INDEX, "json")) || [];
+  if (Array.isArray(index) && index.length > limit) {
+    // A partial recount must never overwrite complete aggregates. A resumable
+    // reconciliation needs an accumulator and cursor; until then, fail closed.
+    return {
+      ok: false,
+      reason: "corpus_exceeds_reconcile_limit",
+      scanned: 0,
+      total: index.length,
+      limit,
+      complete: false,
+    };
+  }
   const ips = (Array.isArray(index) ? index : []).slice(-limit);
 
   const geo = {};

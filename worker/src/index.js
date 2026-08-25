@@ -160,8 +160,14 @@ export default {
 
       return json({ error: "not_found" }, 404, request, env);
     } catch (err) {
+      const requestId = crypto.randomUUID();
+      console.error("worker request failed", {
+        request_id: requestId,
+        path,
+        error: String(err?.message || err),
+      });
       return json(
-        { error: "internal_error", message: String(err?.message || err) },
+        { error: "internal_error", request_id: requestId },
         500,
         request,
         env
@@ -193,6 +199,9 @@ export default {
         // just made rather than the state before them.
         .then(() => reconcileCorpusCounts(env))
         .then((r) => {
+          if (!r?.ok) {
+            throw new Error(`aggregate reconciliation incomplete: ${r?.reason || "unknown"}`);
+          }
           if (r?.ok && r.drift) {
             console.log(`aggregates reconciled: ${r.reverified_before} -> ${r.reverified_after} (drift ${r.drift})`);
           }
@@ -232,6 +241,24 @@ function clientIp(request) {
 }
 
 async function handleCheck(request, env, ctx) {
+  // Cloudflare Workers' global fetch cannot target IP literals directly. The
+  // default self-check target is the caller's IP, so enabling this without a
+  // separate address-pinning probe service produces universal false negatives.
+  // Fail visibly instead of presenting a platform refusal as a clean result.
+  if (env.HOSTED_CHECKS_ENABLED !== "true") {
+    return json(
+      {
+        error: "hosted_checks_temporarily_disabled",
+        message:
+          "Hosted checks are temporarily disabled because this deployment cannot " +
+          "reliably connect to IP-literal targets. Use the local defensive CLI for infrastructure you control.",
+      },
+      503,
+      request,
+      env
+    );
+  }
+
   const ip = clientIp(request);
   let body = {};
   try {
@@ -254,7 +281,7 @@ async function handleCheck(request, env, ctx) {
   const timeoutMs = intEnv(env, "CHECK_TIMEOUT_MS", 3000);
 
   const override = !!(body.target && String(body.target).trim());
-  const authorized = !!body.authorized;
+  const authorized = body.authorized === true;
 
   let targetHost = ip;
   let mode = "own_ip";
@@ -297,8 +324,22 @@ async function handleCheck(request, env, ctx) {
         env
       );
     }
-    targetHost = vt.host;
-    mode = "override";
+    // Public overrides are suspended until every address-level opt-out can be
+    // enforced, including ASN exclusions. The Worker has no trusted target-IP
+    // to ASN mapping, so allowing this request would let a caller route around
+    // an operator's ASN-wide removal request (I-25). Use the local CLI inside
+    // the operator's own boundary in the meantime.
+    return json(
+      {
+        error: "override_temporarily_disabled",
+        message:
+          "Checks of a different address are temporarily disabled while ASN-wide " +
+          "opt-out enforcement is completed. Run the local CLI for infrastructure you control.",
+      },
+      403,
+      request,
+      env
+    );
   }
 
   // I-25: an operator who asked to be left alone is honoured before any request
@@ -339,9 +380,11 @@ async function handleCheck(request, env, ctx) {
   // Which tier-1 services to check. Default: all of them.
   let services = TIER1;
   if (Array.isArray(body.services) && body.services.length) {
-    services = body.services
-      .map((s) => String(s).toLowerCase().trim())
-      .filter((s) => SERVICES[s]);
+    services = [...new Set(
+      body.services
+        .map((s) => String(s).toLowerCase().trim())
+        .filter((s) => TIER1.includes(s))
+    )];
     if (!services.length) {
       return json(
         { error: "unknown_service", supported: TIER1 },
@@ -357,7 +400,7 @@ async function handleCheck(request, env, ctx) {
   const ports = {};
   if (body.ports && typeof body.ports === "object") {
     for (const [k, v] of Object.entries(body.ports)) {
-      if (SERVICES[k]) ports[k] = v;
+      if (TIER1.includes(k)) ports[k] = v;
     }
   }
   if (body.port != null && body.port !== "" && ports.ollama == null) {

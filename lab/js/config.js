@@ -20,7 +20,8 @@ window.LEAKY_LAB_CONFIG = {
     const u = new URL(window.location.href);
     const api = u.searchParams.get("api");
     const dev = u.searchParams.get("dev_user");
-    if (api) window.LEAKY_LAB_CONFIG.API_BASE = api.replace(/\/+$/, "");
-    if (dev) window.LEAKY_LAB_CONFIG.DEV_GITHUB_LOGIN = dev;
+    const localPage = ["", "localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+    if (api && localPage) window.LEAKY_LAB_CONFIG.API_BASE = api.replace(/\/+$/, "");
+    if (dev && localPage) window.LEAKY_LAB_CONFIG.DEV_GITHUB_LOGIN = dev;
   } catch (_) {}
 })();

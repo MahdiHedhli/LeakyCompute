@@ -71,9 +71,9 @@ GOOD_INDEX = P.index_provenance("shodan", "product:Ollama", "ollama", "lane_sear
 
 
 def _no_record():
-    ok, why = eligible([cand("203.0.113.10")])
+    ok, why = eligible([cand("8.8.8.10")])
     assert ok == [], f"a candidate with no provenance reached the probe loop: {ok}"
-    assert why["203.0.113.10"] == "no_provenance_record", why
+    assert why["8.8.8.10"] == "no_provenance_record", why
 
 
 check("a candidate with no provenance record is dropped before probing", _no_record)
@@ -81,10 +81,10 @@ check("a candidate with no provenance record is dropped before probing", _no_rec
 
 def _bad_index():
     ok, why = eligible(
-        [cand("203.0.113.11", provenance=P.index_provenance("hearsay", "?", "ollama", "lane"))]
+        [cand("8.8.8.11", provenance=P.index_provenance("hearsay", "?", "ollama", "lane"))]
     )
     assert ok == [], ok
-    assert why["203.0.113.11"].startswith("index_not_recognised"), why
+    assert why["8.8.8.11"].startswith("index_not_recognised"), why
 
 
 check("a source that is not a recognised public index is dropped", _bad_index)
@@ -96,44 +96,64 @@ def _incomplete():
     undated = dict(GOOD_INDEX)
     undated["observed_at"] = "not-a-date"
     ok, why = eligible(
-        [cand("203.0.113.12", provenance=missing_via), cand("203.0.113.13", provenance=undated)]
+        [cand("8.8.8.12", provenance=missing_via), cand("8.8.8.13", provenance=undated)]
     )
     assert ok == [], ok
-    assert why["203.0.113.12"] == "index_record_incomplete", why
-    assert why["203.0.113.13"] == "index_record_undated", why
+    assert why["8.8.8.12"] == "index_record_incomplete", why
+    assert why["8.8.8.13"] == "index_record_undated", why
 
 
 check("an index record that does not verify at probe time is dropped", _incomplete)
 
 
 def _good_index():
-    ok, _ = eligible([cand("203.0.113.14", provenance=GOOD_INDEX)])
-    assert ok == ["203.0.113.14"], "a genuine index listing must remain probeable"
+    ok, _ = eligible([cand("8.8.8.14", provenance=GOOD_INDEX)])
+    assert ok == ["8.8.8.14"], "a genuine index listing must remain probeable"
 
 
 check("a host a public index already lists is eligible", _good_index)
+
+
+def _non_public_index_target():
+    for ip in ("127.0.0.1", "169.254.169.254", "10.0.0.1", "203.0.113.1", "::1"):
+        ok, why = eligible([cand(ip, provenance=GOOD_INDEX)])
+        assert ok == [], f"trusted index metadata laundered non-public target {ip}"
+        assert why[ip] == "non_public_address", why
+
+
+check("an index record cannot launder a non-public target", _non_public_index_target)
 
 
 def _circular():
     # The whole point of I-22: our own past traffic is not an entitlement.
     for src in ("check", "prior", "active_probe", "discovery", "", None):
         assert P.provenance_from_corpus_source(src) is None, f"{src!r} accepted as provenance"
-    ok, why = eligible([cand("198.51.100.7", provenance=P.provenance_from_corpus_source("check"))])
+    ok, why = eligible([cand("1.1.1.7", provenance=P.provenance_from_corpus_source("check"))])
     assert ok == [], "‘we probed it before’ must not justify probing it again"
-    assert why["198.51.100.7"] == "no_provenance_record", why
+    assert why["1.1.1.7"] == "no_provenance_record", why
 
 
 check("'we probed it before' is not provenance", _circular)
 
 
 def _corpus_index_source():
-    prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(30))
+    prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(1))
     assert prov and prov["index"] == "shodan", prov
-    ok, _ = eligible([cand("198.51.100.8", provenance=prov)])
-    assert ok == ["198.51.100.8"], "a corpus row that names an index keeps its entitlement"
+    ok, _ = eligible([cand("1.1.1.8", provenance=prov)])
+    assert ok == ["1.1.1.8"], "a corpus row that names an index keeps its entitlement"
 
 
 check("a corpus row whose source names a public index stays eligible", _corpus_index_source)
+
+
+def _stale_index_source():
+    prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(30))
+    ok, why = eligible([cand("1.1.1.8", provenance=prov)])
+    assert ok == [], "a stale stored source label became standing probe permission"
+    assert why["1.1.1.8"] == "index_record_stale", why
+
+
+check("stale index provenance is not standing permission", _stale_index_source)
 
 
 # ---------------------------------------------------------------------------
@@ -167,10 +187,10 @@ def approved_manifest(**over):
 
 def _unapproved():
     ok, why = eligible(
-        [cand("198.51.100.9", provenance={"path": "operator_request", "request_id": "ghost"})]
+        [cand("1.1.1.9", provenance={"path": "operator_request", "request_id": "ghost"})]
     )
     assert ok == [], "an unapproved request must never be probed"
-    assert why["198.51.100.9"].startswith("request_not_approved"), why
+    assert why["1.1.1.9"].startswith("request_not_approved"), why
 
 
 check("a request that is not in the approved manifest is never probed", _unapproved)
@@ -477,6 +497,9 @@ def _litellm_is_not_billed():
     lane = next(L for L in R.LANES if L["id"] == "litellm")
     assert lane["probe_path"] != "/health", "restores a probe that bills the operator"
     assert lane["probe_path"].startswith("/health/")
+    profiles = open(os.path.join(ROOT, "scripts", "discovery", "profiles.yaml")).read()
+    litellm = profiles.split("\n  litellm:", 1)[1].split("\n  vllm:", 1)[0]
+    assert "path: /health/liveliness" in litellm, "profiles.yaml restored the billing probe"
 
 
 check("the litellm lane does not spend the operator's money", _litellm_is_not_billed)
@@ -552,13 +575,16 @@ def _self_test_cli():
     assert meta.get("provenance_enforced") is True, meta
     assert meta.get("provenance_dropped") == 4, meta
     # Only the two hosts a public index actually listed survive to the plan.
-    assert sorted(kept) == ["198.51.100.8", "203.0.113.10"], kept
-    for dropped in ("203.0.113.11", "203.0.113.12", "198.51.100.7", "198.51.100.9"):
+    assert sorted(kept) == ["1.1.1.8", "8.8.8.10"], kept
+    for dropped in ("8.8.8.11", "8.8.8.12", "1.1.1.7", "1.1.1.9"):
         assert dropped not in json.dumps(plan.get("candidates", [])), (
             f"{dropped} has no valid provenance but survived into the probe plan"
         )
     # I-22 drops are announced on stderr, where an unattended run cannot lose them.
     assert "I-22" in proc.stderr, proc.stderr
+    console = proc.stdout + proc.stderr
+    for ip in ("8.8.8.10", "8.8.8.11", "8.8.8.12", "1.1.1.7", "1.1.1.8", "1.1.1.9"):
+        assert ip not in console, f"raw candidate address leaked to console: {ip}"
 
     # The plan itself must record that it was not interval- or exclusion-filtered,
     # rather than implying it was.
@@ -569,6 +595,22 @@ def _self_test_cli():
 
 
 check("--self-test drops every ineligible candidate before the plan is written", _self_test_cli)
+
+
+def _active_runner_suspended():
+    proc = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "scripts", "discovery", "run_multilane.py"),
+         "--ingest"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={k: v for k, v in os.environ.items() if not k.startswith(("SHODAN", "LEAKY"))},
+    )
+    assert proc.returncode != 0, "active runner unexpectedly became reachable"
+    assert "Active re-verification is suspended" in proc.stderr + proc.stdout
+
+
+check("active runner fails closed until attempts are durable before probes", _active_runner_suspended)
 
 
 # ---------------------------------------------------------------------------

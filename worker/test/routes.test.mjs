@@ -36,6 +36,7 @@ async function seededEnv(overrides = {}) {
     KV: makeKV(),
     // Dev identity bypass; the lab's gate still requires the allowlist entry.
     ENVIRONMENT: "development",
+    HOSTED_CHECKS_ENABLED: "true",
     ALLOWED_ORIGINS: "https://mahdihedhli.github.io",
     ADMIN_SYNC_TOKEN: ADMIN,
     CHECK_TIMEOUT_MS: "200",
@@ -608,11 +609,9 @@ section("identity: approval and assertion must agree on who someone is");
     assert.equal(m.entry.login, "mahdihedhli");
   });
 
-  await check("the email local-part resolves — the case that actually broke", async () => {
-    // access.js pushes both the address and its local part as candidates, so an
-    // assertion carrying only an email still lands on the entry.
-    const m = await matchAllowEntry(env, ["mhedhli", "researcher@example.test"]);
-    assert.ok(m, "local-part or address should match");
+  await check("an email local-part cannot impersonate an approved handle", async () => {
+    assert.equal(await matchAllowEntry(env, ["mhedhli"]), null);
+    assert.ok(await matchAllowEntry(env, ["researcher@example.test"]));
   });
 
   await check("an unrelated identity still does not", async () => {
@@ -622,6 +621,46 @@ section("identity: approval and assertion must agree on who someone is");
   await check("matching reports which name matched", async () => {
     const m = await matchAllowEntry(env, ["nope", "mahdihedhli"]);
     assert.equal(m.matched, "mahdihedhli");
+  });
+}
+
+{
+  const { approveResearcher, revokeResearcher, matchAllowEntry } =
+    await import("../src/lib/allowlist.js");
+  const env = await seededEnv();
+  await approveResearcher(env, {
+    login: "rotated", aliases: ["old@example.com"], approved_by: "test",
+  });
+  await approveResearcher(env, {
+    login: "rotated", aliases: ["new@example.com"], approved_by: "test",
+  });
+
+  await check("re-approval deactivates aliases removed from the entry", async () => {
+    assert.equal(await matchAllowEntry(env, ["old@example.com"]), null);
+    assert.ok(await matchAllowEntry(env, ["new@example.com"]));
+  });
+
+  await revokeResearcher(env, "rotated");
+  await check("revocation after re-approval leaves no stale alias", async () => {
+    assert.equal(await matchAllowEntry(env, ["old@example.com"]), null);
+    assert.equal(await matchAllowEntry(env, ["new@example.com"]), null);
+  });
+}
+
+{
+  const { approveResearcher } = await import("../src/lib/allowlist.js");
+  const env = await seededEnv();
+  await approveResearcher(env, {
+    login: "owner-one", aliases: ["claimed@example.com"], approved_by: "test",
+  });
+
+  await check("an alias cannot overwrite another researcher's identity", async () => {
+    await assert.rejects(
+      approveResearcher(env, {
+        login: "owner-two", aliases: ["claimed@example.com"], approved_by: "test",
+      }),
+      /alias_in_use/
+    );
   });
 }
 
@@ -683,6 +722,17 @@ section("every gated route resolves identity the same way");
   await check("both gates use matchAllowEntry", async () => {
     assert.ok(src.includes("matchAllowEntry"), "lab.js must match all candidates");
     assert.ok(idx.includes("matchAllowEntry"), "index.js must match all candidates");
+  });
+}
+
+{
+  const access = fs.readFileSync(path.join(SRC, "lib", "access.js"), "utf8");
+  await check("production identity comes only from exact signed email", async () => {
+    assert.ok(!access.includes('X-GitHub-Login'));
+    assert.ok(!access.includes('email.split("@")'));
+    for (const claim of ["preferred_username", "nickname", "identity_nickname"]) {
+      assert.ok(!access.includes(`push(p.${claim})`), `trusted mutable claim ${claim}`);
+    }
   });
 }
 

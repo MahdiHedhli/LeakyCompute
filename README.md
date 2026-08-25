@@ -8,7 +8,7 @@
 
 *Is your AI inference server answering the whole internet?*
 
-### → **[Check your own IP — no signup, no input](https://mahdihedhli.github.io/LeakyCompute/)** ←
+### → **Hosted checks paused — use the [local defensive CLI](#scanning-a-range-you-own)** ←
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f5c542.svg)](LICENSE)
 [![Probes](https://img.shields.io/badge/probes-read--only%20GET-5ce1ff.svg)](docs/SECURITY.md)
@@ -22,10 +22,10 @@ Thousands of Ollama, Ray, and Jupyter servers are reachable from the public
 internet with no authentication at all. Anyone who finds one can run inference on
 someone else's GPU, read their models, and — on Ray and Jupyter — execute code.
 
-LeakyCompute measures that exposure **so operators can close it**. Visit the
-checker and it tells you whether *your* address is answering, and exactly how to
-stop it. Nothing is typed in; the default target is the address you connected
-from, which is why the common path needs no permission from anyone.
+LeakyCompute measures that exposure **so operators can close it**. The hosted
+checker is currently paused: Cloudflare Workers cannot reliably fetch an IP
+literal, so presenting that platform refusal as a clean result would be false
+assurance. The local CLI runs inside the operator's own boundary instead.
 
 > **Evidence first. Panic never.**<br>
 > We measure exposure so operators can close it.
@@ -34,7 +34,7 @@ from, which is why the common path needs no permission from anyone.
 
 | | |
 |---|---|
-| 🔎 **[Public checker](https://mahdihedhli.github.io/LeakyCompute/)** | Scans your own egress IP for Ollama, Ray and Jupyter. No input, no account. |
+| 🔎 **[Public status page](https://mahdihedhli.github.io/LeakyCompute/)** | Hosted checks are paused; exposure statistics and local CLI guidance remain available. |
 | 📄 **[About our scanning](https://mahdihedhli.github.io/LeakyCompute/scanning.html)** | Found us in your logs? Exactly what we send, and a one-click opt-out. |
 | 🔬 **[Researcher lab](https://leakycompute-lab.pages.dev)** | Corpus browser and exposure maps. GitHub SSO, [approval required](https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_research_access.yml). |
 | ⚙️ **[API](https://leakycompute-api.mhedhli.workers.dev/v1/health)** | `/v1/*` — see the [contract](docs/API.md). |
@@ -146,7 +146,8 @@ git clone https://github.com/MahdiHedhli/LeakyCompute
 cd LeakyCompute
 
 # a single host
-python3 src/check_ollama_exposure.py --check-url http://10.0.0.5:11434
+python3 src/check_ollama_exposure.py \
+  --check-url http://10.0.0.5:11434 --i-own-this-host
 
 # everything listening on this machine
 python3 src/check_ollama_exposure.py --scan-local
@@ -189,7 +190,7 @@ npm test                                  # the invariant suite
 # CLI — localhost only
 python3 src/check_ollama_exposure.py --scan-local
 
-# Worker + public checker
+# Worker API + public status page
 npx wrangler dev
 # then open public/index.html with ?api=http://127.0.0.1:8787
 
@@ -199,19 +200,18 @@ python3 -m http.server 5500 --directory lab
 # needs ENVIRONMENT=development and an allowlist entry for that login
 ```
 
-Discovery runs **on your machine**, never inside the Worker:
+Passive discovery planning runs **on your machine**, never inside the Worker:
 
 ```bash
 export SHODAN_API_KEY=... LEAKY_API_BASE=... LEAKY_ADMIN_TOKEN=...
 
 python3 scripts/discovery/run_multilane.py --self-test   # gates only, no packets
 python3 scripts/discovery/run_multilane.py --dry-run     # passive pull, no packets
-python3 scripts/discovery/run_multilane.py --ingest      # all four gates live
 ```
 
-`--ingest` refuses to run if it cannot read the exclusion list or the probe
-clock. That is the design, not a bug: an opt-out that stops being consulted when
-the network hiccups is not an opt-out.
+Active probing and ingest are suspended until a strongly consistent pre-probe
+lease and complete, resumable opt-out deletion are implemented. See the
+[2026-08-25 security review](docs/SECURITY_REVIEW_2026-08-25.md).
 
 ## Roadmap
 
@@ -246,6 +246,7 @@ through discovered hosts (I-20, in any phase).
 - [API reference](docs/API.md) — the `/v1/*` contract, findings, severities, rate limits
 - [Re-verification & disclosure spec](docs/specs/001-reverification-and-disclosure.md) — the corpus expansion plan and the disclosure policy
 - [Discovery model](docs/DISCOVERY.md) — passive lanes, source registry, local fingerprint lab
+- [2026-08-25 security review](docs/SECURITY_REVIEW_2026-08-25.md) — adversarial findings, containment, open blockers, incident response
 - [Roadmap](docs/ROADMAP.md) — what is next, why it is next, and what would make each item wrong
 - [Deploy](docs/DEPLOY.md) · [Research background](docs/research.md)
 - [Archive](docs/archive/) — session handoffs and write-up notes, kept for their reasoning. Unmaintained; the constitution wins over anything in there.

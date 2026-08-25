@@ -323,6 +323,42 @@ const ALLOWED_KEYS = new Set([
   });
 }
 
+{
+  const env = freshEnv();
+  await env.KV.put(
+    "exclusions:v1",
+    JSON.stringify([{ type: "cidr4", value: "198.51.100.0/24", active: true }])
+  );
+  await ingestDiscoveryBatch(env, {
+    // A stale or hostile caller snapshot must not replace the authoritative list.
+    exclusions: [],
+    results: [{ ip: "198.51.100.12", port: 11434, exposed: true, stack: "ollama" }],
+  });
+
+  await check("caller exclusions cannot weaken the authoritative opt-out list", async () => {
+    assert.equal(await readRecord(env.KV, "198.51.100.12"), null);
+  });
+}
+
+{
+  const env = freshEnv();
+  const get = env.KV.get.bind(env.KV);
+  env.KV.get = async (key, type) => {
+    if (key === "exclusions:v1") throw new Error("simulated exclusion-store outage");
+    return get(key, type);
+  };
+
+  await check("admin ingest fails closed when the opt-out list is unreadable", async () => {
+    await assert.rejects(
+      ingestDiscoveryBatch(env, {
+        results: [{ ip: "198.51.100.13", port: 11434, exposed: true, stack: "ollama" }],
+      }),
+      /simulated exclusion-store outage/
+    );
+    assert.equal(await readRecord(env.KV, "198.51.100.13"), null);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 section("[R3] deletion actually deletes: aggregates, counts, and failing loud");
 
@@ -883,6 +919,13 @@ section("aggregates can be recounted from the records themselves");
   const before = await getCorpusCounts(env);
   await check("drift is present before reconciling", async () => {
     assert.equal(before.reverified_hosts, 4);
+  });
+
+  const partial = await reconcileCorpusCounts(env, { limit: 5 });
+  await check("a partial recount refuses instead of overwriting complete aggregates", async () => {
+    assert.equal(partial.ok, false);
+    assert.equal(partial.reason, "corpus_exceeds_reconcile_limit");
+    assert.equal((await getCorpusCounts(env)).reverified_hosts, 4);
   });
 
   const res = await reconcileCorpusCounts(env);

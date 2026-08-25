@@ -2,10 +2,9 @@
  * Researcher allowlist.
  *
  * Keyed by GitHub login, because that is what the approval issue carries — but
- * matched against every identity string the Access assertion presents, because
- * the assertion may not carry a GitHub login at all. An approved researcher
- * whose email prefix differs from their GitHub handle was being rejected with
- * no way to see why; the entry now records its aliases so either name resolves.
+ * production Access presents an exact signed email rather than a GitHub login.
+ * The entry therefore records approved email aliases; mutable display claims
+ * and email local-parts are never treated as identities.
  */
 
 export function allowKey(login) {
@@ -25,7 +24,26 @@ export async function matchAllowEntry(env, candidates) {
   for (const c of candidates) {
     if (!c) continue;
     const row = await env.KV.get(allowKey(c), "json");
-    if (row && row.active !== false) return { entry: row, matched: String(c).toLowerCase() };
+    if (!row || row.active === false) continue;
+
+    // An alias is valid only while its primary entry is active and still names
+    // that alias. This makes stale/corrupted alias rows fail closed even if a
+    // prior multi-key update was interrupted.
+    if (row.alias_of) {
+      const primary = await env.KV.get(allowKey(row.alias_of), "json");
+      const candidate = String(c).trim().toLowerCase().replace(/^@/, "");
+      if (
+        !primary ||
+        primary.active === false ||
+        !Array.isArray(primary.aliases) ||
+        !primary.aliases.includes(candidate)
+      ) {
+        continue;
+      }
+      return { entry: primary, matched: candidate };
+    }
+
+    return { entry: row, matched: String(c).toLowerCase() };
   }
   return null;
 }
@@ -40,17 +58,26 @@ export async function approveResearcher(env, { login, issue, approved_by, meta, 
   if (!/^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/i.test(user)) {
     throw new Error("invalid_github_login");
   }
-  // An email is a legitimate alias — it is what several Access IdP
-  // configurations actually assert — but only the full address and its local
-  // part, never an arbitrary string, so approving one person cannot quietly
-  // admit another.
+  // Only a full email is a production identity alias. Arbitrary strings and
+  // email local-parts would create cross-account collision opportunities.
   const alias = [];
   for (const a of aliases || []) {
     const v = String(a || "").trim().toLowerCase().replace(/^@/, "");
     if (!v || v === user) continue;
     const emailish = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-    const handleish = /^[a-z0-9][a-z0-9._-]{0,63}$/.test(v);
-    if (emailish || handleish) alias.push(v);
+    if (emailish && !alias.includes(v)) alias.push(v);
+  }
+
+  // Resolve every ownership conflict before the first write. A primary login
+  // must never overwrite another researcher's alias, and an alias must never
+  // overwrite another primary or alias.
+  const existing = await env.KV.get(allowKey(user), "json");
+  if (existing?.alias_of && existing.alias_of !== user) {
+    throw new Error("login_in_use_as_alias");
+  }
+  for (const a of alias) {
+    const row = await env.KV.get(allowKey(a), "json");
+    if (row && row.login !== user) throw new Error("alias_in_use");
   }
 
   const entry = {
@@ -68,11 +95,25 @@ export async function approveResearcher(env, { login, issue, approved_by, meta, 
   for (const a of alias) {
     await env.KV.put(allowKey(a), JSON.stringify({ ...entry, alias_of: user }));
   }
+  // Re-approval replaces the alias set. Deactivate anything removed from the
+  // new entry so an old email cannot remain a second door.
+  for (const old of existing?.aliases || []) {
+    if (alias.includes(old)) continue;
+    const row = await env.KV.get(allowKey(old), "json");
+    if (row?.login === user) {
+      await env.KV.put(
+        allowKey(old),
+        JSON.stringify({ ...row, active: false, revoked_at: new Date().toISOString() })
+      );
+    }
+  }
   return entry;
 }
 
 export async function revokeResearcher(env, login) {
-  const user = String(login || "").toLowerCase().replace(/^@/, "");
+  const requested = String(login || "").toLowerCase().replace(/^@/, "");
+  const requestedEntry = await getAllowEntry(env, requested);
+  const user = requestedEntry?.alias_of || requested;
   const existing = await getAllowEntry(env, user);
   // Revoking must take the aliases with it, or a revoked researcher keeps a
   // second door.

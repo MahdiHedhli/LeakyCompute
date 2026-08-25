@@ -97,6 +97,9 @@ def filter_candidates(cands: list[dict], entries: list[dict]) -> tuple[list[dict
         except ValueError:
             excluded.append({**c, "excluded_by": "unparseable_address"})
             continue
+        if not ip.is_global or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            excluded.append({**c, "excluded_by": "non_public_address"})
+            continue
         hit = next((n for n in nets if ip in n), None)
         if hit is not None:
             excluded.append({**c, "excluded_by": str(hit)})

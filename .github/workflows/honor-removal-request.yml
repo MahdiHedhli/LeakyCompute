@@ -51,7 +51,10 @@ jobs:
           ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
           ENTRIES: ${{ steps.scope.outputs.entries }}
           ISSUE: ${{ github.event.issue.number }}
-          ALLOW_BROAD: ${{ contains(github.event.issue.labels.*.name, 'exclusion-approved') }}
+          # Broad approval is valid only on the event where a maintainer applies
+          # the approval label to the current scope. A later issue edit cannot
+          # reuse a persistent label to replace it with 0.0.0.0/0.
+          ALLOW_BROAD: ${{ github.event.action == 'labeled' && github.event.label.name == 'exclusion-approved' }}
         run: |
           set -euo pipefail
           if [ -z "${API_BASE:-}" ] || [ -z "${ADMIN_TOKEN:-}" ]; then
@@ -77,16 +80,28 @@ jobs:
             const accepted = r.accepted || [];
             const rejected = r.rejected || [];
             const held = r.held || [];
+            const purge = r.purged || {};
+            const deletionComplete = purge.complete !== false && !purge.error;
 
             const lines = [];
             if (accepted.length) {
               lines.push(
-                `**Exclusion applied.** We have stopped probing the following and deleted existing records:`,
+                deletionComplete
+                  ? `**Exclusion applied.** We have stopped probing the following and deleted existing records:`
+                  : `**Exclusion applied.** We have stopped probing the following:`,
                 '',
                 ...accepted.map((e) => `- \`${e.value}\``),
                 '',
                 'This is in effect now. It does not expire.'
               );
+              if (!deletionComplete) {
+                lines.push(
+                  '',
+                  '**Record deletion is still pending.** The exclusion is active, so no new',
+                  'probe will be sent, but the bounded purge did not confirm that every existing',
+                  'record was removed. A maintainer must complete the resumable purge.'
+                );
+              }
             }
             if (held.length) {
               lines.push(

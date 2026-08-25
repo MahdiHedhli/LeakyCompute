@@ -7,7 +7,15 @@ import { hashIp } from "./hash.js";
 export async function logAbuse(env, event) {
   if (!env.KV) return;
   try {
-    const salt = env.ABUSE_LOG_SALT || "dev-salt-change-me";
+    // Never make low-entropy IP pseudonyms enumerable with a public fallback.
+    // Local tests may use a fixed key; production skips logging if the required
+    // secret is missing rather than writing reversibly weak identifiers.
+    const salt =
+      env.ABUSE_LOG_SALT ||
+      (env.ENVIRONMENT === "test" || env.ENVIRONMENT === "development"
+        ? "local-test-only-hmac-key"
+        : null);
+    if (!salt) return;
     const clientHash = await hashIp(event.clientIp, salt);
     const targetHash = event.target
       ? await hashIp(String(event.target), salt)

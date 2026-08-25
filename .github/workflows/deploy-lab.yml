@@ -15,7 +15,7 @@ name: Lab gate + deploy fallback
 on:
   push:
     branches: [main]
-    paths: ["lab/**"]
+    paths: ["lab/**", "functions/**"]
   schedule:
     - cron: "35 5 * * *"      # daily, after the retention sweep
   workflow_dispatch:

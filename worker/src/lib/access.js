@@ -3,11 +3,11 @@
  * Dev bypass: ENVIRONMENT=development and header X-Dev-GitHub-Login.
  *
  * Production: set ACCESS_TEAM_DOMAIN + ACCESS_AUD (Application AUD tag).
- * GitHub IdP: we prefer custom claim / email local-part; issue approval stores github login.
- * Client may also send X-GitHub-Login when it matches JWT email/name (checked against allowlist only after JWT ok).
+ * GitHub IdP: identity candidates come only from the signed Access assertion.
+ * Caller-supplied identity headers are never trusted in production.
  */
 
-const certCache = { keys: null, fetchedAt: 0 };
+const certCache = { keys: null, fetchedAt: 0, team: null };
 
 function b64urlToBytes(s) {
   const pad = "=".repeat((4 - (s.length % 4)) % 4);
@@ -24,7 +24,11 @@ function decodeJwtPart(part) {
 
 async function getAccessCerts(teamDomain) {
   const now = Date.now();
-  if (certCache.keys && now - certCache.fetchedAt < 60 * 60 * 1000) {
+  if (
+    certCache.keys &&
+    certCache.team === teamDomain &&
+    now - certCache.fetchedAt < 60 * 60 * 1000
+  ) {
     return certCache.keys;
   }
   const url = `https://${teamDomain}/cdn-cgi/access/certs`;
@@ -33,6 +37,7 @@ async function getAccessCerts(teamDomain) {
   const data = await resp.json();
   certCache.keys = data.keys || [];
   certCache.fetchedAt = now;
+  certCache.team = teamDomain;
   return certCache.keys;
 }
 
@@ -56,14 +61,27 @@ async function verifyAccessJwt(token, env) {
   if (parts.length !== 3) return { ok: false, error: "malformed_jwt" };
   const header = decodeJwtPart(parts[0]);
   const payload = decodeJwtPart(parts[1]);
+  if (header.alg !== "RS256" || (header.typ && header.typ !== "JWT")) {
+    return { ok: false, error: "jwt_header_rejected" };
+  }
   if (payload.aud !== aud && !(Array.isArray(payload.aud) && payload.aud.includes(aud))) {
     return { ok: false, error: "aud_mismatch" };
   }
-  if (payload.exp && payload.exp * 1000 < Date.now()) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const issuer = `https://${String(team).replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+  if (payload.iss !== issuer) return { ok: false, error: "iss_mismatch" };
+  if (payload.type !== "app") return { ok: false, error: "token_type_rejected" };
+  if (!Number.isFinite(payload.exp) || payload.exp <= nowSec) {
     return { ok: false, error: "jwt_expired" };
   }
+  if (payload.nbf != null && (!Number.isFinite(payload.nbf) || payload.nbf > nowSec)) {
+    return { ok: false, error: "jwt_not_yet_valid" };
+  }
+  if (payload.iat != null && (!Number.isFinite(payload.iat) || payload.iat > nowSec + 60)) {
+    return { ok: false, error: "jwt_issued_in_future" };
+  }
   const keys = await getAccessCerts(team);
-  const jwk = keys.find((k) => k.kid === header.kid) || keys[0];
+  const jwk = keys.find((k) => k.kid === header.kid);
   if (!jwk) return { ok: false, error: "no_signing_key" };
   const key = await importJwk(jwk);
   const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
@@ -101,24 +119,21 @@ export async function resolveResearcher(request, env) {
     return null;
   }
 
-  const verified = await verifyAccessJwt(jwt, env);
+  let verified;
+  try {
+    verified = await verifyAccessJwt(jwt, env);
+  } catch {
+    return null;
+  }
   if (!verified.ok) return null;
 
   const p = verified.payload || {};
   const email = p.email || null;
 
-  // Collect every identity string this assertion supports, rather than picking
-  // one and hoping the allowlist agrees.
-  //
-  // The bug this replaces: with GitHub configured as the IdP, the assertion
-  // still arrived with no github_login/login claim, so resolution fell through
-  // to email.split("@")[0]. Meanwhile approve-research-access.yml writes the
-  // GitHub username parsed from the issue form. Those two strings differ for
-  // almost everyone, so an approved researcher signed in and was told they were
-  // not on the allowlist — with nothing on screen to say which name was checked.
-  //
-  // Claim names vary by Access IdP configuration, so this reads all of the ones
-  // that carry a handle instead of betting on one.
+  // Authorization uses only exact, IdP-verified identities. Display-oriented
+  // claims such as nickname/preferred_username are mutable and non-unique; an
+  // email local-part can be chosen to equal somebody else's GitHub handle.
+  // Approval therefore stores the exact Access sign-in email as an alias.
   const candidates = [];
   const push = (v) => {
     if (v == null) return;
@@ -126,20 +141,7 @@ export async function resolveResearcher(request, env) {
     if (s && !candidates.includes(s)) candidates.push(s);
   };
 
-  push(p.github_login);
-  push(p.login);
-  push(p.preferred_username);
-  push(p.nickname);
-  push(p.identity_nickname);
-  push(request.headers.get("X-GitHub-Login"));
-  // Custom claims land under different shapes depending on the IdP.
-  if (p.custom && typeof p.custom === "object") {
-    push(p.custom.github_login);
-    push(p.custom.login);
-    push(p.custom.nickname);
-  }
   push(email);
-  if (email && email.includes("@")) push(email.split("@")[0]);
 
   if (!candidates.length) return null;
 

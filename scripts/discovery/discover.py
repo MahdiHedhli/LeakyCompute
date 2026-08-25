@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LeakyCompute discovery runner — passive-first, slow active re-probes.
+LeakyCompute legacy passive discovery helper.
 
 Important: archive seed (data/seed-models.json) has MODEL NAMES + counts only —
 NO IPs. ASN / hosting-provider seeding comes from:
@@ -9,16 +9,15 @@ NO IPs. ASN / hosting-provider seeding comes from:
   • Prior exposed hits stored privately in the Worker
   • Optional local seeds file
 
-Pipeline:
+Historical pipeline (active stages disabled):
   1) Passive: Shodan search + ASN facet report
   2) Optional: pull top ASNs and fetch limited hosts per ASN
   3) Prior hits from Worker admin API
   4) Optional tiny neighborhood expand (/29–/30 only by default policy)
-  5) Slow safe probe: GET /api/ps only (global rate limiter)
-  6) Ingest to Worker (private hits + public aggregate stats)
+  5) Former active probe and ingest stages — now disabled
 
-Active scanning runs on YOUR machine (not inside free-tier Worker compute).
-The Worker only stores results and serves rate-limited public self-checks.
+Use this helper only for passive reports and dry-run plans. Any non-dry active
+invocation exits before sending a target request.
 
 Examples:
   export SHODAN_API_KEY=...
@@ -33,12 +32,7 @@ Examples:
       --from-top-asns 15 --hosts-per-asn 10 \\
       --from-prior --max-total 64 --dry-run
 
-  # Slow live run (recommended defaults are already conservative)
-  python3 scripts/discovery/discover.py \\
-      --from-top-asns 10 --hosts-per-asn 8 \\
-      --from-prior --expand-prefix 30 --max-expand-per-seed 4 \\
-      --max-total 48 --rate 0.2 --workers 1 \\
-      --ingest --output data/discovery-last-run.json
+  # Active modes are intentionally unavailable in this legacy helper.
 """
 
 from __future__ import annotations
@@ -68,6 +62,7 @@ USER_AGENT = "LeakyCompute-Discovery/1.0 (+defensive research; safe GET /api/ps 
 # goes out under this — the same prefix the Worker's probe uses. USER_AGENT
 # above stays for calls to our own API and to Shodan, which are not probes.
 PROBE_USER_AGENT = "LeakyCompute-SafeProbe/1.0 (+defensive research; read-only GET)"
+MAX_RESPONSE_BYTES = 32 * 1024
 
 # Hard safety rails (cannot be overridden above these without editing code)
 HARD_MAX_TOTAL = 128
@@ -139,13 +134,21 @@ def http_json(
         # third-party target or talks to our own API; neither needs to be
         # redirected, and a flag is one edit away from the target choosing.
         with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
+            raw = resp.read(MAX_RESPONSE_BYTES + 1)[:MAX_RESPONSE_BYTES].decode(
+                "utf-8", errors="replace"
+            )
             try:
                 return resp.status, json.loads(raw)
             except json.JSONDecodeError:
                 return resp.status, raw
     except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        raw = (
+            e.read(MAX_RESPONSE_BYTES + 1)[:MAX_RESPONSE_BYTES].decode(
+                "utf-8", errors="replace"
+            )
+            if e.fp
+            else ""
+        )
         try:
             return e.code, json.loads(raw)
         except Exception:
@@ -449,7 +452,7 @@ def ingest(api_base: str, admin_token: str, results: list[dict], meta: dict) -> 
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="LeakyCompute passive-first discovery (slow, capped active probes)"
+        description="LeakyCompute passive reporting and dry-run planning helper"
     )
     p.add_argument("--api-base", default=os.getenv("LEAKY_API_BASE", DEFAULT_API))
     p.add_argument(
@@ -503,7 +506,11 @@ def main() -> int:
     p.add_argument("--workers", type=int, default=1, help="Concurrent probe threads (max 2)")
     p.add_argument("--timeout", type=float, default=3.0)
     p.add_argument("--dry-run", action="store_true", help="List targets only; no probes")
-    p.add_argument("--ingest", action="store_true", help="Push results to Worker admin ingest")
+    p.add_argument(
+        "--ingest",
+        action="store_true",
+        help="disabled compatibility flag; active ingest is suspended",
+    )
     p.add_argument("--output", help="Write full JSON results to path")
     p.add_argument(
         "--asn-output",
@@ -511,6 +518,20 @@ def main() -> int:
         help="Where to write ASN report / block candidates",
     )
     args = p.parse_args()
+
+    active_sources = bool(
+        args.shodan
+        or args.from_top_asns
+        or args.from_prior
+        or args.seeds_file
+    )
+    if (active_sources or args.ingest) and not args.dry_run:
+        raise SystemExit(
+            "Active probing is disabled in legacy discover.py: it does not "
+            "enforce the current I-22/I-24/I-25 governance gates. Use "
+            "scripts/discovery/run_multilane.py, or add --dry-run for a "
+            "packet-free passive plan."
+        )
 
     # Clamp safety rails
     args.max_total = max(1, min(args.max_total, HARD_MAX_TOTAL))

@@ -35,6 +35,37 @@ AI_PORTS = [
 ]
 DOCKER_IMAGE = "ollama/ollama:latest"
 DEMO_NAME = "ollama-poc-demo"
+MAX_HTTP_BODY = 32 * 1024
+
+
+class _NoRedirect(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+HTTP = request.build_opener(_NoRedirect)
+
+
+def validate_base_url(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("URL must use http(s) and include a host")
+    if parsed.username or parsed.password:
+        raise ValueError("credentials in URLs are not accepted")
+    return url.rstrip("/")
+
+
+def is_loopback_url(url: str) -> bool:
+    from urllib.parse import urlsplit
+
+    host = urlsplit(url).hostname
+    try:
+        addresses = {row[4][0] for row in socket.getaddrinfo(host, None)}
+        return bool(addresses) and all(ipaddress.ip_address(ip).is_loopback for ip in addresses)
+    except (OSError, ValueError):
+        return False
 
 
 def http_json(url: str, method: str = "GET", data: dict | None = None, timeout: float = 5.0):
@@ -46,14 +77,22 @@ def http_json(url: str, method: str = "GET", data: dict | None = None, timeout: 
         headers={"Content-Type": "application/json", "User-Agent": "LeakyCompute-CLI/1.0"},
     )
     try:
-        with request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
+        with HTTP.open(req, timeout=timeout) as resp:
+            body_bytes = resp.read(MAX_HTTP_BODY + 1)
+            if len(body_bytes) > MAX_HTTP_BODY:
+                raise ValueError("response_too_large")
+            raw = body_bytes.decode("utf-8", errors="replace")
             try:
                 return resp.status, json.loads(raw)
             except json.JSONDecodeError:
                 return resp.status, raw
     except error.HTTPError as e:
-        raw = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        body_bytes = e.read(MAX_HTTP_BODY + 1) if e.fp else b""
+        raw = (
+            "response_too_large"
+            if len(body_bytes) > MAX_HTTP_BODY
+            else body_bytes.decode("utf-8", errors="replace")
+        )
         try:
             return e.code, json.loads(raw)
         except Exception:
@@ -63,7 +102,7 @@ def http_json(url: str, method: str = "GET", data: dict | None = None, timeout: 
 
 
 def probe_ollama(base: str, timeout: float = 3.0) -> dict[str, Any]:
-    base = base.rstrip("/")
+    base = validate_base_url(base)
     status, payload = http_json(f"{base}/api/ps", timeout=timeout)
     if status == 200 and isinstance(payload, dict):
         models = payload.get("models") or []
@@ -183,6 +222,11 @@ def main():
         action="store_true",
         help="Required with --scan-cidr; attests authorization",
     )
+    p.add_argument(
+        "--i-own-this-host",
+        action="store_true",
+        help="Required with a non-loopback --check-url; attests authorization",
+    )
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--max-hosts", type=int, default=256)
     p.add_argument("--workers", type=int, default=32)
@@ -195,7 +239,10 @@ def main():
     if args.demo_local:
         return demo_local()
     if args.check_url:
-        out = probe_ollama(args.check_url, timeout=args.timeout)
+        validated = validate_base_url(args.check_url)
+        if not is_loopback_url(validated) and not args.i_own_this_host:
+            raise SystemExit("Refusing non-loopback --check-url without --i-own-this-host")
+        out = probe_ollama(validated, timeout=args.timeout)
     elif args.scan_local:
         out = scan_local()
     elif args.scan_cidr:

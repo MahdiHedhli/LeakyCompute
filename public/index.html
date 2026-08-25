@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://leakycompute-api.mhedhli.workers.dev; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <title>LeakyCompute — DON'T PANIC // exposed AI case file</title>
   <meta name="description" content="Defensive research pulse for internet-exposed Ollama endpoints. Dual counters, safe self-check, and a gated researcher lab. Evidence first. Panic never." />
   <meta name="theme-color" content="#0a0e17" />
@@ -140,21 +142,20 @@
     <section class="panel">
       <h3>Safe self-check</h3>
       <p class="hint" style="margin-bottom:12px">
-        Default target is <strong>your current egress IP</strong> (as seen by Cloudflare) — no input needed.
-        We check <strong>Ollama</strong> (11434), <strong>Ray</strong> (8265) and <strong>Jupyter</strong> (8888).
-        Every probe is a read-only <code>GET</code> against a version, health or listing endpoint —
-        no pull, no generate, no job submission, no path traversal.
-        Strict rate limits apply. Override is logged privately for abuse review.
+        <strong>Hosted checks are temporarily paused.</strong> This deployment
+        cannot reliably connect to IP-literal targets, so a hosted “clean” result
+        would be false assurance. Run the local defensive CLI inside infrastructure
+        you control; results stay on your machine.
       </p>
 
-      <label class="check">
+      <label class="check" hidden>
         <input type="checkbox" id="override-toggle" />
         <span>Check a different host (I own it or have written authorization)</span>
       </label>
 
       <div id="override-fields" hidden>
         <div class="row">
-          <input id="target-input" type="text" placeholder="hostname or public IP" autocomplete="off" spellcheck="false" />
+          <input id="target-input" type="text" placeholder="public IP literal" autocomplete="off" spellcheck="false" />
         </div>
         <label class="check">
           <input type="checkbox" id="auth-check" />
@@ -163,11 +164,11 @@
       </div>
 
       <div class="row">
-        <button type="button" id="check-btn">Run safe probe</button>
+        <button type="button" id="check-btn" disabled>Hosted check unavailable</button>
       </div>
       <div id="verdict" class="verdict" hidden></div>
       <div id="report" class="report"></div>
-      <div id="result" class="result">— awaiting probe —</div>
+      <div id="result" class="result">Use the local CLI linked below.</div>
 
       <div class="more-than-one">
         <strong>Need more than one address checked?</strong>

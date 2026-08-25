@@ -42,8 +42,8 @@ const ROUTE_PREFIX = "/v1/research/lab";
  * says whether it hit the cap so no researcher mistakes a truncated scan for
  * the whole corpus.
  */
-const DEFAULT_SCAN = 500;
-const MAX_SCAN = 2000;
+const DEFAULT_SCAN = 250;
+const MAX_SCAN = 400;
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -286,8 +286,8 @@ async function gate(request, env, action) {
       action,
       result: "forbidden",
       clientIp: request.headers.get("CF-Connecting-IP") || "0.0.0.0",
+      target: identity.login,
       reason: "not_allowlisted",
-      meta: { login: identity.login },
     });
     throw new LabError(
       403,
@@ -305,13 +305,19 @@ async function gate(request, env, action) {
   const rl = await consume(
     env,
     `lab:${match.entry.login}`,
-    intEnv(env, "RL_LAB_MAX", 120),
+    intEnv(env, "RL_LAB_MAX", 20),
     intEnv(env, "RL_LAB_WINDOW_SEC", 300)
   );
-  if (!rl.ok) {
+  const daily = await consume(
+    env,
+    `lab_day:${match.entry.login}`,
+    intEnv(env, "RL_LAB_DAY_MAX", 50),
+    86400
+  );
+  if (!rl.ok || !daily.ok) {
     throw new LabError(429, "rate_limited", "Lab query rate limit reached.", {
       scope: "lab",
-      reset: rl.reset,
+      reset: !rl.ok ? rl.reset : daily.reset,
     });
   }
   return identity;
@@ -528,7 +534,10 @@ function verification(row, now, env) {
  * is what stops a downstream surface treating that as permission to publish.
  */
 function disclosure(row, now, env) {
-  const windowDays = intEnv(env, "DISCLOSURE_WINDOW_DAYS", DISCLOSURE_WINDOW_DAYS);
+  const windowDays = Math.min(
+    90,
+    Math.max(1, intEnv(env, "DISCLOSURE_WINDOW_DAYS", DISCLOSURE_WINDOW_DAYS))
+  );
   const notified = row.notified_ms;
   const elapsed = notified != null && now - notified >= windowDays * DAY_MS;
   return {

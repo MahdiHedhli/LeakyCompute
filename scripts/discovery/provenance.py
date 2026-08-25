@@ -35,6 +35,10 @@ PUBLIC_INDEXES = frozenset({"shodan", "censys"})
 # changes hands; a year-old ticket is not evidence that today's occupant asked
 # for anything.
 APPROVAL_MAX_AGE_DAYS = 90
+# A stored source label is not standing proof that the index still lists the
+# host. Active probing is currently suspended, but this gate must already be
+# correct before it can be re-enabled.
+MAX_INDEX_PROVENANCE_AGE_DAYS = 7
 
 # I-22a: a requester may only attest for space they control. Nobody controls a
 # /8 and needs us to find their Ollama box in it, so an oversized scope is
@@ -244,6 +248,13 @@ def candidates_for_requests(approved: dict[str, dict], port: int, probe_path: st
 
 def verify_candidate(cand: dict, approved: dict[str, dict]) -> tuple[bool, str]:
     """Return (eligible, reason). Reason is the drop reason when not eligible."""
+    try:
+        ip = ipaddress.ip_address(str(cand.get("ip")))
+    except ValueError:
+        return False, "unparseable_address"
+    if not ip.is_global or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return False, "non_public_address"
+
     prov = cand.get("provenance")
     if not isinstance(prov, dict):
         return False, "no_provenance_record"
@@ -255,8 +266,14 @@ def verify_candidate(cand: dict, approved: dict[str, dict]) -> tuple[bool, str]:
             return False, f"index_not_recognised:{index or '?'}"
         if not prov.get("via"):
             return False, "index_record_incomplete"
-        if parse_ts(prov.get("observed_at")) is None:
+        observed = parse_ts(prov.get("observed_at"))
+        if observed is None:
             return False, "index_record_undated"
+        age = _now() - observed
+        if age.total_seconds() < -300:
+            return False, "index_record_from_future"
+        if age > timedelta(days=MAX_INDEX_PROVENANCE_AGE_DAYS):
+            return False, "index_record_stale"
         return True, "public_index"
 
     if path == PATH_OPERATOR_REQUEST:
@@ -264,10 +281,6 @@ def verify_candidate(cand: dict, approved: dict[str, dict]) -> tuple[bool, str]:
         req = approved.get(rid)
         if not req:
             return False, f"request_not_approved:{rid or '?'}"
-        try:
-            ip = ipaddress.ip_address(str(cand.get("ip")))
-        except ValueError:
-            return False, "unparseable_address"
         # An approval covers the space the requester attested for and nothing
         # else. Without this check one approved /24 launders a probe at any host
         # the runner happens to be holding.

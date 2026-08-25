@@ -33,8 +33,16 @@ const FORWARD_HEADERS = [
   "cf-access-jwt-assertion",
   "accept",
   "content-type",
-  "x-github-login",
 ];
+
+const BRIDGE_ROUTES = new Set([
+  "me",
+  "catalog",
+  "lab/catalog",
+  "lab/map",
+  "lab/validation",
+  "lab/host",
+]);
 
 export async function onRequest(context) {
   const { request, params } = context;
@@ -65,7 +73,18 @@ export async function onRequest(context) {
     );
   }
 
-  const sub = Array.isArray(params.path) ? params.path.join("/") : params.path || "";
+  const parts = Array.isArray(params.path) ? params.path : [params.path || ""];
+  let sub;
+  try {
+    sub = parts.map((p) => decodeURIComponent(String(p))).join("/");
+  } catch {
+    return json({ error: "invalid_path" }, 400);
+  }
+  // URL construction normalizes ../ segments. A fixed prefix is not a gate if
+  // untrusted segments can normalize out of it, so bridge only exact lab routes.
+  if (!BRIDGE_ROUTES.has(sub)) {
+    return json({ error: "route_not_allowed" }, 404);
+  }
   const url = new URL(request.url);
   const target = `${UPSTREAM}/v1/research/${sub}${url.search}`;
 
@@ -83,7 +102,12 @@ export async function onRequest(context) {
       redirect: "manual",
     });
   } catch (err) {
-    return json({ error: "upstream_unreachable", message: String(err?.message || err) }, 502);
+    const requestId = crypto.randomUUID();
+    console.error("research bridge upstream failed", {
+      request_id: requestId,
+      error: String(err?.message || err),
+    });
+    return json({ error: "upstream_unreachable", request_id: requestId }, 502);
   }
 
   // Pass the body through untouched — the Worker owns what a researcher may

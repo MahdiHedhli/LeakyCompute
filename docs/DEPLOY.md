@@ -50,7 +50,7 @@ npm i -g wrangler   # or use npx
 wrangler login
 # wrangler.toml already has KV ids
 wrangler secret put ADMIN_SYNC_TOKEN
-wrangler secret put ABUSE_LOG_SALT
+wrangler secret put ABUSE_LOG_SALT  # high-entropy HMAC key; required for abuse logs
 # optional:
 wrangler secret put TURNSTILE_SECRET_KEY
 wrangler deploy

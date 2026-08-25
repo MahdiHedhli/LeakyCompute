@@ -1,5 +1,5 @@
 # LeakyCompute discovery query profiles
-# Passive Shodan first; active probes only with slow caps (see discover.py).
+# Passive Shodan planning only; active probing is suspended (see SECURITY review).
 #
 # Severity context (for the post — cite primary sources, not this file):
 # - NadMesh (mid-2026): bot harvests Shodan for ComfyUI/Ollama/n8n/Open WebUI/Langflow/Gradio → exploit queue
@@ -266,7 +266,9 @@ profiles:
     default_port: 4000
     safe_probe:
       method: GET
-      path: /health
+      # /health issues live completions against configured models and can bill
+      # the operator. Liveliness is static metadata (I-2/I-3).
+      path: /health/liveliness
 
   vllm:
     name: vLLM

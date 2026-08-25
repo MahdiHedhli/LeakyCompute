@@ -36,6 +36,8 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import ipaddress
+import socket
 import sys
 import urllib.error
 import urllib.parse
@@ -47,6 +49,48 @@ class _InlineFavicon(RuntimeError):
 
 USER_AGENT = "LeakyCompute-FaviconHash/1.0 (+defensive research; single GET)"
 TIMEOUT = 8
+MAX_BODY = 1_000_000
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+HTTP = urllib.request.build_opener(_NoRedirect)
+
+
+def _validated_http_url(url: str) -> urllib.parse.SplitResult:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("URL must use http(s) and include a host")
+    if parsed.username or parsed.password:
+        raise ValueError("credentials in URLs are not accepted")
+    return parsed
+
+
+def _same_origin(a: str, b: str) -> bool:
+    left = _validated_http_url(a)
+    right = _validated_http_url(b)
+    default = {"http": 80, "https": 443}
+    return (
+        left.scheme,
+        left.hostname,
+        left.port or default[left.scheme],
+    ) == (
+        right.scheme,
+        right.hostname,
+        right.port or default[right.scheme],
+    )
+
+
+def _is_loopback_url(url: str) -> bool:
+    host = _validated_http_url(url).hostname
+    try:
+        addresses = {row[4][0] for row in socket.getaddrinfo(host, None)}
+        return bool(addresses) and all(ipaddress.ip_address(ip).is_loopback for ip in addresses)
+    except (OSError, ValueError):
+        return False
 
 
 # --- MurmurHash3 x86_32 (Shodan's favicon hash) ----------------------------
@@ -107,6 +151,7 @@ def fetch_favicon(base_url: str) -> tuple[bytes, str]:
     Single read-only GET for the icon. Tries /favicon.ico, then the
     <link rel="icon"> declared on the root page.
     """
+    _validated_http_url(base_url)
     base = base_url.rstrip("/")
     candidates = [f"{base}/favicon.ico"]
 
@@ -127,6 +172,8 @@ def fetch_favicon(base_url: str) -> tuple[bytes, str]:
                     "favicon is inlined as a data: URI — not usable as a "
                     "search-engine pivot for this service"
                 )
+            if not _same_origin(base, joined):
+                raise RuntimeError("cross-origin favicon URL refused")
             candidates.append(joined)
     except _InlineFavicon:
         raise
@@ -145,9 +192,13 @@ def fetch_favicon(base_url: str) -> tuple[bytes, str]:
 
 
 def _get(url: str) -> bytes:
+    _validated_http_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # noqa: S310
-        return resp.read(1_000_000)
+    with HTTP.open(req, timeout=TIMEOUT) as resp:  # noqa: S310
+        body = resp.read(MAX_BODY + 1)
+        if len(body) > MAX_BODY:
+            raise ValueError("response exceeds 1 MB cap")
+        return body
 
 
 def _icon_href(html: str) -> str | None:
@@ -182,6 +233,11 @@ def main() -> int:
     ap.add_argument("--file", help="hash an icon file instead of fetching")
     ap.add_argument("--yaml", action="store_true", help="emit profiles.yaml-shaped output")
     ap.add_argument("--selftest", action="store_true", help="verify the mmh3 implementation")
+    ap.add_argument(
+        "--i-own-this-host",
+        action="store_true",
+        help="required for non-loopback URL targets; attests authorization",
+    )
     args = ap.parse_args()
 
     if args.selftest:
@@ -205,6 +261,8 @@ def main() -> int:
         if not url:
             label, url = url or t, t
         try:
+            if not _is_loopback_url(url) and not args.i_own_this_host:
+                raise ValueError("non-loopback URL requires --i-own-this-host")
             icon, src = fetch_favicon(url)
             rows.append(report(label or url, icon, src))
         except Exception as exc:  # noqa: BLE001

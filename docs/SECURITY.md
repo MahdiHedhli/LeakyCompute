@@ -1,5 +1,9 @@
 # Security policy & project constitution
 
+The 2026-08-25 repository-wide adversarial review, containment changes, open
+architectural blockers and incident-response work are recorded in
+[SECURITY_REVIEW_2026-08-25.md](SECURITY_REVIEW_2026-08-25.md).
+
 This document is the standard every change is checked against. It is written as
 **invariants** — statements that must remain true — rather than intentions, so a
 diff can be verified against it by a reviewer or an agent.
@@ -116,11 +120,18 @@ A clean result always ships with the `limitations` caveat attached.
 **I-9. The default target is the caller's own egress IP** (`CF-Connecting-IP`).
 That path needs no attestation because it is inherently self-authorized.
 
+*Deployment status:* hosted checks are disabled. Workers cannot reliably fetch
+IP-literal destinations, so a failed platform subrequest cannot be presented as
+evidence that the caller's host is clean. The local CLI remains available.
+
 **I-10. Any other target requires an explicit `authorized: true` attestation.**
-No attestation, no scan. Refusals are logged.
+No attestation, no scan. Refusals are logged. Public overrides are additionally
+suspended until an override IP's ASN can be resolved before the I-25 gate.
 
 **I-11. Private, reserved, loopback, link-local and CGNAT targets are refused
-from the public API** — with or without attestation.
+from the public API** — with or without attestation. Overrides accept canonical
+IP literals only; hostnames fail closed rather than opening a DNS-rebinding or
+CIDR-exclusion bypass.
 
 **I-12. Rate limits are enforced server-side at the Worker**, per source IP and
 globally. Client-side limits are not limits.
@@ -145,8 +156,9 @@ refused by every lab query — see the cross-gate test in `routes.test.mjs`.
 admin-token-gated hit store. Public aggregates are counts by country, ASN, and
 stack.
 
-**I-15. Abuse logs store hashed identifiers only** — salted, 14-day TTL, covering
-both client IP and override target.
+**I-15. Abuse logs store keyed pseudonyms only** — HMAC-SHA-256 under the
+required production `ABUSE_LOG_SALT`, 14-day TTL, covering both client IP and
+override target. If the key is absent in production, the event is not written.
 
 **I-16. Strings returned by a probed host are untrusted input.**
 Versions, model names, page titles and error bodies are attacker-controlled in
@@ -227,6 +239,11 @@ lookup that would not resolve to us.
 per host per 14 days; per-/24 and per-ASN concurrency ceilings and minimum
 spacing; a global rate ceiling below `HARD_MAX_RATE` that no flag can raise.
 Missing last-seen data fails closed: no clock, no probe.
+
+*Enforcement status:* active discovery is suspended. The current runner writes
+attempt clocks only after a completed run, so a crash could contact a host
+without advancing its clock. Dry-run and self-test modes remain available; live
+operation requires a durable pre-probe lease/attempt record.
 
 **I-25. Opt-out is honoured before the probe, not after.** An exclusion list (IP,
 CIDR, or ASN) is consulted before any request is emitted, and the runner refuses

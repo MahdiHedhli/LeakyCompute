@@ -303,11 +303,10 @@ Worker ingest (batches ≤150, ≤10/hour) → private hits + public counters
 
 | Layer | Limit |
 |--------|--------|
-| Active probe default | **0.25/sec**, **1 worker** |
-| Hard ceiling | max **1.0/sec**, max **2** workers, max **128** hosts/run |
+| Active probing | **Suspended** pending durable pre-probe leases |
+| Hosted public check | **Suspended**; use the local defensive CLI |
 | Neighborhood | prefix **≥ /28**; prefer **/30** |
 | Hosts per ASN | default **8**, max **25** |
-| Worker public check | 3 / 15m own-IP; 1 / 15m override; **800**/day global |
 | Worker ingest | **≤150**/request, **10**/hour |
 
 ---
@@ -327,10 +326,8 @@ python3 scripts/discovery/discover.py --asn-report \
 python3 scripts/discovery/discover.py --asn-report \
   --shodan-query 'http.title:"Jupyter" port:8888 -http.html:"token"'
 
-# Slow Ollama calibration (active)
-python3 scripts/discovery/discover.py \
-  --shodan-query 'product:Ollama' \
-  --from-top-asns 10 --hosts-per-asn 8 \
-  --max-total 48 --rate 0.2 --workers 1 \
-  --ingest --output data/discovery-last-run.json
+# Governance plan only — active probing is suspended until every attempt is
+# durably recorded before the packet is sent.
+python3 scripts/discovery/run_multilane.py --dry-run \
+  --output data/discovery-multilane.json
 ```

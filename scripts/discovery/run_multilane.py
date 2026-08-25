@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Multi-lane discovery runner for a solid pre-post seed.
+Multi-lane passive discovery planner and governance self-test.
 
 Lanes = high-signal Shodan fingerprints (Ollama, Jupyter-unauth, Ray, Open WebUI, …).
-Each lane: passive pull (limited) → stack-aware safe GET → ingest with geo.
+Each lane currently stops after a limited passive pull and a dry-run plan.
 
 Four gates stand between a candidate and a packet, all of them ahead of the
 dry-run branch so the written plan is the plan:
 
   I-22  provenance — public index record, or approved operator request
-  I-25  exclusions — fail closed; --ingest refuses to run without the list
+  I-25  exclusions — fail closed
   I-24  interval   — one probe cycle per host per 14 days, fail closed. The
                      clock is the probe *attempt* ledger, not the hit store:
                      the hit store holds only hosts that answered, so a host
@@ -23,7 +23,9 @@ Usage:
   export LEAKY_ADMIN_TOKEN=...
 
   python3 scripts/discovery/run_multilane.py --dry-run
-  python3 scripts/discovery/run_multilane.py --ingest --rate 0.2
+
+Active probing and ingest are suspended until attempt clocks can be committed
+durably before any packet is sent.
 
   # governance smoke test — no Shodan key, no admin API, no packets
   python3 scripts/discovery/run_multilane.py --self-test --output /tmp/plan.json
@@ -516,7 +518,7 @@ LANES: list[dict[str, Any]] = [
         # Measured 2026-08-17: the banner string returns 0 (Triton does not put
         # its name in the HTTP banner); matching page content returns 164.
         "query": 'port:8000 http.html:"triton"',
-        "allowed_ports": [8000, 8002],
+        "allowed_ports": [8000],
         "port_default": 8000,
         # Server metadata (name, version, extensions) under the KServe v2
         # protocol. The model inventory is NOT probed: v2 exposes it as
@@ -875,10 +877,10 @@ def run_probes(cands: list[dict], rate: float, workers: int, timeout: float) -> 
             results.append(r)
             mark = "EXPOSED" if r.get("exposed") else "—"
             cc = r.get("country_code") or "?"
-            print(
-                f"[{i}/{len(cands)}] {r['ip']}:{r['port']} {r.get('stack')} "
-                f"{cc} {mark}"
-            )
+            # Console output is routinely copied into CI logs. Raw addresses
+            # belong only in the local ignored result file and the admin-gated
+            # corpus (I-14), never in a public Actions log.
+            print(f"[{i}/{len(cands)}] {r.get('stack')} {cc} {mark}")
     return results
 
 
@@ -886,13 +888,13 @@ def self_test_candidates() -> list[dict]:
     """
     Synthetic candidates for --self-test.
 
-    RFC 5737 documentation space, which is never routed, so even a bug that got
-    past --dry-run could not reach a real host. One candidate per governance
-    outcome, so the smoke test shows the gates deciding rather than just running.
+    Globally routable literal shapes are required so the production routeability
+    gate is exercised. --self-test forcibly implies --dry-run before these are
+    loaded, so no request can be emitted. One candidate per governance outcome.
     """
     return [
         {
-            "ip": "203.0.113.10",
+            "ip": "8.8.8.10",
             "port": 11434,
             "stack": "ollama",
             "probe_path": "/api/ps",
@@ -904,7 +906,7 @@ def self_test_candidates() -> list[dict]:
             ),
         },
         {
-            "ip": "203.0.113.11",
+            "ip": "8.8.8.11",
             "port": 11434,
             "stack": "ollama",
             "probe_path": "/api/ps",
@@ -913,7 +915,7 @@ def self_test_candidates() -> list[dict]:
             "country_code": "ZZ",
         },
         {
-            "ip": "203.0.113.12",
+            "ip": "8.8.8.12",
             "port": 8888,
             "stack": "jupyter",
             "probe_path": "/",
@@ -923,7 +925,7 @@ def self_test_candidates() -> list[dict]:
             "provenance": index_provenance("hearsay", "?", "jupyter", "lane_search"),
         },
         {
-            "ip": "198.51.100.7",
+            "ip": "1.1.1.7",
             "port": 11434,
             "stack": "prior",
             "probe_path": "/api/ps",
@@ -935,7 +937,7 @@ def self_test_candidates() -> list[dict]:
             "provenance": provenance_from_corpus_source("check"),
         },
         {
-            "ip": "198.51.100.8",
+            "ip": "1.1.1.8",
             "port": 11434,
             "stack": "ollama",
             "probe_path": "/api/ps",
@@ -945,7 +947,7 @@ def self_test_candidates() -> list[dict]:
             "provenance": provenance_from_corpus_source("shodan_asn:AS64497"),
         },
         {
-            "ip": "198.51.100.9",
+            "ip": "1.1.1.9",
             "port": 11434,
             "stack": "operator_request",
             "probe_path": "/api/ps",
@@ -1025,7 +1027,11 @@ def main() -> int:
         action="store_true",
         help="skip the pre-deletion re-probe queue (the timer sweep still applies)",
     )
-    ap.add_argument("--ingest", action="store_true")
+    ap.add_argument(
+        "--ingest",
+        action="store_true",
+        help="disabled compatibility flag; active probing and ingest are suspended",
+    )
     ap.add_argument("--from-prior", action="store_true", default=True)
     ap.add_argument("--no-prior", action="store_true")
     ap.add_argument("--output", default="data/discovery-multilane.json")
@@ -1053,6 +1059,15 @@ def main() -> int:
         # Forced, not merely defaulted: the synthetic corpus exists to exercise
         # the gates, and a mistyped flag must not turn it into a probe run.
         args.dry_run = True
+
+    if not args.dry_run:
+        raise SystemExit(
+            "Active re-verification is suspended: the current runner persists "
+            "I-24 probe attempts only after the run, so a crash can contact a "
+            "host without advancing its 14-day clock. Re-enable only after a "
+            "durable pre-probe lease/attempt record is enforced. --dry-run and "
+            "--self-test remain available and send no target traffic."
+        )
 
     # I-24 is a floor, not a default. A flag may slow re-verification down, never
     # speed it up.
@@ -1266,10 +1281,8 @@ def main() -> int:
             f"\n[x] I-5: dropped {len(bad_port)} candidate(s) on ports outside "
             f"their lane's allowlist ({before_ports - len(bad_port)} remain)"
         )
-        for d in bad_port[:10]:
-            print(f"    dropped {d['ip']}:{d.get('port')} — {d.get('stack')} allows {d['allowed']}")
-        if len(bad_port) > 10:
-            print(f"    … and {len(bad_port) - 10} more")
+        for reason, count in Counter(d.get("stack") or "unknown" for d in bad_port).most_common():
+            print(f"    {reason}: {count}")
         print(
             f"[x] I-5: {len(bad_port)} off-allowlist port(s) dropped",
             file=sys.stderr,
@@ -1285,10 +1298,8 @@ def main() -> int:
     print(f"\n[+] provenance: {len(cands)}/{before_prov} candidate(s) eligible")
     if no_provenance:
         print(f"[x] dropped {len(no_provenance)} candidate(s) with no valid provenance:")
-        for d in no_provenance[:10]:
-            print(f"    dropped {d['ip']}:{d.get('port')} — {d['dropped_by']}")
-        if len(no_provenance) > 10:
-            print(f"    … and {len(no_provenance) - 10} more")
+        for reason, count in drop_reasons.most_common():
+            print(f"    {reason}: {count}")
         # Also on stderr: unattended runs are the ones where a source silently
         # losing its provenance would otherwise scroll past unread.
         print(
@@ -1314,10 +1325,8 @@ def main() -> int:
             f"\n[+] exclusions: {len(entries)} rule(s) · "
             f"{before - len(cands)} candidate(s) removed"
         )
-        for e in excluded[:20]:
-            print(f"    excluded {e['ip']}:{e.get('port')} by {e['excluded_by']}")
-        if len(excluded) > 20:
-            print(f"    … and {len(excluded) - 20} more")
+        for reason, count in Counter(e.get("excluded_by") or "rule" for e in excluded).most_common():
+            print(f"    rule matches: {count}")
     except ExclusionsUnavailable as e:
         if args.dry_run:
             print(f"\n[!] exclusion list unavailable ({e})")

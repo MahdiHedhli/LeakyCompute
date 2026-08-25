@@ -46,3 +46,6 @@ data/asn-candidates.json
 data/discovery-dry-run.json
 data/discovery-multilane.json
 data/vuln-findings.json
+# Raw address-level workflow/local output. Never commit or upload (I-14/I-27).
+discovery-run.json
+.incident-response.local.json

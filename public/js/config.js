@@ -1,7 +1,7 @@
 /**
  * Domain-ready public config.
  * After deploy, set API_BASE to your workers.dev URL (or custom domain).
- * GitHub Pages can also override via ?api=https://... for local testing.
+ * Local pages can override via ?api=https://... for development testing.
  */
 window.LEAKY_CONFIG = {
   // Replace after `wrangler deploy`
@@ -21,6 +21,7 @@ window.LEAKY_CONFIG = {
   try {
     const u = new URL(window.location.href);
     const api = u.searchParams.get("api");
-    if (api) window.LEAKY_CONFIG.API_BASE = api.replace(/\/+$/, "");
+    const localPage = ["", "localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+    if (api && localPage) window.LEAKY_CONFIG.API_BASE = api.replace(/\/+$/, "");
   } catch (_) {}
 })();

@@ -28,11 +28,24 @@ jobs:
             if (!/^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/.test(login)) {
               core.setFailed(`Invalid GitHub login: ${login}`);
             }
-            // Optional: the email the requester signs into Access with. Parsed
-            // leniently because it is a convenience, not a gate — a missing one
-            // just means only the GitHub handle is allowlisted.
-            const em = body.match(/###\s*Access sign-in email[^\n]*\n+\s*([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)/i);
-            core.setOutput('access_email', em ? em[1].trim().toLowerCase() : '');
+            // Production Access identity is the exact signed email. A public
+            // issue may omit it for privacy, but then this public-issue workflow
+            // must stop and the maintainer must approve through a private path.
+            const em = body.match(
+              /###\s*Primary email on your GitHub account[^\n]*\n+\s*([^\n]+)/i
+            );
+            let accessEmail = em ? em[1].trim().toLowerCase() : '';
+            if (/^_no response_$/i.test(accessEmail)) accessEmail = '';
+            if (!accessEmail) {
+              core.setFailed(
+                'Access email is absent. Use the private manual approval path; ' +
+                'a GitHub handle alone cannot match the signed Access identity.'
+              );
+            }
+            if (accessEmail && !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(accessEmail)) {
+              core.setFailed('The Access email field is not a valid email address.');
+            }
+            core.setOutput('access_email', accessEmail);
             core.setOutput('login', login);
             core.setOutput('issue_number', String(issue.number));
 
@@ -51,18 +64,21 @@ jobs:
             exit 1
           fi
           API_BASE="${API_BASE%/}"
-          # Aliases matter: the assertion Cloudflare Access presents may carry an
-          # email rather than a GitHub login, and approving only the handle left
-          # the researcher authenticated but unmatched. ACCESS_EMAIL is optional
-          # — when the requester supplies it on the issue, either name resolves.
-          ALIASES="[]"
-          if [ -n "${ACCESS_EMAIL:-}" ]; then
-            ALIASES="[\"$ACCESS_EMAIL\"]"
-          fi
-          curl -fsS -X POST "$API_BASE/v1/admin/allowlist" \
+          # Production Access presents the exact signed email. The GitHub handle
+          # remains the administrative primary; its email alias is the only
+          # production identity that may resolve to it.
+          jq -nc \
+            --arg login "$LOGIN" \
+            --arg email "${ACCESS_EMAIL:-}" \
+            --arg approved_by "$APPROVER" \
+            --argjson issue "$ISSUE" \
+            '{op:"approve", login:$login, issue_number:$issue,
+              approved_by:$approved_by,
+              aliases:(if $email == "" then [] else [$email] end)}' \
+          | curl -fsS -X POST "$API_BASE/v1/admin/allowlist" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Token: $ADMIN_TOKEN" \
-            -d "{\"op\":\"approve\",\"login\":\"$LOGIN\",\"issue_number\":$ISSUE,\"approved_by\":\"$APPROVER\",\"aliases\":$ALIASES}"
+            --data-binary @-
 
       - name: Comment and relabel
         uses: actions/github-script@v7

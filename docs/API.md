@@ -24,8 +24,11 @@ CORS is allowlisted via the `ALLOWED_ORIGINS` var. All responses are
 
 ## POST /v1/check
 
-The public self-check. Probes Ollama, Ray and Jupyter **in parallel** and returns
-a structured report.
+**Deployment status: suspended.** Production returns
+`503 hosted_checks_temporarily_disabled`. Cloudflare Workers cannot reliably
+fetch IP-literal destinations, which are the only target form that can be
+validated and pinned without DNS rebinding or CIDR opt-out bypass. The engine
+below remains its tested contract for a future trusted probe service.
 
 Every request this endpoint makes to a target is a read-only `GET`. See
 [SECURITY.md](SECURITY.md) for the invariants that constrain it.
@@ -37,7 +40,7 @@ to the caller's `CF-Connecting-IP`.
 
 ```json
 {
-  "target": "host.example.com",
+  "target": "203.0.114.10",
   "authorized": true,
   "services": ["ollama", "ray", "jupyter"],
   "ports": { "ollama": 11435 },
@@ -47,7 +50,7 @@ to the caller's `CF-Connecting-IP`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `target` | string | Hostname or public IP. Presence switches to override mode. |
+| `target` | string | Canonical public IP literal only. Hostnames are rejected. Overrides are currently suspended separately. |
 | `authorized` | bool | **Required when `target` is set.** Attests ownership/authorization. |
 | `services` | string[] | Subset of `["ollama","ray","jupyter"]`. Defaults to all. Unknown names are dropped; an all-unknown list is a 400. |
 | `ports` | object | Per-service port override, validated against that service's allowlist. |
@@ -196,9 +199,11 @@ Jupyter never gets OSV results in practice — it reports no version.
 
 | Status | `error` | Cause |
 |---|---|---|
+| 503 | `hosted_checks_temporarily_disabled` | production kill switch; use the local CLI |
 | 400 | `authorization_required` | `target` set without `authorized: true` |
-| 400 | `missing_target` / `invalid_target` / `invalid_hostname` / `target_too_long` | target validation |
-| 400 | `private_target_not_allowed` | RFC1918/loopback/link-local/CGNAT target |
+| 400 | `missing_target` / `invalid_target` / `hostname_target_not_allowed` / `target_too_long` | target validation |
+| 400 | `private_target_not_allowed` | non-public, special-purpose, multicast, private, loopback, link-local or CGNAT target |
+| 403 | `override_temporarily_disabled` | target-ASN opt-outs cannot yet be enforced for overrides |
 | 400 | `port_not_allowed` | port outside that service's allowlist; response includes `allowed_ports` |
 | 400 | `unknown_service` | every name in `services` unrecognized; response includes `supported` |
 | 403 | `turnstile_failed` | Turnstile verification failed |

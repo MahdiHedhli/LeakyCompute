@@ -1,40 +1,18 @@
-name: Scheduled discovery
+name: Passive discovery dry run
 
-# TWO RUNS A DAY, sized to the free-tier KV ceiling.
-#
-# Enabled 2026-08-19 under amended I-23: attribution is the User-Agent plus the
-# /scanning page, with PTR required only where we control the source address.
-# A GitHub-hosted runner has neither a stable address nor a PTR we own, and
-# /scanning now says so rather than implying a lookup that would not resolve
-# to us.
-#
-# Budget arithmetic, because it is tight: ~1.09 KV puts per probed host, so
-# 2 x 445 is ~984 puts against a free-tier hard limit of 1,000. Crossing that
-# blocks writes account-wide until 00:00 UTC, which would take the public
-# checker down with it — so the ceiling is not something to run at.
-#
-# KV_DAILY_PUT_BUDGET is 990, so two full runs (~984) fit and the guard still
-# stops short of the 1,000 that would block writes account-wide. That is ~6 puts
-# of slack, so it only holds because the I-24 interval gate keeps real runs well
-# under the cap — run 3 put up 380 candidates and probed 204. Note the guard
-# counts ingest only: public self-checks write outside it, so a busy day on the
-# checker eats headroom the counter cannot see.
+# Active scheduling is suspended after the adversarial review found that an
+# interrupted run can emit probes before their I-24 clock is persisted, and
+# that the KV budget does not reserve capacity for opt-outs/revocations. This
+# workflow is intentionally passive until the attempt ledger and write budget
+# are strongly consistent. It sends no packets to candidate hosts and ingests
+# nothing.
 
 on:
   workflow_dispatch:
     inputs:
       max_total:
-        description: "Host cap for this run (KV-safe default)"
+        description: "Candidate cap for the packet-free plan"
         default: "445"
-      dry_run:
-        description: "Dry run — pull and gate, send no packets"
-        type: boolean
-        default: false
-  schedule:
-    # 02:10 and 14:10 UTC. Offset from the 04:17 retention sweep so the two
-    # never contend for the same KV budget window.
-    - cron: "10 2 * * *"
-    - cron: "10 14 * * *"
 
 concurrency:
   # Two runs must never overlap: they would each read the probe clock before the
@@ -65,10 +43,8 @@ jobs:
             echo "SHODAN_API_KEY secret is not set — add it before enabling this."
             exit 1
           fi
-          MODE="--ingest"
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then MODE="--dry-run"; fi
           python3 -u scripts/discovery/run_multilane.py \
-            $MODE --rate 0.2 --max-total "$MAX_TOTAL" \
+            --dry-run --rate 0.2 --max-total "$MAX_TOTAL" \
             --output "discovery-run.json"
 
       - name: Summarise
@@ -84,10 +60,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload run record
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: discovery-run
-          path: discovery-run.json
-          retention-days: 14
+      # Do not upload discovery-run.json. It contains the private address-level
+      # run record required for local diagnosis and ingest; an artifact on a
+      # public repository is not a private store (I-14/I-27).

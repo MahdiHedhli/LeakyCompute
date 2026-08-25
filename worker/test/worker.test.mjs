@@ -61,10 +61,13 @@ await listen(ray, 8265);
 const pending = [];
 const ctx = { waitUntil: (p) => pending.push(p.catch(() => {})) };
 let env;
+let res;
+let data;
 function freshEnv(overrides = {}) {
   return {
     KV: makeKV(),
     ENVIRONMENT: "test",
+    HOSTED_CHECKS_ENABLED: "true",
     ALLOWED_ORIGINS: "https://mahdihedhli.github.io",
     CHECK_TIMEOUT_MS: "1500",
     RL_OWN_MAX: "3",
@@ -98,11 +101,21 @@ async function check(name, fn) {
   }
 }
 
+const probesBeforeDisabled = probesReceived;
+env = freshEnv({ HOSTED_CHECKS_ENABLED: "false" });
+res = await worker.fetch(post({}), env, ctx);
+data = await res.json();
+await check("production kill switch fails visibly before any probe", () => {
+  assert.equal(res.status, 503);
+  assert.equal(data.error, "hosted_checks_temporarily_disabled");
+  assert.equal(probesReceived, probesBeforeDisabled);
+});
+
 // --- 1. default self-check, zero user input --------------------------
 console.log("\n[1] POST /v1/check with empty body (own egress IP)");
 env = freshEnv();
-let res = await worker.fetch(post({}), env, ctx);
-let data = await res.json();
+res = await worker.fetch(post({}), env, ctx);
+data = await res.json();
 
 await check("200 with structured report", () => {
   assert.equal(res.status, 200);
@@ -160,6 +173,18 @@ await check("no attestation -> 400 authorization_required", () => {
   assert.equal(res.status, 400);
   assert.equal(data.error, "authorization_required");
 });
+
+env = freshEnv();
+res = await worker.fetch(
+  post({ target: "8.8.8.8", authorized: "false" }),
+  env,
+  ctx
+);
+data = await res.json();
+await check("authorization attestation must be the boolean true", () => {
+  assert.equal(res.status, 400);
+  assert.equal(data.error, "authorization_required");
+});
 await check("refusal logged for abuse review", () => {
   const keys = [...env.KV._store.keys()].filter((k) => k.startsWith("abuse:"));
   assert.equal(keys.length, 1);
@@ -179,6 +204,54 @@ data = await res.json();
 await check("private target rejected even with attestation", () => {
   assert.equal(res.status, 400);
   assert.equal(data.error, "private_target_not_allowed");
+});
+
+const probesBeforeHostname = probesReceived;
+env = freshEnv();
+res = await worker.fetch(
+  post({ target: "example.com", authorized: true }),
+  env,
+  ctx
+);
+data = await res.json();
+await check("hostname override rejected before DNS or probe", () => {
+  assert.equal(res.status, 400);
+  assert.equal(data.error, "hostname_target_not_allowed");
+  assert.equal(probesReceived, probesBeforeHostname);
+});
+
+const probesBeforeReserved = probesReceived;
+env = freshEnv();
+res = await worker.fetch(
+  post({ target: "192.0.2.1", authorized: true }),
+  env,
+  ctx
+);
+data = await res.json();
+await check("reserved public-looking literal rejected before probe", () => {
+  assert.equal(res.status, 400);
+  assert.equal(data.error, "private_target_not_allowed");
+  assert.equal(probesReceived, probesBeforeReserved);
+});
+
+const probesBeforeDuplicate = probesReceived;
+env = freshEnv();
+res = await worker.fetch(post({ services: ["ollama", "ollama", "ollama"] }), env, ctx);
+data = await res.json();
+await check("duplicate service names cannot amplify target requests", () => {
+  assert.equal(res.status, 200);
+  assert.deepEqual(data.services.map((s) => s.service), ["ollama"]);
+  assert.equal(probesReceived - probesBeforeDuplicate, 2, "one confirm + one exposure GET");
+});
+
+const probesBeforeInherited = probesReceived;
+env = freshEnv();
+res = await worker.fetch(post({ services: ["constructor", "__proto__"] }), env, ctx);
+data = await res.json();
+await check("inherited object keys are not service names", () => {
+  assert.equal(res.status, 400);
+  assert.equal(data.error, "unknown_service");
+  assert.equal(probesReceived, probesBeforeInherited);
 });
 
 // --- 3. port allowlist ----------------------------------------------
@@ -299,24 +372,25 @@ await check("refusal is logged for review", async () => {
   assert.ok(keys.length > 0, "expected an abuse-log entry for the refusal");
 });
 
-// An override request naming excluded space must lose to the exclusion, even
-// with a valid ownership attestation — I-25 precedence over I-22a.
+// Public overrides are suspended until target-ASN exclusions can be resolved.
+// This makes an ASN/CIDR bypass impossible rather than pretending an unknown
+// target ASN was checked.
 const probesBeforeOverride = probesReceived;
 env = freshEnv();
 await env.KV.put(
   "exclusions:v1",
-  JSON.stringify([{ type: "cidr4", value: "203.0.113.0/24", active: true }])
+  JSON.stringify([{ type: "cidr4", value: "8.8.8.0/24", active: true }])
 );
 res = await worker.fetch(
-  post({ target: "203.0.113.10", authorized: true }),
+  post({ target: "8.8.8.8", authorized: true }),
   env,
   ctx
 );
 data = await res.json();
 
-await check("exclusion beats an attested scan request for the same space", () => {
+await check("suspended override cannot bypass an address-level exclusion", () => {
   assert.equal(res.status, 403);
-  assert.equal(data.error, "target_excluded");
+  assert.equal(data.error, "override_temporarily_disabled");
   assert.equal(probesReceived, probesBeforeOverride, "must not probe");
 });
 

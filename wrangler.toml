@@ -9,6 +9,10 @@ workers_dev = true
 # Public site CORS + domain-ready: set CUSTOM_ORIGINS later to include your domain
 [vars]
 ENVIRONMENT = "production"
+# Workers global fetch cannot connect directly to IP-literal destinations. Keep
+# the hosted checker off until requests go through a trusted resolver/pinning
+# probe service; otherwise every result is a platform-shaped false negative.
+HOSTED_CHECKS_ENABLED = "false"
 # Comma-separated allowed browser origins (GitHub Pages + Pages lab + localhost)
 ALLOWED_ORIGINS = "http://localhost:8787,http://127.0.0.1:8787,http://localhost:5500,http://127.0.0.1:5500,https://mahdihedhli.github.io,https://leakycompute-lab.pages.dev"
 # Research snapshot (archive seed) — dual counter "C"
@@ -41,8 +45,9 @@ ACCESS_AUD = "" # removed from public history
 # returns raw addresses, so these limits protect the corpus and the KV budget,
 # not the public API. Counted per allowlisted login, not per IP: a shared exit
 # node must not let one researcher exhaust another's quota.
-RL_LAB_MAX = "120"
+RL_LAB_MAX = "20"
 RL_LAB_WINDOW_SEC = "300"
+RL_LAB_DAY_MAX = "50"
 # Seconds a Worker isolate may reuse a corpus read. Exclusions are re-applied on
 # every request regardless (I-25), so this never delays an opt-out taking effect.
 LAB_CACHE_TTL_SEC = "60"
@@ -79,5 +84,5 @@ preview_id = "32c933f498d646afae8eb1e617063f8b"
 
 # Secrets (set via wrangler secret put — never commit):
 #   TURNSTILE_SECRET_KEY   optional; if unset, Turnstile check is skipped (dev only)
-#   ABUSE_LOG_SALT         salt for hashing client IPs in private abuse logs
+#   ABUSE_LOG_SALT         secret HMAC key for private abuse-log pseudonyms
 #   ADMIN_SYNC_TOKEN       GitHub Action uses this to write allowlist entries

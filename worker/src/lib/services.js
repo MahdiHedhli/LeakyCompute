@@ -364,7 +364,7 @@ export const ALLOWED_PORTS = new Set(
  * from being usable as a general-purpose port prober.
  */
 export function resolvePort(serviceId, requested) {
-  const svc = SERVICES[serviceId];
+  const svc = Object.hasOwn(SERVICES, serviceId) ? SERVICES[serviceId] : null;
   if (!svc) return { ok: false, error: "unknown_service" };
   if (requested == null || requested === "") {
     return { ok: true, port: svc.defaultPort };
@@ -478,7 +478,9 @@ function buildReachable(svc) {
  * wall-clock budget under a 2.5s per-probe timeout.
  */
 export async function runChecks(host, { services = TIER1, ports = {}, timeoutMs = 2500 } = {}) {
-  const selected = services.filter((s) => SERVICES[s]);
+  // Defense in depth: callers other than index.js must not be able to amplify
+  // subrequests with duplicates or inherited object keys.
+  const selected = [...new Set(services)].filter((s) => Object.hasOwn(SERVICES, s));
   const resolved = [];
   for (const id of selected) {
     const rp = resolvePort(id, ports[id]);
