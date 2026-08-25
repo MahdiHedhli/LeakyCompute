@@ -50,8 +50,10 @@ digest prevents that tag from changing what runs.
 | `python:3.11-slim` | `sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76` |
 
 The two Jupyter services intentionally share one image digest. The TensorBoard
-container also pins its direct Python package to `tensorboard==2.21.0`; it is a
-manual, loopback-only validation fixture and never runs in CI or production.
+container installs `tensorboard==2.21.0` and all twelve transitive packages from
+an exact, SHA-256-locked requirements file covering the Linux x86_64 and aarch64
+wheels. It is a manual, loopback-only validation fixture and never runs in CI or
+production.
 
 ## Update procedure
 

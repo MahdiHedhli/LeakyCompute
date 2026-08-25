@@ -96,13 +96,30 @@ for (const match of compose.matchAll(/^\s*image:\s*["']?([^\s"']+)/gm)) {
     fail(`${composeFile}: image is not pinned to a digest: ${match[1]}`);
   }
 }
-if (/\bpip install\b[^\n]*\btensorboard(?!==\d+\.\d+\.\d+)/.test(compose)) {
-  fail(`${composeFile}: TensorBoard fixture installs a floating Python package`);
+if (!/\bpip install\b[\s\S]*?--require-hashes/.test(compose)) {
+  fail(`${composeFile}: TensorBoard fixture must require package hashes`);
+}
+
+const tensorboardLockFile =
+  "scripts/discovery/local-lab/tensorboard-requirements.lock";
+const tensorboardLock = read(tensorboardLockFile)
+  .replace(/\\\n\s*/g, " ")
+  .split("\n")
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith("#"));
+for (const requirement of tensorboardLock) {
+  if (!/^[a-z0-9-]+==\d+(?:\.\d+)+\s+/i.test(requirement)) {
+    fail(`${tensorboardLockFile}: dependency is not exact: ${requirement}`);
+  }
+  if (!/--hash=sha256:[0-9a-f]{64}/.test(requirement)) {
+    fail(`${tensorboardLockFile}: dependency has no SHA-256 hash: ${requirement}`);
+  }
 }
 
 assert.equal(failures.length, 0, failures.join("\n"));
 console.log(
   `supply-chain checks passed (${workflowFiles.length} workflows; ` +
     `${Object.keys(packageJson.devDependencies || {}).length} locked dev dependency; ` +
-    `${[...compose.matchAll(/^\s*image:/gm)].length} digest-pinned images)`
+    `${[...compose.matchAll(/^\s*image:/gm)].length} digest-pinned images; ` +
+    `${tensorboardLock.length} hash-locked Python packages)`
 );

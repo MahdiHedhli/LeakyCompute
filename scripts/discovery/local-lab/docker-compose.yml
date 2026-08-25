@@ -97,8 +97,11 @@ services:
   tensorboard:
     image: python:3.11-slim@sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76
     ports: ["127.0.0.1:6006:6006"]
+    volumes:
+      - "./tensorboard-requirements.lock:/tmp/tensorboard-requirements.lock:ro"
     command: >
-      bash -c "pip install --quiet --no-cache-dir tensorboard==2.21.0 &&
+      bash -c "pip install --quiet --no-cache-dir --only-binary=:all:
+      --require-hashes -r /tmp/tensorboard-requirements.lock &&
       mkdir -p /tmp/logs &&
       tensorboard --logdir /tmp/logs --host 0.0.0.0 --port 6006"
     restart: "no"
