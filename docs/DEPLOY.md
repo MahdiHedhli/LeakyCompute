@@ -56,11 +56,6 @@ wrangler secret put TURNSTILE_SECRET_KEY
 wrangler deploy
 ```
 
-The manual `Deploy Worker` GitHub workflow uses a separate
-`CLOUDFLARE_WORKERS_API_TOKEN` repository secret. Give that token only Account
-→ Workers Scripts → Edit for the deployment account; do not reuse the Pages
-deployment token.
-
 URLs are set in:
 
 - `public/js/config.js` → `API_BASE`
