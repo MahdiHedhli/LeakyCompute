@@ -61,8 +61,8 @@ mysterious.
 
 | Resource | URL |
 |----------|-----|
-| API Worker | `https://leakycompute-api.mhedhli.workers.dev` |
-| Public pulse (GitHub Pages) | `https://mahdihedhli.github.io/LeakyCompute/` |
+| API Worker | `https://api.leakycompute.mahdihedhli.com` |
+| Public pulse (GitHub Pages) | `https://leakycompute.mahdihedhli.com/` |
 | Researcher lab (CF Pages) | `https://leakycompute-lab.pages.dev` |
 | KV prod | `432febf1abd64e9995e33d6081dfd3c7` (`leakycompute-KV`) |
 
@@ -169,9 +169,24 @@ Create labels: `access-request`, `needs-review`, `access-approved`, `access-acti
 2. Add label **`access-approved`**  
 3. Action writes KV allowlist + comments with lab URL  
 
-## 8. Custom domain later
+## 8. Controlled public perimeter
 
-1. Pages / Workers custom domains in CF dashboard  
-2. Access app: add hostname  
-3. Update `ALLOWED_ORIGINS`, `public/js/config.js`, `lab/js/config.js`, secrets  
-4. No code rewrite required beyond config URLs  
+The public topology is deliberately split even though both names are in the
+same Cloudflare zone:
+
+| Hostname | Origin/deployment owner | Cloudflare role |
+|---|---|---|
+| `api.leakycompute.mahdihedhli.com` | Worker, deployed locally through scoped Wrangler OAuth | Worker Custom Domain + WAF |
+| `leakycompute.mahdihedhli.com` | GitHub Pages workflow | Proxied DNS + response-header rules |
+
+The Pages hostname must be registered in GitHub before its proxied CNAME is
+created. Verify GitHub's domain ownership/HTTPS state and the redirect from the
+legacy `github.io` URL before treating the header boundary as complete.
+
+The API migration keeps `workers.dev` temporarily while callers move. Disable
+it only by committing `workers_dev = false` after the public site, discovery
+scripts, Pages research bridge, repository secrets, and live verification all
+use the custom domain. Dashboard-only disabling is not durable because a later
+Wrangler deployment can re-enable it from configuration.
+
+See [PERIMETER.md](PERIMETER.md) for the reviewed WAF and response-header policy.

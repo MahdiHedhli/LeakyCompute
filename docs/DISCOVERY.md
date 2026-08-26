@@ -332,7 +332,7 @@ removing that dormant implementation.
 
 ```bash
 export SHODAN_API_KEY=...
-export LEAKY_API_BASE=https://leakycompute-api.mhedhli.workers.dev
+export LEAKY_API_BASE=https://api.leakycompute.mahdihedhli.com
 export LEAKY_ADMIN_TOKEN=...
 
 # Passive ASN report (Ollama lane)

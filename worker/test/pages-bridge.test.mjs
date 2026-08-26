@@ -69,7 +69,7 @@ await check("known route forwards only allowlisted headers to the fixed upstream
   }));
   assert.equal(res.status, 200);
   const call = calls.at(-1);
-  assert.equal(call.url, "https://leakycompute-api.mhedhli.workers.dev/v1/research/lab/catalog");
+  assert.equal(call.url, "https://api.leakycompute.mahdihedhli.com/v1/research/lab/catalog");
   assert.equal(call.init.method, "GET");
   assert.equal(call.init.redirect, "manual");
   assert.equal(call.init.headers.get("cf-access-jwt-assertion"), "signed");

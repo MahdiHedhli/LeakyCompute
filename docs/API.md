@@ -1,6 +1,6 @@
 # LeakyCompute Worker API
 
-Base URL: `https://leakycompute-api.mhedhli.workers.dev` (see `public/js/config.js`)
+Base URL: `https://api.leakycompute.mahdihedhli.com` (see `public/js/config.js`)
 
 Source of truth is [`worker/src/index.js`](../worker/src/index.js). This document
 describes the contract; when they disagree, the code wins and this file is a bug.

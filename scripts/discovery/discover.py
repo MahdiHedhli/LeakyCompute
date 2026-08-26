@@ -21,7 +21,7 @@ invocation exits before sending a target request.
 
 Examples:
   export SHODAN_API_KEY=...
-  export LEAKY_API_BASE=https://leakycompute-api.mhedhli.workers.dev
+  export LEAKY_API_BASE=https://api.leakycompute.mahdihedhli.com
   export LEAKY_ADMIN_TOKEN=...
 
   # ASN report only (passive, 1 credit-ish)
@@ -50,7 +50,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-DEFAULT_API = "https://leakycompute-api.mhedhli.workers.dev"
+DEFAULT_API = "https://api.leakycompute.mahdihedhli.com"
 # product:Ollama is the high-signal Shodan fingerprint (~12k hosts).
 # Banner-only queries often return 0 depending on how banners are indexed.
 DEFAULT_QUERY = "product:Ollama"

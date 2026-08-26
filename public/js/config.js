@@ -1,11 +1,12 @@
 /**
  * Domain-ready public config.
- * After deploy, set API_BASE to your workers.dev URL (or custom domain).
+ * Production uses the controlled Worker custom domain. Local pages may still
+ * override it through the loopback-only query parameter below.
  * Local pages can override via ?api=https://... for development testing.
  */
 window.LEAKY_CONFIG = {
   // Replace after `wrangler deploy`
-  API_BASE: "https://leakycompute-api.mhedhli.workers.dev",
+  API_BASE: "https://api.leakycompute.mahdihedhli.com",
   // Optional free Turnstile site key; leave empty to skip client widget
   TURNSTILE_SITE_KEY: "",
   LAB_URL: "https://leakycompute-lab.pages.dev",

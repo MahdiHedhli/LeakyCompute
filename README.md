@@ -34,10 +34,10 @@ assurance. The local CLI runs inside the operator's own boundary instead.
 
 | | |
 |---|---|
-| 🔎 **[Public status page](https://mahdihedhli.github.io/LeakyCompute/)** | Hosted checks are paused; exposure statistics and local CLI guidance remain available. |
-| 📄 **[Measurement & opt-out](https://mahdihedhli.github.io/LeakyCompute/scanning.html)** | Found us in your logs? What historical probes sent, current suspension status, and a one-click opt-out. |
+| 🔎 **[Public status page](https://leakycompute.mahdihedhli.com/)** | Hosted checks are paused; exposure statistics and local CLI guidance remain available. |
+| 📄 **[Measurement & opt-out](https://leakycompute.mahdihedhli.com/scanning.html)** | Found us in your logs? What historical probes sent, current suspension status, and a one-click opt-out. |
 | 🔬 **[Researcher lab](https://leakycompute-lab.pages.dev)** | Corpus browser and exposure maps. GitHub SSO, [approval required](https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_research_access.yml). |
-| ⚙️ **[API](https://leakycompute-api.mhedhli.workers.dev/v1/health)** | `/v1/*` — see the [contract](docs/API.md). |
+| ⚙️ **[API](https://api.leakycompute.mahdihedhli.com/v1/health)** | `/v1/*` — see the [contract](docs/API.md). |
 
 ## How the dormant active path gates a probe
 

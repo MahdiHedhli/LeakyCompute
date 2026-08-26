@@ -3,7 +3,7 @@
  *
  * The gap this closes: Cloudflare Access protects the Pages project and sets
  * CF_Authorization on leakycompute-lab.pages.dev. The API lives on
- * leakycompute-api.mhedhli.workers.dev — a different registrable domain — so the
+ * api.leakycompute.mahdihedhli.com — a different hostname — so the
  * browser never sends that cookie there, and a static Pages site has no server
  * to inject the header instead. Every lab request therefore arrived at the
  * Worker with no identity and came back 401. access.js has carried a comment
@@ -25,7 +25,7 @@
  * general forwarder it would be a way around the admin gate.
  */
 
-const UPSTREAM = "https://leakycompute-api.mhedhli.workers.dev";
+const UPSTREAM = "https://api.leakycompute.mahdihedhli.com";
 
 // Only these ever leave here. An allowlist rather than a denylist: a header we
 // forget to strip is a header the upstream might trust.

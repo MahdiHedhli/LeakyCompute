@@ -6,7 +6,7 @@ window.LEAKY_LAB_CONFIG = {
   // Local dev against wrangler: append ?api=http://127.0.0.1:8787
   API_BASE: "",
   SEED_URL: "data/seed-models.json",
-  PUBLIC_URL: "https://mahdihedhli.github.io/LeakyCompute/",
+  PUBLIC_URL: "https://leakycompute.mahdihedhli.com/",
   REPO_URL: "https://github.com/MahdiHedhli/LeakyCompute",
   DONT_PANIC_URL: "https://mahdihedhli.com/dont-panic/",
   ACCESS_ISSUE_URL:

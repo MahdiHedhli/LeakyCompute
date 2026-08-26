@@ -19,7 +19,7 @@ dry-run branch so the written plan is the plan:
 
 Usage:
   export SHODAN_API_KEY=...
-  export LEAKY_API_BASE=https://leakycompute-api.mhedhli.workers.dev
+  export LEAKY_API_BASE=https://api.leakycompute.mahdihedhli.com
   export LEAKY_ADMIN_TOKEN=...
 
   python3 scripts/discovery/run_multilane.py --dry-run
