@@ -47,6 +47,31 @@ export function json(data, status, request, env, extra = {}) {
   });
 }
 
+/**
+ * Credential-free public JSON has one representation at the edge. Using the
+ * request Origin here would create an attacker-controlled cache variant for
+ * every header value and turn /v1/stats back into a KV-read amplifier.
+ */
+export function publicJson(data, status, extra = {}) {
+  return new Response(JSON.stringify(data, null, 0), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "X-Content-Type-Options": "nosniff",
+      ...extra,
+    },
+  });
+}
+
 export function noContent(request, env) {
-  return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Cache-Control": "no-store",
+      ...corsHeaders(request, env),
+    },
+  });
 }

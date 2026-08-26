@@ -12,7 +12,7 @@
  * and the admin-token routes; every public route above returns aggregates
  * (I-14). Safe probes only. No mass scan. No exploit payloads.
  */
-import { json, noContent } from "./lib/cors.js";
+import { json, noContent, publicJson } from "./lib/cors.js";
 import { consume, intEnv } from "./lib/ratelimit.js";
 import { logAbuse } from "./lib/abuse.js";
 import { validateTarget, isPrivateOrLocal } from "./lib/check.js";
@@ -224,11 +224,47 @@ function retentionWindow(env, requested) {
 }
 
 async function handleStats(request, env) {
+  const url = new URL(request.url);
+  // Workers Caching keys by URL. Refuse alternate query/trailing-slash forms
+  // before touching the limiter or KV so attacker-controlled URLs cannot force
+  // an unbounded number of cold cache variants.
+  if (url.pathname !== "/v1/stats" || url.search) {
+    return publicJson({ error: "canonical_stats_url_required" }, 400);
+  }
+
+  // Cache hits are served before the Worker runs. This binding protects the
+  // remaining cold misses and explicit cache-bypass requests without spending
+  // the KV allowance that exclusions, authorization and retention depend on.
+  // The route-wide key is intentional: Cloudflare advises against client-IP
+  // keys because legitimate users may share an egress address.
+  if (!env.STATS_RATE_LIMITER) {
+    if (env.ENVIRONMENT === "production") {
+      return publicJson({ error: "stats_temporarily_unavailable" }, 503);
+    }
+  } else {
+    try {
+      const limited = await env.STATS_RATE_LIMITER.limit({ key: "public-stats" });
+      if (!limited?.success) {
+        return publicJson(
+          { error: "rate_limited", scope: "public_stats" },
+          429,
+          { "Retry-After": "60" }
+        );
+      }
+    } catch {
+      // Failing open would restore the unauthenticated KV-read amplifier this
+      // boundary exists to remove.
+      return publicJson({ error: "stats_temporarily_unavailable" }, 503);
+    }
+  }
+
   const live = await getLiveStats(env);
   const payload = await publicStatsPayload(env, live);
   payload.methodology = SNAPSHOT_NOTE;
-  return json(payload, 200, request, env, {
+  return publicJson(payload, 200, {
     "Cache-Control": "public, max-age=30",
+    "Cloudflare-CDN-Cache-Control": "public, max-age=60",
+    "Cache-Tag": "leakycompute-stats",
   });
 }
 

@@ -62,9 +62,12 @@ prerequisites are explicit.
    rejects mutable references. Dependabot proposes explicit updates. **Operator
    setting still open:** the repository has no branch protection or ruleset, so
    `CI / Invariant suite` is not yet a required status check.
-2. **Isolate public statistics reads.** Materialize `/v1/stats` behind the Cache
-   API and an edge rate limit so public traffic cannot exhaust the KV allowance
-   used by authorization, exclusions, and retention.
+2. **Isolate public statistics reads — implemented.** Workers Caching now checks
+   the canonical `/v1/stats` representation before the Worker runs. A native
+   edge rate-limit binding rejects cold-miss/cache-bypass floods before any KV
+   read; alternate query and trailing-slash cache keys are refused; and public
+   wildcard CORS avoids attacker-controlled `Origin` variants. Production fails
+   closed if the limiter binding is missing or unavailable.
 3. **Tighten the public perimeter.** Put the Worker behind a controlled custom
    hostname/WAF before removing direct `workers.dev` exposure. Add enforceable
    clickjacking headers for the GitHub Pages site through a hosting layer that

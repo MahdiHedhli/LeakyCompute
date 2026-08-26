@@ -327,11 +327,10 @@ await check("exposes by_service, no raw IPs", () => {
   assert.ok(s.live_instrumented.by_service);
   assert.ok(!JSON.stringify(s).includes("127.0.0.1"));
 });
-await check("CORS honours the allowlist", () => {
-  assert.equal(
-    res.headers.get("Access-Control-Allow-Origin"),
-    "https://mahdihedhli.github.io"
-  );
+await check("public stats use one credential-free CORS representation", () => {
+  assert.equal(res.headers.get("Access-Control-Allow-Origin"), "*");
+  assert.equal(res.headers.get("Access-Control-Allow-Credentials"), null);
+  assert.equal(res.headers.get("Vary"), null);
 });
 
 // --- 7. I-25 exclusions ----------------------------------------------

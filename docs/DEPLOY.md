@@ -106,6 +106,12 @@ The restricted scope list is intentional. Wrangler's default login currently
 requests write access across many unrelated Cloudflare products; inspect and
 minimise OAuth scopes rather than approving that default.
 
+`wrangler.toml` also enables Workers Caching and the `STATS_RATE_LIMITER`
+binding. These are part of the Worker version and require no additional secret
+or dashboard-created resource. Do not remove either independently:
+`/v1/stats` relies on caching for normal traffic and the limiter to stop cold
+misses or cache-bypass requests before they consume security-state KV reads.
+
 URLs are set in:
 
 - `public/js/config.js` → `API_BASE`

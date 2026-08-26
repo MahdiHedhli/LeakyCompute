@@ -6,6 +6,13 @@ main = "worker/src/index.js"
 compatibility_date = "2025-11-01"
 workers_dev = true
 
+# Cache eligible responses before invoking the Worker. Every response is
+# explicitly no-store except the canonical, credential-free GET /v1/stats.
+# Version isolation stays at its safe default, so deploys cannot serve an older
+# version's cached representation.
+[cache]
+enabled = true
+
 # Public site CORS + domain-ready: set CUSTOM_ORIGINS later to include your domain
 [vars]
 ENVIRONMENT = "production"
@@ -70,6 +77,17 @@ KV_DAILY_PUT_BUDGET = "990"
 # I-27: days between the first notification attempt and publication of any
 # host-identifying detail. Aggregates are not gated by this window.
 DISCLOSURE_WINDOW_DAYS = "90"
+
+# Public stats cold-miss/cache-bypass ceiling, enforced at the edge before any
+# KV read. The fixed key creates one budget per Cloudflare location; it avoids
+# penalizing unrelated users behind the same NAT or privacy relay.
+[[ratelimits]]
+name = "STATS_RATE_LIMITER"
+namespace_id = "84306127"
+
+  [ratelimits.simple]
+  limit = 60
+  period = 60
 
 # I-26 expiry on silence. Retention is only real if something runs unattended;
 # the admin route POST /v1/admin/discovery/sweep is the manual equivalent.

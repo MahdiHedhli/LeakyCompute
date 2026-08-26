@@ -86,10 +86,12 @@ probing must stay disabled until the first three are complete.
    queryable store is still needed to avoid one KV read per host and isolate-
    local cache behavior.
 
-7. **Public statistics read isolation.** `/v1/stats` is unrestricted and reads
-   several KV keys per request. Materialize a public snapshot behind the Cache
-   API and an edge rate limit so public traffic cannot exhaust the same KV read
-   allowance used by authorization, exclusions and retention.
+7. **Public statistics read isolation — remediated 2026-08-25.** Workers Caching
+   now serves the canonical `/v1/stats` representation before Worker execution.
+   A native edge limiter rejects cold-miss/cache-bypass floods before any KV
+   read, alternate cache-key forms are refused, and the route fails closed in
+   production when the limiter is unavailable. The response has a 30-second
+   browser TTL and 60-second Cloudflare edge TTL.
 
 8. **CI and dependency supply-chain pinning.** GitHub Actions use mutable
    major-version tags; Wrangler has a range without a lockfile; local-lab
