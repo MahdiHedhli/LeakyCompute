@@ -91,7 +91,10 @@ probing must stay disabled until the first three are complete.
    A native edge limiter rejects cold-miss/cache-bypass floods before any KV
    read, alternate cache-key forms are refused, and the route fails closed in
    production when the limiter is unavailable. The response has a 30-second
-   browser TTL and 60-second Cloudflare edge TTL.
+   browser TTL and 60-second Cloudflare edge TTL; at most two cold-miss origin
+   builds are admitted per minute in each Cloudflare location. The limiter is
+   local and eventually consistent, so the controlled-hostname/WAF item remains
+   the next perimeter layer rather than being implied complete here.
 
 8. **CI and dependency supply-chain pinning.** GitHub Actions use mutable
    major-version tags; Wrangler has a range without a lockfile; local-lab

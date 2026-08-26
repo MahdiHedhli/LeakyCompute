@@ -238,10 +238,11 @@ Only the exact, queryless `/v1/stats` URL is accepted. The response is
 credential-free and uses `Access-Control-Allow-Origin: *`, a 30-second browser
 TTL, and a 60-second Cloudflare edge TTL. Cloudflare checks its cache before the
 Worker executes. A route-wide native edge limiter protects cold misses and
-explicit cache bypasses before any Workers KV read. The route returns
-`429 rate_limited` when that budget is exhausted and fails closed with
-`503 stats_temporarily_unavailable` if the production binding is absent or
-unavailable.
+explicit cache bypasses before any Workers KV read. It permits two origin builds
+per minute in each Cloudflare location; cache hits do not invoke the Worker or
+spend that budget. The route returns `429 rate_limited` when the budget is
+exhausted and fails closed with `503 stats_temporarily_unavailable` if the
+production binding is absent or unavailable.
 
 ```json
 {

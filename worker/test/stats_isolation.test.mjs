@@ -138,9 +138,9 @@ section("[S3] production configuration provides the two isolation layers");
   await check("Workers Caching is enabled before Worker invocation", () => {
     assert.match(config, /\[cache\]\s+enabled\s*=\s*true/);
   });
-  await check("the stats limiter binding has a one-minute edge budget", () => {
+  await check("the stats limiter permits only two origin builds per minute", () => {
     assert.match(config, /name\s*=\s*"STATS_RATE_LIMITER"/);
-    assert.match(config, /\[ratelimits\.simple\]\s+limit\s*=\s*60\s+period\s*=\s*60/);
+    assert.match(config, /\[ratelimits\.simple\]\s+limit\s*=\s*2\s+period\s*=\s*60/);
   });
 }
 

@@ -226,8 +226,8 @@ See [ADR 0001](docs/decisions/0001-passive-local-first.md).
 Bounded work that is valuable either way:
 
 1. Required CI and pinned Actions, packages, and container images.
-2. A cached, edge-rate-limited public statistics snapshot that cannot exhaust
-   security-state KV reads. **Implemented.**
+2. A cached, edge-rate-limited public statistics snapshot that protects the
+   security-state KV budget. **Implemented.**
 3. A controlled Worker hostname/WAF and enforceable browser framing policy.
 
 Then close the research questions that constrain publication:

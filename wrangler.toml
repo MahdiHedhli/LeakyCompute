@@ -86,7 +86,7 @@ name = "STATS_RATE_LIMITER"
 namespace_id = "84306127"
 
   [ratelimits.simple]
-  limit = 60
+  limit = 2
   period = 60
 
 # I-26 expiry on silence. Retention is only real if something runs unattended;

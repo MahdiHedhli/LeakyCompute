@@ -67,7 +67,10 @@ prerequisites are explicit.
    edge rate-limit binding rejects cold-miss/cache-bypass floods before any KV
    read; alternate query and trailing-slash cache keys are refused; and public
    wildcard CORS avoids attacker-controlled `Origin` variants. Production fails
-   closed if the limiter binding is missing or unavailable.
+   closed if the limiter binding is missing or unavailable. The limiter permits
+   two origin builds per minute per Cloudflare location. It is deliberately an
+   abuse backstop, not a globally exact quota; item 3 adds the controlled
+   hostname/WAF perimeter needed for broader traffic policy.
 3. **Tighten the public perimeter.** Put the Worker behind a controlled custom
    hostname/WAF before removing direct `workers.dev` exposure. Add enforceable
    clickjacking headers for the GitHub Pages site through a hosting layer that
