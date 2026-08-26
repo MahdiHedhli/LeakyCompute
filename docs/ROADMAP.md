@@ -24,28 +24,26 @@ decisions and must stay separate in code, documentation, and metrics.
 
 ---
 
-## 0. Decide the measurement mode
+## 0. Measurement mode — decided
 
 This decision determines whether the large storage/control-plane project in
 section 1b is necessary.
 
-### Option A — passive and local-first (current default)
+### Option A — passive and local-first (accepted 2026-08-25)
 
 Keep internet measurement to index-derived counts and comparisons. Keep live
 checks inside infrastructure the operator controls. Retire dormant active paths
 that no longer serve a committed product direction.
 
-This is the lower-risk, lower-cost path and is the default until a written
-decision says otherwise.
+This is the selected path. The decision and its code-retirement consequences are
+recorded in
+[`decisions/0001-passive-local-first.md`](decisions/0001-passive-local-first.md).
 
-### Option B — restore governed active re-verification
+### Option B — restore governed active re-verification (not selected)
 
 Retain the public-index provenance rule and read-only metadata probes, but rebuild
 the state model before sending traffic again. Choosing this option authorizes a
 design phase, not a probe run.
-
-**Decision output:** a short architecture decision record stating which option
-the project is taking, why, and which dormant code should be kept or removed.
 
 **What would make this step wrong:** allowing the existing dormant runner to
 become the de facto decision. It remains fail-closed until the choice and its
@@ -124,29 +122,49 @@ hosted checker is not a reason to weaken target validation.
 These constrain what the published numbers and any host-identifying output may
 claim.
 
-### 2a. Disclosure routing — settles Q-2 operationally
+### 2a. Independent passive index — settles Q-3
+
+Every current count is Shodan-shaped. Add Censys first and publish disagreement
+between sources rather than summing them into a larger-looking population.
+
+Use only the supported Censys Platform API and pin its requested schema version.
+Keep source-specific records separate. Censys researcher terms prohibit raw data
+redistribution without prior written consent, so no Censys-derived host rows may
+enter a Shadowserver or other third-party handoff unless Censys grants that
+consent. Aggregate research publication and third-party data transfer are
+different permissions.
+
+Global search/census access depends on the account tier or approved research
+access; free Platform accounts expose lookup endpoints, not the search workflow
+this item needs. If research access is requested, the maintainer must write the
+application personally—Censys explicitly rejects LLM-authored applications.
+
+Certificate Transparency and favicon lanes can follow as passive census inputs.
+Index records are counts/candidates, not standing permission to probe.
+
+**Output:** a terms-compliant API path plus source-specific counts, overlap,
+disagreement, freshness, and query limitations. A single combined total is
+explicitly not the deliverable.
+
+### 2b. Disclosure routing — settles Q-2 operationally
 
 The policy is already settled: notify before host-identifying publication, wait
 90 days, and leave aggregates ungated. The delivery route is not wired.
 
-Confirm Shadowserver Foundation's current researcher intake and required format.
+Shadowserver's current data-sharing guidance directs prospective collaborators
+to its contact form, which explicitly forbids operationally sensitive data in
+the initial message. Send the reviewed, aggregate-only introduction in
+[`DISCLOSURE_ENGAGEMENT.md`](DISCLOSURE_ENGAGEMENT.md), then learn whether they
+want to add the fingerprints to their own scans or accept a minimized feed over
+a private channel. Do not build an uploader until they specify the route and
+schema.
+
 Use national CSIRTs through FIRST, CERT/CC VINCE for multi-party cases, and
 provider abuse channels as fallbacks. Do not build a home-grown mass contact
 discovery or notification system.
 
 **Output:** an accepted external route, a documented fallback, and a testable
 handoff format that contains only the minimum host-identifying data required.
-
-### 2b. Independent passive index — settles Q-3
-
-Every current count is Shodan-shaped. Add Censys first and publish disagreement
-between sources rather than summing them into a larger-looking population.
-
-Certificate Transparency and favicon lanes can follow as passive census inputs.
-Index records are counts/candidates, not standing permission to probe.
-
-**Output:** source-specific counts, overlap, disagreement, freshness, and query
-limitations. A single combined total is explicitly not the deliverable.
 
 ### 2c. Hostname handling — settles Q-1 before CT identifiers persist
 

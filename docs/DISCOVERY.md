@@ -121,7 +121,7 @@ provider's ToS on automated querying — several are stricter than Shodan's.
 | **crt.sh** | ❌ none | none | **none** | reverse-proxied-on-443 population |
 | **certstream** | ❌ none | none | **none** | real-time CT feed |
 | **Common Crawl** | ❌ none | none | **none** | body-level fingerprints |
-| Censys | ✅ | id+secret / platform token | low | independent second census |
+| Censys | ✅ | Platform PAT + organization ID | tier-dependent | independent second census; global search is not available on the free lookup-only tier |
 | Netlas | ✅ | `NETLAS_API_KEY` | low | full-body search, odd ports |
 | GreyNoise | ✅ | `GREYNOISE_API_KEY` | low | who is *already* scanning these ports |
 | FOFA | ✅ | email + key | medium | APAC/CN coverage (fixes geo bias) |
@@ -134,6 +134,13 @@ add Censys as the first independent census. CT query experiments may begin
 without retaining results, but hostname persistence waits for Q-1's retention,
 deletion, and publication decision. Netlas/FOFA are later bias checks, not a way
 to manufacture a larger combined total.
+
+Use the supported Censys Platform API, request an explicit response schema, and
+keep Censys rows source-labeled. Research accounts may not redistribute raw
+Censys data without prior written consent. Research-access applications must be
+written personally by the maintainer; Censys explicitly rejects LLM-authored
+applications. The application and account choice therefore stay outside this
+repository and automation.
 
 ---
 

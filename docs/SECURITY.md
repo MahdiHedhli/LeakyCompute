@@ -272,11 +272,13 @@ country, ASN, stack — are not host-identifying and are not gated by the window
 > **Enforcement status: partial, and this is the one to know about.** The
 > withholding logic is implemented and tested — the lab marks records
 > not-for-publication and strips the address of an unnotified host. The
-> *notification routing* is not wired: we can identify hundreds of exposed hosts
-> and have no way to tell their operators. Route is the Shadowserver Foundation,
-> who already notify network owners and national CSIRTs daily. Until it is wired,
-> the practical effect of I-27 is that we publish aggregates and notify nobody —
-> which settles Q-2's policy question while leaving its operational one open.
+> *notification routing* is not wired: we can identify exposed hosts and have no
+> accepted channel to their operators. Shadowserver's public data-sharing
+> guidance directs collaborators to an aggregate-only first contact; the draft
+> is in `DISCLOSURE_ENGAGEMENT.md`. Until Shadowserver accepts a route and source
+> licensing permits transfer, the practical effect of I-27 is that we publish
+> aggregates and notify nobody—which settles Q-2's policy question while leaving
+> its operational one open.
 
 ---
 
@@ -349,14 +351,19 @@ as raw IPs — admin-gated, never public.
 **Q-2. Coordinated disclosure — policy settled, routing open.**
 *Settled by I-27:* we notify before host-identifying publication, with a 90-day
 window; aggregates are ungated. *Still open:* the routing. We can identify
-hundreds of exposed hosts and have no channel to their operators, and notifying
+exposed hosts and have no channel to their operators, and notifying
 at scale ourselves is how a research project gets reclassified as the threat.
-Blocked on confirming the Shadowserver Foundation's researcher intake. Until it
-is wired, we publish aggregates and contact nobody.
+Shadowserver's public intake path is confirmed, but acceptance, secure transfer,
+schema, freshness, and deletion requirements are not. The first-contact draft in
+[DISCLOSURE_ENGAGEMENT.md](DISCLOSURE_ENGAGEMENT.md) contains no operational
+data. Until a route is accepted and source licensing permits transfer, we
+publish aggregates and contact nobody.
 
 **Q-3. Published counts inherit their source's bias.**
 The by-country chart is Shodan-shaped. Broaden sources or caveat the chart —
-publishing it unqualified overstates what was measured. See [DISCOVERY.md](DISCOVERY.md).
+publishing it unqualified overstates what was measured. Censys comes next, but
+its source records stay separate and cannot be redistributed without the
+permission required by the account terms. See [DISCOVERY.md](DISCOVERY.md).
 
 **Q-4. Tunnelled exposure is structurally invisible** (ngrok, trycloudflare,
 Tailscale Funnel). Published totals must say so rather than imply completeness.

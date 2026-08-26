@@ -219,13 +219,9 @@ Ordered by what closes a question the project already admits is open, then by
 value per hour. Full detail, including what would make each item *wrong*, in
 **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
-**Current default:** passive internet measurement plus live checks inside the
+**Accepted direction:** passive internet measurement plus live checks inside the
 operator's own boundary. Hosted checks and active discovery remain suspended.
-
-The next decision is whether active re-verification is still a product goal. If
-yes, it requires the strong state/storage migration in the security review. If
-no, the dormant active paths should be retired rather than maintained
-indefinitely.
+See [ADR 0001](docs/decisions/0001-passive-local-first.md).
 
 Bounded work that is valuable either way:
 
@@ -238,8 +234,8 @@ Then close the research questions that constrain publication:
 
 | | |
 |---|---|
-| **Disclosure routing** *(settles Q-2)* | The policy is written — notify before host-identifying publication, 90-day window. The routing is not wired. Route is the Shadowserver Foundation, who already notify network owners and national CSIRTs daily. We can identify hundreds of exposed hosts and cannot yet tell their operators. |
-| **An independent passive index** *(settles Q-3)* | Every number here is Shodan-shaped. Censys comes first; publish overlap and disagreement rather than summing sources into a larger figure. |
+| **An independent passive index** *(settles Q-3)* | Every number here is Shodan-shaped. Censys comes first; publish overlap and disagreement rather than summing sources. Raw Censys-derived rows cannot be redistributed without the permission required by its terms. |
+| **Disclosure routing** *(settles Q-2)* | Start aggregate-only contact with Shadowserver now; implement transfer only after they accept a route/schema and the observation source permits redistribution. |
 | **Hostname policy before CT** *(settles Q-1)* | Certificate Transparency produces organizational hostnames. Decide retention, deletion, and publication rules before persisting them. |
 
 Product and content work follows:
@@ -263,6 +259,8 @@ unindexed address space (I-19).
 - [Discovery model](docs/DISCOVERY.md) — passive lanes, source registry, local fingerprint lab
 - [2026-08-25 security review](docs/SECURITY_REVIEW_2026-08-25.md) — adversarial findings, containment, open blockers, incident response
 - [Supply-chain baseline](docs/SUPPLY_CHAIN.md) — reviewed Action SHAs, dependency and image digests, update procedure
+- [Disclosure engagement](docs/DISCLOSURE_ENGAGEMENT.md) — Shadowserver first-contact draft, licensing gate, candidate handoff
+- [Architecture decisions](docs/decisions/) — accepted product and security direction
 - [Roadmap](docs/ROADMAP.md) — what is next, why it is next, and what would make each item wrong
 - [Deploy](docs/DEPLOY.md) · [Research background](docs/research.md)
 - [Archive](docs/archive/) — session handoffs and write-up notes, kept for their reasoning. Unmaintained; the constitution wins over anything in there.
