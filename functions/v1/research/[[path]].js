@@ -85,6 +85,29 @@ export async function onRequest(context) {
   if (!BRIDGE_ROUTES.has(sub)) {
     return json({ error: "route_not_allowed" }, 404);
   }
+
+  // Access returns a browser to the exact URL that started authentication. If
+  // that URL was the identity endpoint, a top-level navigation would otherwise
+  // end on raw JSON (and some browser extensions block it outright). Send only
+  // document navigations back to the lab shell. The shell's application/json
+  // fetch still reaches /me normally, so this cannot weaken the identity gate.
+  const acceptsHtml = /(^|,)\s*text\/html(?:\s*;|\s*(?:,|$))/i.test(
+    request.headers.get("Accept") || ""
+  );
+  if (
+    sub === "me" &&
+    (request.headers.get("Sec-Fetch-Mode") === "navigate" || acceptsHtml)
+  ) {
+    const location = new URL("/", request.url);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: location.toString(),
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const url = new URL(request.url);
   const target = `${UPSTREAM}/v1/research/${sub}${url.search}`;
 

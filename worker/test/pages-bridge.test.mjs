@@ -59,6 +59,28 @@ await check("encoded traversal cannot normalize into an admin route", async () =
   assert.equal(calls.length, before);
 });
 
+await check("post-login document navigation to /me returns to the lab shell", async () => {
+  const before = calls.length;
+  const res = await onRequest(context("me", {
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "Sec-Fetch-Mode": "navigate",
+    },
+  }));
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get("location"), "https://lab.test/");
+  assert.match(res.headers.get("cache-control") || "", /no-store/);
+  assert.equal(calls.length, before);
+});
+
+await check("application fetch to /me still reaches the fixed upstream", async () => {
+  const res = await onRequest(context("me", {
+    headers: { Accept: "application/json" },
+  }));
+  assert.equal(res.status, 200);
+  assert.equal(calls.at(-1).url, "https://api.leakycompute.mahdihedhli.com/v1/research/me");
+});
+
 await check("known route forwards only allowlisted headers to the fixed upstream", async () => {
   const res = await onRequest(context(["lab", "catalog"], {
     headers: {
