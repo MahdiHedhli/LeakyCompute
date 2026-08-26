@@ -6,6 +6,12 @@ main = "worker/src/index.js"
 compatibility_date = "2025-11-01"
 workers_dev = true
 
+# Staged perimeter migration: keep workers.dev until every public/lab consumer
+# has moved to this hostname and the new route passes end-to-end verification.
+[[routes]]
+pattern = "api.leakycompute.mahdihedhli.com"
+custom_domain = true
+
 # Cache eligible responses before invoking the Worker. Every response is
 # explicitly no-store except the canonical, credential-free GET /v1/stats.
 # Version isolation stays at its safe default, so deploys cannot serve an older
