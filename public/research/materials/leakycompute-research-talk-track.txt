@@ -1,0 +1,71 @@
+LeakyCompute: measuring exposed AI without becoming the threat
+Publication talk track
+Updated 26 August 2026
+
+Slide 1: LeakyCompute
+
+I started LeakyCompute after seeing a short-lived public catalog of exposed AI infrastructure. The count was attention-grabbing, but it mixed several different questions together. I wanted to know what was visible in public indexes, what had answered a recent read-only request, and what kind of access those endpoints actually exposed.
+
+The project is defensive. It reports reachability, never demonstrated impact. I did not submit jobs, run notebooks, pull models, send prompts, or prove code execution on third-party systems.
+
+Slide 2: Three measurements, never summed
+
+The project shows three numbers because they describe three different populations.
+
+The archive snapshot contains 19,348 hosts captured on 27 July 2026. It is historical and was not reverified.
+
+The current public index count contains 19,376 hosts as of 25 August 2026. That figure is entirely Shodan-derived at the moment. It is counted from public records, and LeakyCompute sent those hosts nothing to arrive at it.
+
+Bounded historical re-verification retained 1,360 distinct hosts that answered a read-only request within a 180-day window. Active discovery is now suspended, so this is not a live census.
+
+These figures are not additive. Each has a different source, timestamp, and confidence level.
+
+Slide 3: Rules before features
+
+I wrote the safety rules as versioned invariants. Probes were limited to reviewed metadata, health, version, and listing endpoints. They used GET only, never followed redirects, contacted reviewed ports, capped response bodies, and applied opt-outs before any request.
+
+Discovery and verification were separate. A public index could nominate a candidate, but the system was not allowed to discover hosts by walking address space. A verification result said only that an endpoint was reachable. It never became permission to demonstrate what an attacker could do with it.
+
+Slide 4: What the retained observations show
+
+The retained snapshot classifies host and stack pairs by what their open endpoints make reachable.
+
+There are 969 pairs where models or inference are open, 188 where workflow execution is open, 129 where training metadata or artifacts are readable, and 78 where Jupyter or Ray expose the prerequisites for code execution.
+
+A host can expose more than one stack, so these are pairs rather than a distinct-host total. The classification describes reachable capability, not exploitability tested by the project.
+
+Slide 5: Public, gated, and administrative data
+
+LeakyCompute has three data boundaries. The public site receives aggregate counts. Approved researchers can use a gated lab with a minimised corpus. Administrative ingest and researcher authorization sit behind a separate interface.
+
+That split matters because a bug in the public client should not reveal raw records, and a researcher session should not turn into an administrative request. The lab now derives identity only from a cryptographically verified Cloudflare Access application token. The signed email must exactly match an active allowlist entry.
+
+Slide 6: Red teaming with Daybreak Blue
+
+I used Daybreak Blue as an adversarial reviewer alongside a primary code review pass. The review covered the Worker, public clients, research lab, Pages bridge, local and scheduled runners, storage model, workflows, Cloudflare configuration, CLI, and tests. It did not probe a third-party target.
+
+The useful shift was to treat every safety claim as something to falsify. Could an authenticated user manufacture a trusted researcher identity? Could an odd address encoding bypass a private-range block? Could a crash cause a probe to repeat? Could a health check spend someone else's API budget? That approach found issues the happy path missed.
+
+Slide 7: What Daybreak helped find
+
+The review found a critical researcher impersonation path and raw candidate addresses in public workflow artifacts and logs. It also found weaknesses in alias revocation, bridge routing, denied-user logging, hosted-check accuracy, public-address validation, probe-ledger timing, legacy discovery, input amplification, stale provenance, and a LiteLLM health route that could trigger paid upstream work.
+
+It found more conventional engineering failures too: unbounded response reads, redirects in off-Worker helpers, partial aggregate reconciliation, reusable exclusion approvals, unsafe workflow parsing, enumerable abuse pseudonyms, fail-open administrative ingest, a client-controlled API endpoint, weak browser headers, over-detailed public errors, and floating supply-chain dependencies.
+
+The concrete bugs were fixed or contained and tests were added. Thirteen discovery artifact and workflow log sets were deleted. No credential leak was confirmed, but deletion cannot revoke a copy that was already downloaded or cached.
+
+Slide 8: Why active probing stays off
+
+Active discovery and hosted checks remain suspended. The remaining blockers are architectural: a durable pre-probe lease, authoritative pageable corpus storage, resumable and verifiable opt-out deletion, retention that works at corpus scale, and complete reconciliation that cannot silently publish a partial count.
+
+The project can still read passive public-index aggregates, serve the historical corpus to approved researchers, and let operators run a local checker against infrastructure they own.
+
+The main lesson is simple. The probe is only one part of the safety boundary. Identity, logs, retries, storage limits, redirects, workflow events, and dependency pins all have to keep the same promise.
+
+References
+
+Project: https://github.com/MahdiHedhli/LeakyCompute
+Security review: https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY_REVIEW_2026-08-25.md
+Safety invariants: https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md
+Live aggregate snapshot: https://api.leakycompute.mahdihedhli.com/v1/stats
+Measurement and opt-out: https://leakycompute.mahdihedhli.com/scanning

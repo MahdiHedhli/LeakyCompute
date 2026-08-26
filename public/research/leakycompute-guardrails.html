@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <title>LeakyCompute: measuring exposed AI without becoming the threat</title>
+  <meta name="description" content="How LeakyCompute measures internet-exposed AI services, what an adversarial Daybreak Blue review found, and why active probing remains suspended." />
+  <meta name="theme-color" content="#0a0e17" />
+  <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../css/style.css?v=research-1" />
+</head>
+<body>
+  <div class="scanline" aria-hidden="true"></div>
+  <div class="wrap article-wrap">
+    <header class="top article-top">
+      <img src="../assets/logo.svg" alt="LeakyCompute logo" />
+      <div class="brand">
+        <a class="eyebrow" href="https://mahdihedhli.com/dont-panic/" target="_blank" rel="noopener noreferrer">DON'T PANIC // Threat Research</a>
+        <h1>LEAKY COMPUTE</h1>
+        <div class="tag">a research note on measurement, restraint, and adversarial review</div>
+      </div>
+      <nav class="nav">
+        <a href="../index.html">Home</a>
+        <a href="../scanning.html">Scanning and opt-out</a>
+        <a href="https://github.com/MahdiHedhli/LeakyCompute" target="_blank" rel="noopener">Code</a>
+      </nav>
+    </header>
+
+    <article class="research-article">
+      <header class="article-hero">
+        <p class="article-kicker">Research note // 26 August 2026</p>
+        <h2>LeakyCompute: measuring exposed AI without becoming the threat</h2>
+        <p class="article-dek">
+          Internet-exposed AI services are easy to count badly and surprisingly hard to study responsibly.
+          I built LeakyCompute to measure the problem without turning the measurement system into another scanner, proxy, or source of false confidence.
+        </p>
+        <p class="article-byline">Mahdi Hedhli</p>
+      </header>
+
+      <aside class="article-callout">
+        <strong>The short version.</strong> LeakyCompute separates passive index counts, an archive snapshot, and bounded historical re-verification. It reports reachability, never demonstrated impact. After an adversarial Daybreak Blue review found serious flaws in identity, data handling, target validation, and probe scheduling, I suspended active discovery and hosted checks. They stay off until the remaining architectural controls exist.
+      </aside>
+
+      <section>
+        <h3>The question was never just "how many?"</h3>
+        <p>
+          The project began after I saw a short-lived public catalog of exposed AI infrastructure. The raw number was arresting, but the more useful question was what that number actually meant. Was a host merely visible in a search index? Had it answered a recent request? Did an endpoint expose metadata, inference, a workflow engine, or a path to code execution? Those are different claims, and collapsing them into one counter makes the research less useful.
+        </p>
+        <p>
+          So LeakyCompute now presents three measurements side by side. As of the project's 25 August 2026 snapshot, an archive-era catalog listed <strong>19,348 hosts</strong>. Current public index records listed <strong>19,376 hosts</strong>. Bounded historical re-verification had retained <strong>1,360 distinct hosts</strong> that answered a read-only request within a 180-day window. These figures are not additive. Each has a different source, time boundary, and confidence level.
+        </p>
+        <div class="article-metrics" aria-label="Three separate LeakyCompute measurements">
+          <div><span>19,348</span><strong>archive listings</strong><small>captured 27 July 2026, not reverified</small></div>
+          <div><span>19,376</span><strong>indexed records</strong><small>counted from public records, not probed</small></div>
+          <div><span>1,360</span><strong>reverified hosts</strong><small>retained historical read-only observations</small></div>
+        </div>
+        <p>
+          The current index count is entirely Shodan-derived, so source bias is not a footnote. It is part of the result. Tunnelled services are also invisible to this method. The live project page keeps the timestamp and source split next to the numbers so they cannot quietly turn into a timeless claim.
+        </p>
+      </section>
+
+      <section>
+        <h3>Rules before features</h3>
+        <p>
+          I wrote the safety rules as versioned invariants before treating the project as a measurement platform. The important ones are deliberately unglamorous: use only reviewed metadata, health, version, or listing requests; send GET requests only; never follow redirects; cap every response body; contact only reviewed ports; honor exclusions before any request; and report what was reachable without proving what an attacker could do with it.
+        </p>
+        <p>
+          Discovery and verification are separate operations. A passive index can nominate a candidate, but the system must not discover new hosts by walking address space. The public site receives aggregates. Approved researchers can reach a minimised corpus through the lab. Administrative ingest and authorization stay behind a third boundary. Keeping those surfaces separate limits what a bug in any one of them can expose.
+        </p>
+        <p>
+          That design still surfaced meaningful classes of exposure. The retained snapshot contains 969 host and stack pairs where models or inference were reachable, 188 where unauthenticated workflow execution was reachable, 129 where training metadata or artifacts were readable, and 78 where Jupyter or Ray exposed the prerequisites for code execution. These are reachability classifications. I did not submit jobs, run notebooks, pull models, send prompts, or otherwise demonstrate impact on third-party systems.
+        </p>
+      </section>
+
+      <section>
+        <h3>Red teaming the research system with Daybreak Blue</h3>
+        <p>
+          Once the project had a public Worker, a gated lab, local runners, scheduled workflows, and several ways to ingest observations, reading the happy path was not enough. I used Daybreak Blue as an adversarial reviewer alongside a primary code review pass. The review covered the Worker, public clients, lab, Pages bridge, runners, storage model, workflows, Cloudflare configuration, CLI, and tests. It did not probe a third-party target.
+        </p>
+        <p>
+          Daybreak's most useful habit was to treat every safety claim as something to falsify. If the system said a researcher was approved, could a different Access user manufacture the trusted identity? If a target parser rejected private addresses, what happened with an integer-encoded address or a hostname that changed after validation? If a rate gate recorded a probe after it finished, what happened when the process crashed in the middle? Those questions found problems that ordinary feature testing did not.
+        </p>
+
+        <h4>Identity and data boundaries</h4>
+        <ol class="finding-list">
+          <li><strong>Researcher impersonation.</strong> Any valid Access user could supply a trusted-looking login header, or collide through an email local part or mutable display claim, and impersonate an allowlisted researcher. Production identity now comes only from the exact email in a cryptographically verified Access application token. Issuer, audience, token type, lifetime, algorithm, signature, and key ID are checked.</li>
+          <li><strong>Public workflow artifacts.</strong> Scheduled discovery wrote raw candidate addresses to downloadable artifacts and logs in a public repository. The uploads were removed, output was redacted, and 13 artifact and workflow log sets were deleted. No credential leak was confirmed, but deletion cannot revoke copies that were already downloaded or cached.</li>
+          <li><strong>Alias lifecycle errors.</strong> Research aliases could survive some revocation and reapproval sequences, and one researcher could collide with another researcher's alias. Ownership conflicts now fail before a write, removed aliases are deactivated, and alias matches re-check the active primary identity.</li>
+          <li><strong>Bridge route confusion.</strong> Path normalization in the lab bridge could turn a researcher route into an administrative one. The bridge now uses an exact route inventory, a header allowlist, manual redirects, and no-store responses.</li>
+          <li><strong>Identity stored in denial records.</strong> Denied lab requests stored raw signed email addresses, while some lab scans performed excessive key-value reads. Denial identity is now hashed, scans are capped, and per-user rate limits apply.</li>
+        </ol>
+
+        <h4>Target validation and probe safety</h4>
+        <ol class="finding-list" start="6">
+          <li><strong>False clean results from the hosted checker.</strong> The Worker platform could not reliably fetch IP-literal targets. A failed connection could therefore look like a clean host. Hosted checks were disabled instead of presenting that ambiguity as assurance.</li>
+          <li><strong>Address parser bypasses.</strong> Reserved, documentation, benchmark, and multicast ranges were incomplete. Numeric address encodings, hostnames, DNS rebinding, and CIDR opt-out edges created additional bypasses. Targets now pass through one canonical parser, only public-unicast IP literals are accepted, and hostnames are rejected.</li>
+          <li><strong>Probe ledger timing.</strong> The attempt clock was written after a run. A crash could repeat a probe, and ledger eviction could weaken cadence. Active discovery remains disabled pending a durable pre-probe lease.</li>
+          <li><strong>Ungated legacy discovery.</strong> An older runner could probe arbitrary seeds and neighbouring addresses without the newer provenance, exclusion, interval, and rate gates. Its active mode was disabled.</li>
+          <li><strong>Amplification through malformed input.</strong> Duplicate services, inherited object keys, and truthy authorization values could expand a request beyond its intended work. Inputs are now exact, deduplicated, bounded, limited to owned keys, and require the literal boolean value true.</li>
+          <li><strong>Stale provenance.</strong> An old index record could make a now-private or reserved target appear eligible, or preserve standing permission indefinitely. Public-unicast validation now happens first and index provenance expires after seven days.</li>
+          <li><strong>A costly health check.</strong> One LiteLLM health route can trigger paid upstream completions. The profile now uses its liveness endpoint, which checks service health without spending the operator's API budget.</li>
+          <li><strong>Redirect and response-size gaps.</strong> Off-Worker helpers followed redirects, some reads were unbounded, the local Ollama client lacked a response cap, and favicon loading could cross origin. Redirects are blocked across runners, reads are capped at 32 KiB, non-loopback local checks need attestation, and icons stay same-origin.</li>
+        </ol>
+
+        <h4>State, reconciliation, and automation</h4>
+        <ol class="finding-list" start="14">
+          <li><strong>Partial aggregates presented as complete.</strong> A reconciliation job could count only the newest 2,000 records and overwrite complete totals. Partial recounts now refuse to publish.</li>
+          <li><strong>Reusable exclusions.</strong> An exclusion approval could be reused after an issue was edited, and an incomplete purge could be reported as complete. Approvals are now bound to the label event and body, and deletion status reports partial work honestly.</li>
+          <li><strong>Unsafe workflow parsing.</strong> One approval flow read the wrong event field and constructed JSON through shell interpolation. It now reads the correct event data and uses a structured JSON builder.</li>
+          <li><strong>Enumerable abuse pseudonyms.</strong> When a secret was missing, abuse logs fell back to a public salt. They now use HMAC-SHA256, and production skips the pseudonym rather than weakening it.</li>
+          <li><strong>Fail-open administrative ingest.</strong> Exclusion lookup failures and caller-supplied replacement sets could weaken the effective block list. Administrative ingest now fails closed and unions server-side exclusions.</li>
+          <li><strong>Client-side trust expansion.</strong> An arbitrary <code>?api=</code> parameter could redirect the browser client to another endpoint. Disclosure timing could also be misconfigured, browser headers were too weak, and exception strings could reveal internals. The override is gone, timing is validated, response headers are stricter, and public errors are bounded.</li>
+          <li><strong>Supply-chain drift.</strong> Floating dependencies, actions, and container images made the reviewed build different from a future build. Dependencies and actions are pinned, images use immutable digests, and CI checks those constraints.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h3>Why probing is still off</h3>
+        <p>
+          Most of the concrete bugs above are fixed and covered by tests. That does not make the architecture ready for unattended internet measurement. A durable pre-probe ledger still needs to reserve work before traffic leaves the runner. Corpus storage needs authoritative pagination rather than eventually consistent key-value scans. Opt-out deletion needs a resumable, verifiable completion record. Retention and full reconciliation also need to work across the whole corpus without silently degrading into a partial pass.
+        </p>
+        <p>
+          Until those controls exist, scheduled active discovery and hosted checks remain suspended. The project can still read public index aggregates, serve the historical research corpus to approved researchers, and let operators run the local checker against infrastructure they own. This is a narrower product, but it is an honest one.
+        </p>
+      </section>
+
+      <section>
+        <h3>What I learned</h3>
+        <p>
+          The hardest part of defensive measurement is not writing the probe. It is making every surrounding system keep the same promise. Identity, logs, retries, storage limits, redirects, workflow events, and dependency pins all become part of the safety boundary. A read-only request can still cause harm if it reaches the wrong address, repeats after a crash, spends someone else's API budget, or leaves a sensitive trail in public automation logs.
+        </p>
+        <p>
+          Daybreak Blue changed the project by forcing those promises into adversarial questions and executable tests. The result is not a claim that LeakyCompute is finished or risk-free. It is a clearer record of what the system can support today, what it cannot, and which controls must exist before any suspended capability returns.
+        </p>
+      </section>
+
+      <section class="article-resources">
+        <h3>Read the evidence</h3>
+        <ul>
+          <li><a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY_REVIEW_2026-08-25.md" target="_blank" rel="noopener">Full adversarial security review</a></li>
+          <li><a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Safety invariants and threat model</a></li>
+          <li><a href="https://api.leakycompute.mahdihedhli.com/v1/stats" target="_blank" rel="noopener">Current aggregate snapshot</a></li>
+          <li><a href="../scanning.html">Measurement, retention, and permanent opt-out policy</a></li>
+          <li><a href="materials/leakycompute-research-slides.pdf">Publication-safe research slides</a></li>
+          <li><a href="materials/leakycompute-research-slides.pptx">Editable publication-safe slides</a></li>
+          <li><a href="materials/leakycompute-research-talk-track.txt">Publication-safe talk track</a></li>
+        </ul>
+        <p class="article-note">
+          The downloadable presentation materials were rebuilt from the original talk artifacts. Organization-specific references were removed, and every retained count was reconciled with the repository and the 25 August 2026 aggregate snapshot.
+        </p>
+      </section>
+    </article>
+
+    <footer class="footer">
+      <div class="stamp">EVIDENCE FIRST · PANIC NEVER</div>
+      <p style="margin-top:8px">LeakyCompute · <a href="../index.html">live research pulse</a> · <a href="https://github.com/MahdiHedhli/LeakyCompute" target="_blank" rel="noopener">source and tests</a></p>
+    </footer>
+  </div>
+</body>
+</html>
