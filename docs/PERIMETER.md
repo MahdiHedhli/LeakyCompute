@@ -1,7 +1,7 @@
 # Public perimeter configuration
 
-**Status:** staged cutover; do not disable `workers.dev` until every verification
-below passes.
+**Status:** active as of 2026-08-26. The custom public and API hostnames, edge
+headers, rate limit, lab bridge, and legacy-route retirement were verified.
 
 This is the reviewed, reproducible record for Cloudflare zone controls that do
 not live in Worker source. It does not change deployment ownership: the API
@@ -21,7 +21,8 @@ No wildcard DNS record is permitted for this project.
 
 ## API WAF rate rule
 
-Create one zone rate-limiting rule scoped to the API hostname:
+The active zone rule is named `LeakyCompute API perimeter` and is scoped to the
+API hostname:
 
 - expression: `http.host eq "api.leakycompute.mahdihedhli.com" and starts_with(http.request.uri.path, "/v1/")`
 - counting characteristic: source IP (Free-plan behavior)
@@ -36,7 +37,8 @@ boundaries, including the two-per-minute, per-location cold-build limit for
 
 ## Public-site response headers
 
-Apply a response-header Transform Rule only when:
+The active Transform Rule is named `LeakyCompute public security headers` and
+applies only when:
 
 ```text
 http.host eq "leakycompute.mahdihedhli.com"
@@ -68,6 +70,5 @@ redirect, and rollback paths have been stable.
 6. The legacy GitHub Pages URL redirects to the protected custom hostname.
 7. The Access-gated lab bridge reaches every allowlisted research route through
    the custom API hostname.
-8. Only after 1–7 pass: set `workers_dev = false`, disable Worker preview URLs,
-   deploy with the exact reviewed Wrangler version, and verify the old URL no
-   longer serves the API.
+8. Set `workers_dev = false` and `preview_urls = false`, deploy with the exact
+   reviewed Wrangler version, and verify the old URL no longer serves the API.

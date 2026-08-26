@@ -184,7 +184,7 @@ created. Verify GitHub's domain ownership/HTTPS state and the redirect from the
 legacy `github.io` URL before treating the header boundary as complete.
 
 The API migration keeps `workers.dev` temporarily while callers move. Disable
-it only by committing `workers_dev = false` after the public site, discovery
+it only by committing `workers_dev = false` and `preview_urls = false` after the public site, discovery
 scripts, Pages research bridge, repository secrets, and live verification all
 use the custom domain. Dashboard-only disabling is not durable because a later
 Wrangler deployment can re-enable it from configuration.
