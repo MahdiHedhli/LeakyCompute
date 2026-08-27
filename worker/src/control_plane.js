@@ -170,7 +170,18 @@ export class DiscoveryControlPlane {
     this.ctx = ctx;
     this.env = env;
     this.sql = ctx.storage.sql;
-    this.sql.exec(`
+    let schemaReady = true;
+    try {
+      // DDL and INSERT OR IGNORE consume the Durable Object row-write budget
+      // even when the logical schema is unchanged. A new Worker version can
+      // reinstantiate this object many times, so probe the existing schema with
+      // a read and initialize only a genuinely empty object.
+      this.sql.exec("SELECT value FROM control_meta LIMIT 1");
+    } catch {
+      schemaReady = false;
+    }
+    if (!schemaReady) {
+      this.sql.exec(`
       CREATE TABLE IF NOT EXISTS exclusions (
         type TEXT NOT NULL,
         value TEXT NOT NULL,
@@ -265,9 +276,10 @@ export class DiscoveryControlPlane {
       );
       CREATE INDEX IF NOT EXISTS purge_status ON purge_jobs(status, created_at);
     `);
-    this.sql.exec(
-      "INSERT OR IGNORE INTO control_meta(key, value) VALUES ('corpus_epoch', '0')"
-    );
+      this.sql.exec(
+        "INSERT OR IGNORE INTO control_meta(key, value) VALUES ('corpus_epoch', '0')"
+      );
+    }
   }
 
   async fetch(request) {
