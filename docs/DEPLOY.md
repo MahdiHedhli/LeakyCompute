@@ -106,6 +106,13 @@ npx --yes wrangler@4.126.0 secret put TURNSTILE_SECRET_KEY
 npx --yes wrangler@4.126.0 deploy
 ```
 
+`TURNSTILE_EXPECTED_HOSTNAME` is a non-secret Worker variable and must match the
+single hostname configured on the dedicated widget. The browser labels every
+token with the fixed `hosted_self_check` action; production verification accepts
+only that exact hostname/action pair. The optional `remoteip` hint is deliberately
+omitted because proxy and address-family differences must not turn a valid
+browser token into an ambiguous identity failure.
+
 The restricted scope list is intentional. Wrangler's default login currently
 requests write access across many unrelated Cloudflare products; inspect and
 minimise OAuth scopes rather than approving that default.

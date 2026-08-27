@@ -446,7 +446,7 @@ async function handleCheck(request, env, ctx) {
     body = {};
   }
 
-  const turnstile = await verifyTurnstile(env, body.turnstile_token, ip);
+  const turnstile = await verifyTurnstile(env, body.turnstile_token);
   if (!turnstile.ok) {
     await logAbuse(env, {
       action: "check",

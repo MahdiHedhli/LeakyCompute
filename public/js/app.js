@@ -30,6 +30,7 @@
   let lastCountryStack = {};
   let turnstileWidgetId = null;
   let turnstileToken = "";
+  let preserveResultOnNextToken = false;
 
   function hostedCheckUnavailable(message) {
     const btn = $("check-btn");
@@ -50,11 +51,16 @@
       try {
         turnstileWidgetId = window.turnstile.render("#turnstile-widget", {
           sitekey,
+          action: "hosted_self_check",
           theme: "dark",
           size: "flexible",
           callback(token) {
             turnstileToken = token;
             $("check-btn").disabled = false;
+            if (preserveResultOnNextToken) {
+              preserveResultOnNextToken = false;
+              return;
+            }
             const out = $("result");
             out.className = "result";
             out.textContent = "Browser verification complete. Ready to check your public IP.";
@@ -487,7 +493,13 @@
     } finally {
       btn.disabled = true;
       if (turnstileWidgetId !== null && window.turnstile) {
-        window.turnstile.reset(turnstileWidgetId);
+        preserveResultOnNextToken = true;
+        try {
+          window.turnstile.reset(turnstileWidgetId);
+        } catch {
+          preserveResultOnNextToken = false;
+          hostedCheckUnavailable("Browser verification could not reset. Reload before checking again.");
+        }
       }
     }
   }

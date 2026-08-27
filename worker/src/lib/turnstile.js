@@ -1,5 +1,5 @@
-/** Optional Cloudflare Turnstile verification (free). */
-export async function verifyTurnstile(env, token, ip) {
+/** Cloudflare Turnstile verification for the public hosted self-check. */
+export async function verifyTurnstile(env, token) {
   const secret = env.TURNSTILE_SECRET_KEY;
   if (!secret) {
     if (env.ENVIRONMENT === "production") {
@@ -9,17 +9,39 @@ export async function verifyTurnstile(env, token, ip) {
     return { ok: true, skipped: true };
   }
   if (!token) return { ok: false, error: "turnstile_missing" };
+  const expectedHostname = String(env.TURNSTILE_EXPECTED_HOSTNAME || "")
+    .trim()
+    .toLowerCase();
+  if (!expectedHostname) {
+    return { ok: false, error: "turnstile_not_configured" };
+  }
   try {
     const body = new URLSearchParams();
     body.set("secret", secret);
     body.set("response", token);
-    if (ip) body.set("remoteip", ip);
     const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
       body,
     });
     const data = await resp.json();
-    return { ok: !!data.success, skipped: false, codes: data["error-codes"] || [] };
+    const hostname = String(data.hostname || "").trim().toLowerCase();
+    const action = String(data.action || "");
+    const ok =
+      data.success === true &&
+      hostname === expectedHostname &&
+      action === "hosted_self_check";
+    return {
+      ok,
+      skipped: false,
+      codes: data["error-codes"] || [],
+      error: ok
+        ? undefined
+        : data.success !== true
+          ? "turnstile_rejected"
+          : hostname !== expectedHostname
+            ? "turnstile_hostname_mismatch"
+            : "turnstile_action_mismatch",
+    };
   } catch {
     return { ok: false, error: "turnstile_error" };
   }

@@ -69,6 +69,7 @@ RL_GLOBAL_DAY_MAX = "800"
 # Per-probe timeout. Hosted services run sequentially so each one receives its
 # own durable lease and completion record.
 CHECK_TIMEOUT_MS = "2500"
+TURNSTILE_EXPECTED_HOSTNAME = "leakycompute.mahdihedhli.com"
 # Tier-1 services and their permitted ports are defined in
 # worker/src/lib/services.js. Ports are validated against that per-service
 # list, so /v1/check cannot be used as a general-purpose port prober.

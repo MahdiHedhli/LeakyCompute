@@ -47,7 +47,7 @@ http.host eq "leakycompute.mahdihedhli.com"
 Set, replacing any origin value:
 
 ```text
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.leakycompute.mahdihedhli.com; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.leakycompute.mahdihedhli.com https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 X-Frame-Options: DENY
 X-Content-Type-Options: nosniff
 Referrer-Policy: no-referrer
