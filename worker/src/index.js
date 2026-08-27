@@ -373,12 +373,16 @@ async function handleStats(request, env) {
   let authoritative = null;
   if (env.CONTROL_PLANE_READY === "true") {
     const aggregate = await controlCall(env, "/aggregates/current", { method: "GET" });
-    if (aggregate.status !== 200 || aggregate.body.ok === false) {
-      return publicJson({ error: "stats_temporarily_unavailable" }, 503);
+    if (aggregate.status === 200 && aggregate.body.ok !== false) {
+      authoritative = aggregate.body;
     }
-    authoritative = aggregate.body;
   }
   const payload = await publicStatsPayload(env, live, { authoritative });
+  if (!authoritative && env.CONTROL_PLANE_READY === "true") {
+    payload.control_plane_degraded = true;
+    payload.control_plane_note =
+      "Serving the last compatibility-cache counters while strong storage is temporarily unavailable.";
+  }
   payload.methodology = SNAPSHOT_NOTE;
   return publicJson(payload, 200, {
     "Cache-Control": "public, max-age=30",
@@ -904,11 +908,20 @@ function controlStub(env) {
 async function controlCall(env, path, { method = "POST", body } = {}) {
   const stub = controlStub(env);
   if (!stub) return { status: 503, body: { error: "control_plane_unavailable" } };
-  const response = await stub.fetch(`https://control.internal${path}`, {
-    method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await stub.fetch(`https://control.internal${path}`, {
+      method,
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    console.error("control plane unavailable", {
+      path,
+      error: String(error?.message || error),
+    });
+    return { status: 503, body: { error: "control_plane_unavailable" } };
+  }
   let payload;
   try {
     payload = await response.json();
