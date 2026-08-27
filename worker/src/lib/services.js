@@ -366,7 +366,7 @@ export const TIER1 = ["ollama", "ray", "jupyter"];
 export const DISCOVERY_PROFILES = Object.freeze({
   // Production egress verification only. The control plane refuses this
   // profile for discovery/hosted purposes and binds it to CANARY_TARGET_IP.
-  owned_canary: { ports: [10000], path: "/leakycompute-owned-canary" },
+  owned_canary: { ports: [8443], path: "/leakycompute-owned-canary" },
   ollama: { ports: [11434, 11435], path: "/api/ps" },
   jupyter: { ports: [8888, 8889, 8890], path: "/" },
   ray: { ports: [8265, 8266], path: "/api/version" },

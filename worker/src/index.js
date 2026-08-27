@@ -1039,7 +1039,7 @@ async function handleOwnedCanary(request, env) {
       ip,
       asn: "AS-UNKNOWN",
       service: "owned_canary",
-      port: 10000,
+      port: 8443,
     },
   });
   if (lease.status !== 200) return json(lease.body, lease.status, request, env);

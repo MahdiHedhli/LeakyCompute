@@ -223,20 +223,20 @@ try {
 
   const discoveryCanary = await post(
     "/v1/admin/discovery/lease",
-    candidate({ service: "owned_canary", port: 10000 })
+    candidate({ service: "owned_canary", port: 8443 })
   );
   const wrongCanary = await post("/v1/admin/discovery/lease", {
     purpose: "owned_canary",
     ip: "93.184.216.98",
     service: "owned_canary",
-    port: 10000,
+    port: 8443,
     now,
   });
   const ownedCanary = await post("/v1/admin/discovery/lease", {
     purpose: "owned_canary",
     ip: "93.184.216.99",
     service: "owned_canary",
-    port: 10000,
+    port: 8443,
     now,
   });
   await check("the canary profile is isolated to the exact configured owned target", () => {
