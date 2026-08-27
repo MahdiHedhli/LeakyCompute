@@ -922,13 +922,20 @@ section("aggregates can be recounted from the records themselves");
   });
 
   const partial = await reconcileCorpusCounts(env, { limit: 5 });
-  await check("a partial recount refuses instead of overwriting complete aggregates", async () => {
-    assert.equal(partial.ok, false);
-    assert.equal(partial.reason, "corpus_exceeds_reconcile_limit");
+  await check("a partial recount checkpoints without overwriting complete aggregates", async () => {
+    assert.equal(partial.ok, true);
+    assert.equal(partial.complete, false);
+    assert.equal(partial.scanned_total, 5);
     assert.equal((await getCorpusCounts(env)).reverified_hosts, 4);
   });
 
-  const res = await reconcileCorpusCounts(env);
+  const partial2 = await reconcileCorpusCounts(env, { limit: 5 });
+  await check("a second chunk resumes the same snapshot", async () => {
+    assert.equal(partial2.complete, false);
+    assert.equal(partial2.scanned_total, 10);
+  });
+
+  const res = await reconcileCorpusCounts(env, { limit: 5 });
 
   await check("recount matches the actual record count", async () => {
     assert.equal(res.records, 12);
@@ -952,6 +959,38 @@ section("aggregates can be recounted from the records themselves");
     const again = await reconcileCorpusCounts(env);
     assert.equal(again.records, 12);
     assert.equal(again.drift, 0);
+  });
+}
+
+{
+  const { recordExposedHost, reconcileCorpusCounts, getCorpusCounts } =
+    await import("../src/lib/discovery.js");
+  const env = await freshEnv();
+
+  for (let i = 0; i < 8; i++) {
+    await recordExposedHost(env, {
+      ip: `198.51.100.${i}`, port: 11434, stack: "ollama",
+      country_code: "US", asn: "AS64496", source: "shodan:ollama",
+    });
+  }
+  await reconcileCorpusCounts(env, { limit: 5 });
+  await recordExposedHost(env, {
+    ip: "198.51.100.99", port: 8000, stack: "vllm",
+    country_code: "CA", asn: "AS64497", source: "shodan:vllm",
+  });
+  const restarted = await reconcileCorpusCounts(env, { limit: 5 });
+
+  await check("an index change restarts instead of mixing snapshots", async () => {
+    assert.equal(restarted.scanned_total, 5);
+    assert.equal(restarted.total, 9);
+    assert.equal(restarted.complete, false);
+  });
+
+  const done = await reconcileCorpusCounts(env, { limit: 5 });
+  await check("the restarted recount commits the new authoritative snapshot", async () => {
+    assert.equal(done.complete, true);
+    assert.equal(done.records, 9);
+    assert.equal((await getCorpusCounts(env)).reverified_hosts, 9);
   });
 }
 

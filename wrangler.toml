@@ -7,6 +7,11 @@ compatibility_date = "2025-11-01"
 workers_dev = false
 preview_urls = false
 
+# Production diagnostics are required for cron/maintenance failures. This does
+# not enable hosted checks or active discovery; it only retains Worker logs.
+[observability]
+enabled = true
+
 # Staged perimeter migration: keep workers.dev until every public/lab consumer
 # has moved to this hostname and the new route passes end-to-end verification.
 [[routes]]

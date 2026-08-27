@@ -306,6 +306,12 @@ as `run_meta.indexed_observed`) is spec §4's passive count: hosts a public inde
 listed, counted and not probed. Results matching a stored exclusion are refused
 and reported as `refused_excluded` rather than written back (I-25).
 
+**`POST /v1/admin/discovery/reconcile`** — `{ limit? }`. Rebuilds published
+country, ASN, stack, and retained-host aggregates from the private records.
+Large corpora checkpoint safely across calls; repeat until `complete: true`.
+`limit` is capped at 800 so one request remains below the Worker KV-operation
+ceiling. Partial calls never overwrite the published aggregates.
+
 ---
 
 ## Notes for clients

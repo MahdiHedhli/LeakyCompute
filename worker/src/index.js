@@ -52,6 +52,7 @@ import {
   getProbeAttempts,
   checkWriteBudget,
   reconcileCorpusCounts,
+  RECONCILE_ADMIN_MAX_SCAN,
   RETENTION_DAYS,
 } from "./lib/discovery.js";
 import { enrichServicesWithOsv } from "./lib/osv.js";
@@ -200,9 +201,11 @@ export default {
         .then(() => reconcileCorpusCounts(env))
         .then((r) => {
           if (!r?.ok) {
-            throw new Error(`aggregate reconciliation incomplete: ${r?.reason || "unknown"}`);
+            throw new Error(`aggregate reconciliation failed: ${r?.reason || "unknown"}`);
           }
-          if (r?.ok && r.drift) {
+          if (!r.complete) {
+            console.log(`aggregate reconciliation partial: ${r.scanned_total}/${r.total}`);
+          } else if (r.drift) {
             console.log(`aggregates reconciled: ${r.reverified_before} -> ${r.reverified_after} (drift ${r.drift})`);
           }
         })
@@ -849,7 +852,17 @@ async function handleReconcile(request, env) {
   if (!requireAdmin(request, env)) {
     return json({ error: "unauthorized" }, 401, request, env);
   }
-  const res = await reconcileCorpusCounts(env);
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const requested = Number(body.limit);
+  const limit = Number.isFinite(requested) && requested > 0
+    ? Math.min(Math.floor(requested), RECONCILE_ADMIN_MAX_SCAN)
+    : RECONCILE_ADMIN_MAX_SCAN;
+  const res = await reconcileCorpusCounts(env, { limit });
   return json({ ok: true, ...res }, 200, request, env);
 }
 

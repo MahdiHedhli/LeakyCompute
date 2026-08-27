@@ -20,6 +20,7 @@ const COUNTRY_STACK_KEY = "stats:by_country_stack";
 const CORPUS_KEY = "stats:corpus";
 const ATTEMPTS_KEY = "discovery:probe_attempts";
 const SWEEP_STATE_KEY = "discovery:sweep_cursor";
+const RECONCILE_STATE_KEY = "discovery:reconcile_state";
 // Must cover at least a full I-24 interval at the maximum historical schedule
 // volume (2 x 445 x 14 = 12,460). Falling below that silently evicts a recent
 // probe clock and makes the host eligible again before 14 days.
@@ -52,6 +53,13 @@ const ATTEMPT_RETENTION_DAYS = 90;
 /** Per-invocation KV budget for the sweep — see sweepExpiredHosts. */
 const SWEEP_MAX_SCAN = 300;
 const SWEEP_MAX_DELETE = 30;
+// The cron runs this after a sweep. A worst-case sweep can spend several KV
+// operations per deletion while it repairs every derived counter, so leave a
+// conservative margin beneath Workers' per-invocation KV operation ceiling.
+const RECONCILE_MAX_SCAN = 200;
+// The admin-only route does not share an invocation with the sweep and can use
+// more of the ceiling. Keep room for the index/state reads and final writes.
+export const RECONCILE_ADMIN_MAX_SCAN = 800;
 
 /**
  * I-26: the complete list of what a host record may contain. Anything a probe
@@ -228,7 +236,7 @@ export async function recordExposedHost(env, hit, batch = null) {
  *
  * Bounded per invocation, and resumable. Every record read and every counter
  * bump is a KV operation, and KV operations count against the Worker's
- * per-invocation subrequest ceiling (50 on the free plan this deploys to).
+ * per-invocation KV-operation ceiling.
  * An unbounded loop over a few hundred hosts trips that ceiling mid-way, and
  * the throw escapes into ctx.waitUntil with no handler — deletions already
  * made, index never rewritten, dangling entries left behind. So the sweep
@@ -1132,33 +1140,47 @@ export async function setLaneCursor(env, lane, { page, exhausted = false, observ
  * wrong eventually. This is that path: the index is authoritative, so walk it
  * and rewrite the totals to match.
  *
- * Bounded per invocation for the same reason the sweep is — a corpus larger than
- * one window is reconciled over successive runs rather than throwing partway.
+ * Bounded per invocation for the same reason the sweep is. Staging counters and
+ * the exact index snapshot are checkpointed in private KV; live aggregates are
+ * switched only after every record in that snapshot has been processed.
  */
-export async function reconcileCorpusCounts(env, { limit = 2000 } = {}) {
+export async function reconcileCorpusCounts(env, { limit = RECONCILE_MAX_SCAN } = {}) {
   if (!env.KV) return { ok: false, reason: "no_kv" };
 
-  const index = (await env.KV.get(HITS_INDEX, "json")) || [];
-  if (Array.isArray(index) && index.length > limit) {
-    // A partial recount must never overwrite complete aggregates. A resumable
-    // reconciliation needs an accumulator and cursor; until then, fail closed.
-    return {
-      ok: false,
-      reason: "corpus_exceeds_reconcile_limit",
-      scanned: 0,
-      total: index.length,
-      limit,
-      complete: false,
+  let index = (await env.KV.get(HITS_INDEX, "json")) || [];
+  if (!Array.isArray(index)) index = [];
+  const scanLimit = Math.max(
+    1,
+    Math.min(Number(limit) || RECONCILE_MAX_SCAN, RECONCILE_ADMIN_MAX_SCAN)
+  );
+
+  let state = await env.KV.get(RECONCILE_STATE_KEY, "json");
+  const sameSnapshot =
+    state?.version === 1 &&
+    Array.isArray(state.ips) &&
+    state.ips.length === index.length &&
+    state.ips.every((ip, i) => ip === index[i]);
+
+  // Counts from two different index versions must never be combined. If a
+  // retention sweep or admin ingest changed the authoritative list between
+  // chunks, discard the accumulator and start a fresh snapshot.
+  if (!sameSnapshot) {
+    state = {
+      version: 1,
+      ips: [...index],
+      cursor: 0,
+      geo: {},
+      asn: {},
+      stack: {},
+      country_stack: {},
+      records: 0,
+      orphaned_index_entries: 0,
+      started_at: new Date().toISOString(),
     };
   }
-  const ips = (Array.isArray(index) ? index : []).slice(-limit);
 
-  const geo = {};
-  const asn = {};
-  const stack = {};
-  const countryStack = {};
-  let records = 0;
-  let orphanedIndexEntries = 0;
+  const start = Math.max(0, Math.min(Number(state.cursor) || 0, state.ips.length));
+  const ips = state.ips.slice(start, start + scanLimit);
 
   const CHUNK = 40;
   for (let i = 0; i < ips.length; i += CHUNK) {
@@ -1167,41 +1189,65 @@ export async function reconcileCorpusCounts(env, { limit = 2000 } = {}) {
     );
     for (const rec of rows) {
       if (!rec) {
-        orphanedIndexEntries++;
+        state.orphaned_index_entries++;
         continue;
       }
-      records++;
+      state.records++;
       const g = rec.country_code || rec.country || "ZZ";
-      geo[g] = (geo[g] || 0) + 1;
-      if (rec.asn) asn[rec.asn] = (asn[rec.asn] || 0) + 1;
+      state.geo[g] = (state.geo[g] || 0) + 1;
+      if (rec.asn) state.asn[rec.asn] = (state.asn[rec.asn] || 0) + 1;
       const stacks = rec.stacks?.length ? rec.stacks : rec.stack ? [rec.stack] : [];
       for (const s of stacks) {
-        stack[s] = (stack[s] || 0) + 1;
+        state.stack[s] = (state.stack[s] || 0) + 1;
         const pair = `${g}|${s}`;
-        countryStack[pair] = (countryStack[pair] || 0) + 1;
+        state.country_stack[pair] = (state.country_stack[pair] || 0) + 1;
       }
     }
   }
 
+  state.cursor = start + ips.length;
+  state.updated_at = new Date().toISOString();
+  const complete = state.cursor >= state.ips.length;
+
+  if (!complete) {
+    await env.KV.put(RECONCILE_STATE_KEY, JSON.stringify(state));
+    return {
+      ok: true,
+      records: state.records,
+      orphaned_index_entries: state.orphaned_index_entries,
+      scanned: ips.length,
+      scanned_total: state.cursor,
+      total: state.ips.length,
+      remaining: state.ips.length - state.cursor,
+      complete: false,
+      started_at: state.started_at,
+    };
+  }
+
   const corpus = (await env.KV.get(CORPUS_KEY, "json")) || {};
   const before = corpus.reverified_hosts || 0;
-  corpus.reverified_hosts = records;
+  corpus.reverified_hosts = state.records;
   corpus.reconciled_at = new Date().toISOString();
 
   await env.KV.put(CORPUS_KEY, JSON.stringify(corpus));
-  await env.KV.put(GEO_KEY, JSON.stringify(geo));
-  await env.KV.put(ASN_KEY, JSON.stringify(asn));
-  await env.KV.put(STACK_KEY, JSON.stringify(stack));
-  await env.KV.put(COUNTRY_STACK_KEY, JSON.stringify(countryStack));
+  await env.KV.put(GEO_KEY, JSON.stringify(state.geo));
+  await env.KV.put(ASN_KEY, JSON.stringify(state.asn));
+  await env.KV.put(STACK_KEY, JSON.stringify(state.stack));
+  await env.KV.put(COUNTRY_STACK_KEY, JSON.stringify(state.country_stack));
+  if (typeof env.KV.delete === "function") await env.KV.delete(RECONCILE_STATE_KEY);
 
   return {
     ok: true,
-    records,
+    records: state.records,
     reverified_before: before,
-    reverified_after: records,
-    drift: records - before,
-    orphaned_index_entries: orphanedIndexEntries,
+    reverified_after: state.records,
+    drift: state.records - before,
+    orphaned_index_entries: state.orphaned_index_entries,
     scanned: ips.length,
-    complete: ips.length >= (Array.isArray(index) ? index.length : 0),
+    scanned_total: state.cursor,
+    total: state.ips.length,
+    remaining: 0,
+    complete: true,
+    started_at: state.started_at,
   };
 }
