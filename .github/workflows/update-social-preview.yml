@@ -1,0 +1,56 @@
+name: Refresh social preview
+
+on:
+  workflow_run:
+    workflows: ["Governed discovery"]
+    types: [completed]
+  schedule:
+    # Daily fallback catches operator-driven ingest that did not originate in
+    # the governed discovery workflow. A degraded API preserves the last card.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: social-preview
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.13.0"
+          cache: npm
+
+      - name: Install locked renderer
+        run: npm ci
+
+      - name: Render from healthy public aggregates
+        env:
+          LEAKY_API_BASE: https://api.leakycompute.mahdihedhli.com
+        run: node scripts/update_social_preview.mjs
+
+      - name: Commit a changed card
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- public/index.html public/assets/leakycompute-social-preview.png; then
+            echo "Social preview already matches the current aggregate generation."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/index.html public/assets/leakycompute-social-preview.png
+          git commit -m "chore: refresh social preview counts"
+          git push origin HEAD:main

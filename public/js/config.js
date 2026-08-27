@@ -8,7 +8,7 @@ window.LEAKY_CONFIG = {
   // Replace after `wrangler deploy`
   API_BASE: "https://api.leakycompute.mahdihedhli.com",
   // Required for the production hosted self-check. Public identifier only.
-  TURNSTILE_SITE_KEY: "",
+  TURNSTILE_SITE_KEY: "0x4AAAAAAEeREuGCx3DEpIP7",
   LAB_URL: "https://leakycompute-lab.pages.dev",
   REPO_URL: "https://github.com/MahdiHedhli/LeakyCompute",
   DONT_PANIC_URL: "https://mahdihedhli.com/dont-panic/",

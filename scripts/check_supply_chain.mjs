@@ -105,6 +105,13 @@ assert.match(
   /^sha512-/,
   "locked Wrangler package must carry an integrity hash"
 );
+for (const name of Object.keys(packageJson.devDependencies || {})) {
+  assert.match(
+    lock.packages?.[`node_modules/${name}`]?.integrity || "",
+    /^sha512-/,
+    `locked ${name} package must carry an integrity hash`
+  );
+}
 
 const composeFile = "scripts/discovery/local-lab/docker-compose.yml";
 const compose = read(composeFile);
