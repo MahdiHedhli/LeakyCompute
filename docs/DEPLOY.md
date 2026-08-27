@@ -66,7 +66,9 @@ mysterious.
 | Researcher lab (CF Pages) | `https://leakycompute-lab.pages.dev` |
 | KV prod | `432febf1abd64e9995e33d6081dfd3c7` (`leakycompute-KV`) |
 
-**Still manual:** Cloudflare Access (GitHub SSO) on the lab hostname, Turnstile site keys (optional).
+**Still manual:** Cloudflare Access (GitHub SSO) on the lab hostname. Production
+hosted checks require the dedicated Turnstile widget and its Worker secret; the
+widget must not be shared with another site or environment.
 
 ## Deployment ownership — important
 
