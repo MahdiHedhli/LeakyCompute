@@ -40,7 +40,11 @@
       </header>
 
       <aside class="article-callout">
-        <strong>TLDR:</strong> LeakyCompute is a research project that passively catalogs exposed AI endpoints using minimally intrusive verification. It keeps passive index counts, an archive snapshot, and bounded historical re-verification separate, and reports reachability—not demonstrated impact. After an adversarial Daybreak Blue review found serious flaws in identity, data handling, target validation, and probe scheduling, I suspended active discovery and hosted checks. On 27 August 2026, I shipped verified researcher authorization, durable probe leases and cooldowns, one-time permits, canonical public-address validation, fresh-source requirements, last-moment exclusion checks, conservative rate limits, and tightly constrained probes with pinned destinations, fixed request shapes, no redirects, hard timeouts, and capped responses. With those controls verified in production, research scanning has resumed.
+        <strong>TLDR:</strong> LeakyCompute is a research project that passively catalogs exposed AI endpoints using minimally intrusive verification. It keeps passive index counts, an archive snapshot, and bounded historical re-verification separate, and reports reachability—not demonstrated impact. After an adversarial Daybreak Blue review found serious flaws in identity, data handling, target validation, and probe scheduling, I suspended active discovery and hosted checks. On 27 August 2026, I shipped cryptographically verified researcher identity, durable probe leases and cooldowns, one-time permits, canonical public-address validation, fresh-source requirements, last-moment exclusion checks, conservative rate limits, and tightly constrained probes with pinned destinations, fixed request shapes, no redirects, hard timeouts, and capped responses. Those controls passed a production canary; scanning resumes only while the strong control plane is healthy.
+      </aside>
+
+      <aside class="article-callout">
+        <strong>Operational note — 27 August 2026:</strong> Scheduled discovery is temporarily paused because the control store reached its daily write allowance. Permit issuance fails closed, so no target traffic can leave while the strong store is unavailable. The public dashboard is serving clearly marked, last-known aggregate counters until the store recovers; scanning will resume only after a packet-free health check and another capped canary pass.
       </aside>
 
       <section>
@@ -134,7 +138,7 @@
           What shipped was a strongly consistent control plane with transactional leases and one-time probe permits, authoritative cursor-paged corpus storage, resumable opt-out jobs with durable completion records, and checkpointed retention and reconciliation jobs that publish new aggregates only after a complete pass. Production verification meant interrupting and resuming each workflow across a multi-page corpus, confirming that no second probe authorization was issued, late-page opt-outs and expired records were removed, partial reconciliations never became public, and only one tightly constrained request reached an operator-owned canary.
         </p>
         <p>
-          With those in place, scheduled discovery and hosted checks are running again under the controls listed above. The project reads public index aggregates, serves the historical research corpus to approved researchers, and lets operators run the local checker against infrastructure they own.
+          With those in place, scheduled discovery and hosted checks can run only under the controls listed above. The production canary passed, and any loss of the strong control plane stops new permits rather than weakening those controls. The project reads public index aggregates, serves the historical research corpus to approved researchers, and lets operators run the local checker against infrastructure they own.
         </p>
         <p>
           The scope is narrow by design, and the narrowness is the point.
@@ -178,6 +182,7 @@
           <li><a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Safety invariants and threat model</a></li>
           <li><a href="https://api.leakycompute.mahdihedhli.com/v1/stats" target="_blank" rel="noopener">Current aggregate snapshot</a></li>
           <li><a href="../scanning.html">Measurement, retention, and permanent opt-out policy</a></li>
+          <li><a href="https://github.com/MahdiHedhli/LeakyCompute" target="_blank" rel="noopener">GitHub repository</a></li>
         </ul>
       </section>
     </article>
