@@ -1,0 +1,28 @@
+name: Repair indexed metric
+
+# One-shot operational repair for the 2026-08-27 partial-lane overwrite. The
+# runner now withholds this field unless every lane completed, so replaying the
+# last complete measurement is safe and does not touch the address corpus.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Restore last complete passive measurement
+        env:
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${LEAKY_ADMIN_TOKEN:-}"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --header "X-Admin-Token: ${LEAKY_ADMIN_TOKEN}" \
+            --data-binary '{"results":[],"run_meta":{"indexed_observed":19376,"indexed_observed_sources":{"shodan":19376,"censys":0,"other":0,"user_submitted":0},"observed_source":"last complete public-index measurement, restored after partial-lane overwrite","repair_reason":"2026-08-27 partial-lane metric overwrite"}}' \
+            "https://api.leakycompute.mahdihedhli.com/v1/admin/discovery/ingest"
