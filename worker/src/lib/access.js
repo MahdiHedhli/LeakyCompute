@@ -2,7 +2,9 @@
  * Cloudflare Access JWT verification (lab routes).
  * Dev bypass: ENVIRONMENT=development and header X-Dev-GitHub-Login.
  *
- * Production: set ACCESS_TEAM_DOMAIN + ACCESS_AUD (Application AUD tag).
+ * Production: set ACCESS_TEAM_DOMAIN_SECRET + ACCESS_APP_AUD as encrypted
+ * Worker secrets. The values identify private Access infrastructure and must
+ * not be committed as ordinary Wrangler vars.
  * GitHub IdP: identity candidates come only from the signed Access assertion.
  * Caller-supplied identity headers are never trusted in production.
  */
@@ -52,8 +54,8 @@ async function importJwk(jwk) {
 }
 
 async function verifyAccessJwt(token, env) {
-  const team = env.ACCESS_TEAM_DOMAIN;
-  const aud = env.ACCESS_AUD;
+  const team = env.ACCESS_TEAM_DOMAIN_SECRET;
+  const aud = env.ACCESS_APP_AUD;
   if (!team || !aud) {
     return { ok: false, error: "access_not_configured" };
   }

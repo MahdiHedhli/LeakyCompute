@@ -616,7 +616,7 @@ section("identity: approval and assertion must agree on who someone is");
   const env = await seededEnv();
   await approveResearcher(env, {
     login: "MahdiHedhli",
-    aliases: ["researcher@example.test"],
+    aliases: ["researcher@identity.example"],
     approved_by: "test",
   });
 
@@ -625,14 +625,14 @@ section("identity: approval and assertion must agree on who someone is");
   });
 
   await check("the email alias resolves to the same entry", async () => {
-    const m = await matchAllowEntry(env, ["researcher@example.test"]);
+    const m = await matchAllowEntry(env, ["researcher@identity.example"]);
     assert.ok(m, "email alias should match");
     assert.equal(m.entry.login, "mahdihedhli");
   });
 
   await check("an email local-part cannot impersonate an approved handle", async () => {
     assert.equal(await matchAllowEntry(env, ["mhedhli"]), null);
-    assert.ok(await matchAllowEntry(env, ["researcher@example.test"]));
+    assert.ok(await matchAllowEntry(env, ["researcher@identity.example"]));
   });
 
   await check("an unrelated identity still does not", async () => {

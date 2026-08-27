@@ -38,6 +38,17 @@ EXPLOIT_PATTERNS = [
     r"gopher://",
 ]
 
+IPV4_LITERAL = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
+EMAIL_LITERAL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+USER_PATH = re.compile(r"(?i)(?:/Users/|/home/|[A-Z]:\\Users\\)[^\s/:\\]+")
+
+
+def redact_identifiers(value: str) -> str:
+    """Keep aggregate utility without publishing addresses or workstation paths."""
+    value = IPV4_LITERAL.sub("[redacted-address]", value)
+    value = EMAIL_LITERAL.sub("[redacted-email]", value)
+    return USER_PATH.sub("[redacted-user-path]", value)
+
 
 def is_exploit(name: str) -> bool:
     n = name.lower()
@@ -67,13 +78,14 @@ def main():
     by_name: dict[str, dict] = {}
     filtered = 0
     raw_n = 0
-    for path in args.inputs:
+    for input_index, path in enumerate(args.inputs, start=1):
         for m in load_entries(path):
             raw_n += 1
-            name = m.get("model") or ""
-            if not name or is_exploit(name) or len(name) > 200:
+            raw_name = m.get("model") or ""
+            if not raw_name or is_exploit(raw_name) or len(raw_name) > 200:
                 filtered += 1
                 continue
+            name = redact_identifiers(raw_name)
             hosts = int(m.get("hosts") or 0)
             prev = by_name.get(name)
             if not prev or hosts > prev["hosts"]:
@@ -83,7 +95,7 @@ def main():
                     "size": m.get("size") or "?",
                     "num": m.get("num"),
                     "seen": m.get("seen"),
-                    "source": m.get("source") or f"merge:{path.name}",
+                    "source": m.get("source") or f"input_catalog_{input_index}",
                     "validated": bool(m.get("validated", False)),
                 }
 
@@ -92,7 +104,7 @@ def main():
     seed = {
         "version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "sources": [str(p) for p in args.inputs],
+        "sources": [f"input_catalog_{i}" for i, _ in enumerate(args.inputs, start=1)],
         "snapshot": {
             "models": len(models),
             "hosts": total_hosts,

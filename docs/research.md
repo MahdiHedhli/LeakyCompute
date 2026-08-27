@@ -25,4 +25,4 @@ We reuse the **UX pattern** (sidebar catalog, counters, stats modal) for **defen
 4. Promote to validated when live authorized probes confirm  
 5. Remove seed rows that never validate  
 
-See also the local threat-research package (`ThreatResearch/<redacted-project>`) for the full write-up and raw archive artifacts.
+Raw archive artifacts are intentionally kept outside this public repository.

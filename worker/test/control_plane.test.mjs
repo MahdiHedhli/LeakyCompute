@@ -33,9 +33,9 @@ const child = spawn(
     "--var",
     "CANARY_PROBE_ENABLED:true",
     "--var",
-    "CANARY_TARGET_IP:93.184.216.99",
+    "OWNED_CANARY_TARGET_IP:93.184.216.99",
     "--var",
-    "CANARY_TARGET_HOST:canary.example.test",
+    "OWNED_CANARY_TARGET_HOST:canary.example.test",
   ],
   { stdio: ["ignore", "pipe", "pipe"] }
 );

@@ -9,6 +9,8 @@ const workflowFiles = readdirSync(workflowDir)
   .filter((name) => /\.ya?ml$/.test(name))
   .map((name) => `.github/workflows/${name}`);
 
+const discoveryWorkflow = read(".github/workflows/scheduled-discovery.yml");
+
 const failures = [];
 const fail = (message) => failures.push(message);
 const actionRefs = (source) =>
@@ -65,6 +67,16 @@ for (const file of workflowFiles) {
       fail(`${file}: tool runtime must use an exact patch version: ${match[1]}`);
     }
   }
+}
+
+if (!/cron:\s*["']43 5 \* \* 0,6["']/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must remain weekend-only and off the hour");
+}
+if (/upload-artifact/i.test(discoveryWorkflow)) {
+  fail("scheduled discovery must never publish an address-level artifact");
+}
+if (!/max_total[^\n]*\n\s+description:[^\n]*\n\s+default:\s*["']120["']/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must retain the reviewed 120-candidate default");
 }
 
 const packageJson = JSON.parse(read("package.json"));

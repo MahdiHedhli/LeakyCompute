@@ -99,6 +99,8 @@ npx --yes wrangler@4.126.0 secret put DISCOVERY_ADMIN_TOKEN
 npx --yes wrangler@4.126.0 secret put EXCLUSION_ADMIN_TOKEN
 npx --yes wrangler@4.126.0 secret put RESEARCH_ADMIN_TOKEN
 npx --yes wrangler@4.126.0 secret put ABUSE_LOG_SALT  # high-entropy HMAC key; required for abuse logs
+npx --yes wrangler@4.126.0 secret put ACCESS_TEAM_DOMAIN_SECRET
+npx --yes wrangler@4.126.0 secret put ACCESS_APP_AUD
 # optional:
 npx --yes wrangler@4.126.0 secret put TURNSTILE_SECRET_KEY
 npx --yes wrangler@4.126.0 deploy
@@ -167,8 +169,11 @@ Site: `https://<user>.github.io/LeakyCompute/`
 2. **Access → Applications → Add** self-hosted:
    - Application domain: your lab Pages hostname
    - Policy: **Allow** identity provider **GitHub** (authenticated users)
-3. Application **AUD** tag → Worker var `ACCESS_AUD`
-4. Team domain → Worker var `ACCESS_TEAM_DOMAIN`
+3. Application **AUD** tag → encrypted Worker secret `ACCESS_APP_AUD`
+4. Team domain → encrypted Worker secret `ACCESS_TEAM_DOMAIN_SECRET`
+
+Do not commit either value to `wrangler.toml`. They are identifiers rather than
+bearer credentials, but they disclose private Access control-plane details.
 
 Allowlist enforcement is **application-level** (Worker KV) after issue approval — Access only forces GitHub login.
 

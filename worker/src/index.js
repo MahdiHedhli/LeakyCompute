@@ -1073,7 +1073,7 @@ async function handleOwnedCanary(request, env) {
   if (env.CONTROL_PLANE_READY !== "true" || env.CANARY_PROBE_ENABLED !== "true") {
     return json({ error: "owned_canary_disabled" }, 503, request, env);
   }
-  const ip = String(env.CANARY_TARGET_IP || "");
+  const ip = String(env.OWNED_CANARY_TARGET_IP || "");
   const lease = await controlCall(env, "/lease/acquire", {
     body: {
       purpose: "owned_canary",

@@ -14,8 +14,8 @@ authorization to run active traffic.
 | Research lab | Available behind Cloudflare Access and the researcher allowlist |
 | Local defensive CLI | Available for infrastructure the operator controls |
 | Passive discovery reports and dry-run plans | Available; send no target traffic |
-| Hosted `/v1/check` | Active through the address-pinned Worker socket runtime |
-| Active discovery and ingest | Active weekly through fresh provenance, durable leases, one-time permits, exclusions, cooldowns, and rate gates |
+| Hosted `/v1/check` | Fail-closed until its dedicated Turnstile credential and production control-plane health are verified |
+| Active discovery and ingest | Weekend schedule committed; production workflow remains paused until the strong control plane and capped canary pass |
 | 2026-08 discovery incident | Contained; 13 artifacts and 13 log sets deleted and verified |
 
 Nothing on this roadmap silently widens what the project touches. Passive source
@@ -46,7 +46,9 @@ the state model before sending traffic again. The implementation decision is
 recorded in
 [`decisions/0002-governed-active-measurement.md`](decisions/0002-governed-active-measurement.md).
 The maintainer explicitly activated the completed design on 2026-08-27 after
-the migration, owned canary, and re-enable suite passed.
+the migration, owned canary, and re-enable suite passed. A later free-tier
+control-store quota event correctly stopped new permits; reactivation requires
+a fresh packet-free health check and capped canary rather than a cache fallback.
 
 **What would make this step wrong:** allowing the existing dormant runner to
 become the de facto decision. It remains fail-closed until the choice and its

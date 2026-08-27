@@ -79,12 +79,15 @@ Costs and limitations:
 - source licenses constrain storage, publication, and redistribution;
 - tunnelled and poorly indexed services remain structurally undercounted.
 
-## Verification
+## Historical verification at suspension
 
-- Production `/v1/check` returns `503 hosted_checks_temporarily_disabled` before
+- Production `/v1/check` returned `503 hosted_checks_temporarily_disabled` before
   parsing a target.
-- The scheduled discovery workflow sends no traffic to target hosts and uploads
+- The scheduled discovery workflow sent no traffic to target hosts and uploaded
   no address-level artifact.
-- Active runner entry points remain fail-closed until removed.
-- Public and repository documentation describe passive counts, historical
+- Active runner entry points remained fail-closed pending the governed design.
+- Public and repository documentation described passive counts, historical
   re-verification, and local checks as separate measurements.
+
+ADR 0002 supersedes this operating state. This section is evidence of the
+2026-08-25 containment, not a description of current scheduling.

@@ -12,7 +12,7 @@
  * A Pages Function *does* receive Cf-Access-Jwt-Assertion, because Access sits
  * in front of it. So the browser calls same-origin, and this forwards the
  * assertion on. The Worker's verification is unchanged: it still validates the
- * JWT against ACCESS_TEAM_DOMAIN and ACCESS_AUD, and still requires an allowlist
+ * JWT against the Worker's encrypted Access configuration, and still requires an allowlist
  * entry. This adds a hop, not a bypass.
  *
  * On the word "proxy": I-20 forbids proxying user traffic through *third-party

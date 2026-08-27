@@ -7,9 +7,10 @@ name: Governed discovery
 
 on:
   schedule:
-    # Weekly, off the hour. The 14-day per-host cooldown remains authoritative,
-    # so this can discover new candidates without accelerating old ones.
-    - cron: "43 5 * * 1"
+    # Weekend-only, off the hour. Saturday and Sunday runs draw fresh index
+    # candidates, while the durable 14-day per-host cooldown remains
+    # authoritative and prevents either run from accelerating an old target.
+    - cron: "43 5 * * 0,6"
   workflow_dispatch:
     inputs:
       max_total:

@@ -1,7 +1,7 @@
 # Handoff prompt — discovery expansion + live fingerprint validation
 
-*Paste the block below to Grok. Everything it references is committed in the
-working tree at `<REDACTED_LOCAL_PATH>s/Coding/ThreatResearch/<redacted-project>/LeakyCompute`.*
+*Archived implementation handoff. Paths are repository-relative so this copy
+does not disclose a contributor's workstation layout.*
 
 ---
 

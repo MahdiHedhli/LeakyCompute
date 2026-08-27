@@ -4,8 +4,7 @@
 tier-1 checker described in the "LeakyCompute Checker — Build Brief" on top of it.
 This document is the merge brief: what changed, why, what's verified, and what's left.
 
-Working tree: `<REDACTED_LOCAL_PATH>s/Coding/ThreatResearch/<redacted-project>/LeakyCompute`
-Nothing is committed. No commits were made and Claude was not added as a co-author.
+All paths in this archived handoff are repository-relative.
 
 ---
 

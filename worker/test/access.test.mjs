@@ -71,7 +71,11 @@ const request = (token, extra = {}) => new Request("https://api.test/v1/research
     ...extra,
   },
 });
-const env = { ENVIRONMENT: "production", ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: aud };
+const env = {
+  ENVIRONMENT: "production",
+  ACCESS_TEAM_DOMAIN_SECRET: team,
+  ACCESS_APP_AUD: aud,
+};
 
 console.log("\n[A1] Cloudflare Access identity is cryptographically bound and exact");
 

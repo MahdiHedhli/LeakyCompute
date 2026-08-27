@@ -1,10 +1,12 @@
 # Discovery model (passive nomination; governed verification)
 
 **Current status:** passive reports, index comparisons, local-container
-validation, dry-run governance plans, and weekly governed verification are
-available. The runner cannot open a target socket: only the API Worker's pinned
-runtime can do so after the Durable Object commits and consumes a one-time
-permit. The authoritative order is [`ROADMAP.md`](ROADMAP.md).
+validation, and dry-run governance plans are available. Governed verification
+is configured for Saturday and Sunday, but production scheduling remains paused
+until the strong control plane passes its recovery check and capped canary. The
+runner cannot open a target socket: only the API Worker's pinned runtime can do
+so after the Durable Object commits and consumes a one-time permit. The
+authoritative order is [`ROADMAP.md`](ROADMAP.md).
 
 ## Critical fact about the archive seed
 
