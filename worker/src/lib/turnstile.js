@@ -3,16 +3,33 @@ export async function verifyTurnstile(env, token) {
   const secret = env.TURNSTILE_SECRET_KEY;
   if (!secret) {
     if (env.ENVIRONMENT === "production") {
+      console.warn(JSON.stringify({
+        event: "turnstile_verification_failed",
+        reason: "turnstile_not_configured",
+        codes: [],
+      }));
       return { ok: false, error: "turnstile_not_configured" };
     }
     // Local tests and development may explicitly run without the service.
     return { ok: true, skipped: true };
   }
-  if (!token) return { ok: false, error: "turnstile_missing" };
+  if (!token) {
+    console.warn(JSON.stringify({
+      event: "turnstile_verification_failed",
+      reason: "turnstile_missing",
+      codes: [],
+    }));
+    return { ok: false, error: "turnstile_missing" };
+  }
   const expectedHostname = String(env.TURNSTILE_EXPECTED_HOSTNAME || "")
     .trim()
     .toLowerCase();
   if (!expectedHostname) {
+    console.warn(JSON.stringify({
+      event: "turnstile_verification_failed",
+      reason: "turnstile_not_configured",
+      codes: [],
+    }));
     return { ok: false, error: "turnstile_not_configured" };
   }
   try {
