@@ -41,10 +41,10 @@ ENVIRONMENT = "production"
 # The production checker uses an address-pinned Cloudflare TCP socket runtime.
 # Keep these independent traffic switches off until migration, the isolated
 # owned canary, and the complete re-enable suite have all passed.
-HOSTED_CHECKS_ENABLED = "false"
-ACTIVE_DISCOVERY_ENABLED = "false"
-PROBE_SERVICE_ENABLED = "false"
-CONTROL_PLANE_READY = "false"
+HOSTED_CHECKS_ENABLED = "true"
+ACTIVE_DISCOVERY_ENABLED = "true"
+PROBE_SERVICE_ENABLED = "true"
+CONTROL_PLANE_READY = "true"
 # Separately gated production egress test. Temporarily set true with the exact
 # public IP of an operator-owned canary, run once, then turn it back off.
 CANARY_PROBE_ENABLED = "false"
