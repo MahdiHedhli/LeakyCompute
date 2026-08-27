@@ -43,6 +43,28 @@ jobs:
         with:
           python-version: "3.12.14"
 
+      - name: Verify strong control plane
+        env:
+          LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_ADMIN_TOKEN:-}" ]; then
+            echo "Required control-plane credentials are not configured."
+            exit 1
+          fi
+          HEALTH_FILE="$(mktemp)"
+          HTTP_CODE=$(curl -sS -o "$HEALTH_FILE" -w '%{http_code}' \
+            -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+            "${LEAKY_API_BASE%/}/v1/admin/control/health")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Strong control plane is unavailable (HTTP $HTTP_CODE); no index query or target traffic was attempted."
+            exit 1
+          fi
+          jq -e '.ok == true and .ready == true and (.schema >= 2) and (.pending_purges == 0)' \
+            "$HEALTH_FILE" >/dev/null
+          jq '{ok, ready, schema, pending_purges}' "$HEALTH_FILE"
+
       - name: Run discovery
         env:
           SHODAN_API_KEY: ${{ secrets.SHODAN_API_KEY }}

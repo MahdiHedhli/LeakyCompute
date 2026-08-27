@@ -75,6 +75,11 @@ if (!/cron:\s*["']43 5 \* \* 0,6["']/.test(discoveryWorkflow)) {
 if (/upload-artifact/i.test(discoveryWorkflow)) {
   fail("scheduled discovery must never publish an address-level artifact");
 }
+if (!/Verify strong control plane/.test(discoveryWorkflow) ||
+    !/\/v1\/admin\/control\/health/.test(discoveryWorkflow) ||
+    !/\.ready == true/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must fail before index access unless strong storage is ready");
+}
 if (!/max_total[^\n]*\n\s+description:[^\n]*\n\s+default:\s*["']120["']/.test(discoveryWorkflow)) {
   fail("scheduled discovery must retain the reviewed 120-candidate default");
 }

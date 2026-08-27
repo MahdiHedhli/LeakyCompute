@@ -8,6 +8,11 @@ runner cannot open a target socket: only the API Worker's pinned runtime can do
 so after the Durable Object commits and consumes a one-time permit. The
 authoritative order is [`ROADMAP.md`](ROADMAP.md).
 
+Every scheduled run checks the authenticated strong-store health endpoint
+before it queries Shodan. A degraded store, incomplete migration, unavailable
+aggregate generation, or pending purge stops the job before candidate discovery
+or target traffic.
+
 ## Critical fact about the archive seed
 
 `data/seed-models.json` lists **model names + host counts** from STOLEN COMPUTE.
