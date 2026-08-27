@@ -814,6 +814,43 @@ def collect_lane(
     return out, observed, next_page, lane_total
 
 
+def public_index_publication_meta(
+    *,
+    requested_all_lanes: bool,
+    completed_lane_ids: set[str],
+    index_listed: dict[str, int],
+    approved_host_count: int,
+) -> dict:
+    """Return public index metrics only for a complete all-lane measurement.
+
+    A scheduled subset is a candidate feed, not a population measurement. A
+    failed lane is not a zero. Omitting these keys makes the Worker preserve the
+    last complete measurement instead of replacing it with a partial sum.
+    """
+    expected = {lane["id"] for lane in LANES}
+    complete = (
+        requested_all_lanes
+        and completed_lane_ids == expected
+        and set(index_listed) == expected
+    )
+    if not complete:
+        return {}
+
+    shodan_total = sum(index_listed.values())
+    return {
+        "indexed_observed": shodan_total + approved_host_count,
+        "indexed_observed_sources": {
+            "shodan": shodan_total,
+            "censys": 0,
+            "other": 0,
+            "user_submitted": approved_host_count,
+        },
+        "observed_source": (
+            "public index records matching our lane fingerprints, counted not probed"
+        ),
+    }
+
+
 VERSION_KEYS = ("version", "server_version", "ray_version", "app_version")
 
 
@@ -1093,7 +1130,9 @@ def self_test_candidates() -> list[dict]:
             "source": "prior",
             "asn": "AS64497",
             "country_code": "ZZ",
-            "provenance": provenance_from_corpus_source("shodan_asn:AS64497"),
+            "provenance": provenance_from_corpus_source(
+                "shodan_asn:AS64497", datetime.now(timezone.utc).isoformat()
+            ),
         },
         {
             "ip": "1.1.1.9",
@@ -1248,6 +1287,7 @@ def main() -> int:
     # a box on 8080 can match both open_webui and openai_compat_8080, and we
     # cannot dedupe what we did not pull. The label has to say so.
     index_listed: dict[str, int] = {}
+    completed_lane_ids: set[str] = set()
     for lane in lanes:
         try:
             start_page = int((cursors.get(lane["id"]) or {}).get("page") or 1)
@@ -1258,6 +1298,7 @@ def main() -> int:
             indexed_observed += lane_observed
             if isinstance(lane_total, int):
                 index_listed[lane["id"]] = lane_total
+            completed_lane_ids.add(lane["id"])
             cursor_updates.append(
                 {
                     "lane": lane["id"],
@@ -1529,23 +1570,6 @@ def main() -> int:
     meta = {
         "lanes": [L["id"] for L in lanes],
         "candidate_count": len(cands),
-        # What the public index lists. This is the key the Worker publishes as
-        # indexed_observed, so it has to be the population figure — sending the
-        # pulled count here is how that counter ended up measuring our budget.
-        "indexed_observed": (sum(index_listed.values()) or indexed_observed)
-        + approved_host_count,
-        # Per-source split for the public card. The headline is a composite, so
-        # each component ships with it — a total nobody can decompose is a total
-        # nobody can check.
-        "indexed_observed_sources": {
-            "shodan": sum(index_listed.values()) or indexed_observed,
-            "censys": 0,
-            "other": 0,
-            "user_submitted": approved_host_count,
-        },
-        "observed_source": (
-            "public index records matching our lane fingerprints, counted not probed"
-        ),
         # Kept separately so the two are never confused again.
         "pulled_count": indexed_observed,
         "excluded_count": len(excluded),
@@ -1578,6 +1602,16 @@ def main() -> int:
         "max_inflight_per_asn": MAX_INFLIGHT_PER_ASN,
         "mode": "multilane_seed",
     }
+    public_metrics = public_index_publication_meta(
+        requested_all_lanes=args.lanes == "all",
+        completed_lane_ids=completed_lane_ids,
+        index_listed=index_listed,
+        approved_host_count=approved_host_count,
+    )
+    meta.update(public_metrics)
+    meta["indexed_observed_publication"] = (
+        "complete_all_lane_measurement" if public_metrics else "withheld_subset_or_incomplete"
+    )
 
     # Persist the Shodan cursors before the dry-run exit: those pages were paid
     # for either way, so re-reading them on the next run is pure waste.

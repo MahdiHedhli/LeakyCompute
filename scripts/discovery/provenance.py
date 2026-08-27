@@ -111,6 +111,15 @@ def provenance_from_corpus_source(source, observed_at=None) -> dict | None:
     the strength of "we probed it before" is exactly the circular justification
     I-22 exists to break, so those return None and the caller drops the host.
     """
+    # A source label proves only *which* index once nominated the host. Without
+    # the stored observation time it cannot prove that nomination is still
+    # fresh. Passing a missing timestamp through index_provenance() used to
+    # replace it with "now", silently turning an old corpus row into standing
+    # permission to probe. Missing or malformed time therefore fails closed.
+    observed = parse_ts(observed_at)
+    if observed is None:
+        return None
+
     s = str(source or "").strip().lower()
     if not s:
         return None
@@ -120,7 +129,7 @@ def provenance_from_corpus_source(source, observed_at=None) -> dict | None:
         head = s.split(":", 1)[0].split("_", 1)[0]
     if head not in PUBLIC_INDEXES:
         return None
-    return index_provenance(head, None, None, "corpus_record", observed_at)
+    return index_provenance(head, None, None, "corpus_record", observed)
 
 
 # ---------------------------------------------------------------------------

@@ -238,8 +238,7 @@ def shodan_search(
             # contextualise a candidate; never download or log banner bodies.
             "fields": (
                 "ip_str,port,asn,org,isp,product,version,timestamp,"
-                "location.city,location.country_code,location.country_name,"
-                "location.latitude,location.longitude"
+                "location"
             ),
         }
         if facets and page == 1:

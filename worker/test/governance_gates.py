@@ -150,6 +150,48 @@ def _corpus_index_source():
 check("a corpus row whose source names a public index stays eligible", _corpus_index_source)
 
 
+def _undated_corpus_index_source():
+    assert P.provenance_from_corpus_source("shodan_asn:AS64497") is None
+    assert P.provenance_from_corpus_source("public_index:shodan", "not-a-date") is None
+
+
+check("a corpus index label without a timestamp is not fresh provenance", _undated_corpus_index_source)
+
+
+def _public_index_metrics_require_complete_all_lane_run():
+    all_ids = {lane["id"] for lane in R.LANES}
+    totals = {lane_id: 10 for lane_id in all_ids}
+
+    complete = R.public_index_publication_meta(
+        requested_all_lanes=True,
+        completed_lane_ids=all_ids,
+        index_listed=totals,
+        approved_host_count=2,
+    )
+    assert complete["indexed_observed"] == len(all_ids) * 10 + 2, complete
+
+    subset = R.public_index_publication_meta(
+        requested_all_lanes=False,
+        completed_lane_ids=all_ids,
+        index_listed=totals,
+        approved_host_count=2,
+    )
+    assert subset == {}, subset
+
+    one_failed = set(all_ids)
+    one_failed.pop()
+    incomplete = R.public_index_publication_meta(
+        requested_all_lanes=True,
+        completed_lane_ids=one_failed,
+        index_listed={lane_id: 10 for lane_id in one_failed},
+        approved_host_count=2,
+    )
+    assert incomplete == {}, incomplete
+
+
+check("only a complete all-lane run can publish the global index metric", _public_index_metrics_require_complete_all_lane_run)
+
+
 def _stale_index_source():
     prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(30))
     ok, why = eligible([cand("1.1.1.8", provenance=prov)])
