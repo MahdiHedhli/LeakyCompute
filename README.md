@@ -8,7 +8,7 @@
 
 *Is your AI inference server answering the whole internet?*
 
-### → **Hosted checks paused — use the [local defensive CLI](#scanning-a-range-you-own)** ←
+### → **Governed checks are live — use the [local defensive CLI](#scanning-a-range-you-own) for owned ranges** ←
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f5c542.svg)](LICENSE)
 [![Probes](https://img.shields.io/badge/probes-read--only%20GET-5ce1ff.svg)](docs/SECURITY.md)
@@ -22,10 +22,11 @@ Thousands of Ollama, Ray, and Jupyter servers are reachable from the public
 internet with no authentication at all. Anyone who finds one can run inference on
 someone else's GPU, read their models, and — on Ray and Jupyter — execute code.
 
-LeakyCompute measures that exposure **so operators can close it**. The hosted
-checker is currently paused: Cloudflare Workers cannot reliably fetch an IP
-literal, so presenting that platform refusal as a clean result would be false
-assurance. The local CLI runs inside the operator's own boundary instead.
+LeakyCompute measures that exposure **so operators can close it**. Hosted checks
+and scheduled discovery run through an address-pinned socket runtime only after
+a strongly consistent control plane commits a one-time permit. Platform and
+target failures remain inconclusive instead of being presented as clean hosts.
+The local CLI remains the right tool for ranges inside an operator's boundary.
 
 > **Evidence first. Panic never.**<br>
 > We measure exposure so operators can close it.
@@ -34,16 +35,16 @@ assurance. The local CLI runs inside the operator's own boundary instead.
 
 | | |
 |---|---|
-| 🔎 **[Public status page](https://leakycompute.mahdihedhli.com/)** | Hosted checks are paused; exposure statistics and local CLI guidance remain available. |
-| 📄 **[Measurement & opt-out](https://leakycompute.mahdihedhli.com/scanning.html)** | Found us in your logs? What historical probes sent, current suspension status, and a one-click opt-out. |
+| 🔎 **[Public status page](https://leakycompute.mahdihedhli.com/)** | Aggregate exposure statistics, bounded hosted self-check, and local CLI guidance. |
+| 📄 **[Measurement & opt-out](https://leakycompute.mahdihedhli.com/scanning.html)** | Found us in your logs? What probes send, the current controls, and a one-click opt-out. |
 | 🔬 **[Researcher lab](https://leakycompute-lab.pages.dev)** | Corpus browser and exposure maps. GitHub SSO, [approval required](https://github.com/MahdiHedhli/LeakyCompute/issues/new?template=request_research_access.yml). |
 | ⚙️ **[API](https://api.leakycompute.mahdihedhli.com/v1/health)** | `/v1/*` — see the [contract](docs/API.md). |
 
-## How the dormant active path gates a probe
+## How the active path gates a probe
 
-Active discovery is suspended. The dormant implementation remains fail-closed
-behind four gates, all ahead of the dry-run branch. They are retained for audit
-and testing, not as authorization to run it:
+Active discovery is fail-closed behind the gates below. The runner nominates
+fresh public-index candidates; the Durable Object commits the lease and consumes
+a one-time permit immediately before the Worker opens an address-pinned socket:
 
 ```
   candidate host
@@ -65,12 +66,14 @@ and testing, not as authorization to run it:
   │  RATE + PORT  │   I-5   and per-ASN limits; port must be on
   └───────┬───────┘         that service's allowlist
           ▼
+  one-time permit
+          ▼
    read-only GET   ← the only thing we ever send
 ```
 
-**We never discover a host by probing.** Every address historically contacted
-was already published in a public index, or its owner asked us to look. Current
-internet measurement is passive and sends those indexed hosts nothing.
+**We never discover a host by probing.** Every address contacted must have a
+fresh public-index record, or its owner must have asked us to look. Historical
+corpus membership is not standing permission.
 
 ## What active checks are limited to
 
@@ -83,9 +86,9 @@ submission, model pull, prompt, kernel start, or file read.
 | **Ray** | 8265 | `GET /api/version` | `GET /api/jobs/` |
 | **Jupyter** | 8888 | `GET /api/status` | `GET /tree` |
 
-The suspended background re-verification implementation covers a wider set —
+Scheduled governed re-verification covers a wider set —
 vLLM, Triton, Open WebUI, LocalAI, LiteLLM, ComfyUI, MLflow, TensorBoard,
-Gradio — every dormant probe path listed and justified under invariant I-2 in
+Gradio — with every probe path listed and justified under invariant I-2 in
 [SECURITY.md](docs/SECURITY.md).
 
 Ray is flagged on **configuration, not version**: CVE-2023-48022 is disputed
@@ -100,17 +103,17 @@ because collapsing them into one would be the easiest lie to tell:
 |---|---|
 | **Archive snapshot** | What a Wayback-era catalog listed. Counted, never probed by us. |
 | **Indexed, observed** | Hosts in public index records today. Counted, not probed. |
-| **Historical re-verification** | Retained hosts that answered a bounded read-only GET before active probing was suspended. |
+| **Rolling re-verification** | Retained hosts that answered a bounded read-only GET within the 180-day window. |
 
-The third number is direct but historical; it is not a live census. That gap and
-its increasing staleness are limitations to publish, not shortfalls to conceal.
+The third number is direct but bounded and source-shaped; it is not a live
+internet census. That limitation is published rather than hidden.
 
 ## Safety rails
 
 Every rule below is a numbered invariant in
 **[docs/SECURITY.md](docs/SECURITY.md)**, the document each change is reviewed
 against. Most are enforced by `npm test` rather than by good intentions. The
-remote paths are suspended, but their constraints remain testable and binding.
+same constraints bind hosted and scheduled production traffic.
 
 - **Read-only `GET` only** — never `/api/pull`, `/api/generate`, a Ray job, or a traversal payload
 - **We report that an endpoint answers unauthenticated requests. We never send one to prove impact**
@@ -133,9 +136,10 @@ an opt-out.
 
 ## Scanning a range you own
 
-The hosted checker is suspended. Cloudflare Workers cannot reliably connect to
-IP-literal destinations, so a hosted failure could look like a clean result. We
-will not offer false assurance.
+The browser checker is deliberately narrow. Its socket runtime pins the
+validated public address and labels platform or target failures inconclusive.
+For a range—or for internal addresses—run the checker inside infrastructure you
+control.
 
 Run the checker inside infrastructure you control. It executes on your network,
 answers immediately, has no service-side rate limit, and never asks us for
@@ -175,7 +179,7 @@ public/            # GitHub Pages status + /scanning disclosure page
 lab/               # Access-gated researcher UI (corpus, maps, validation)
 worker/src/        # Cloudflare Worker API
 worker/test/       # the invariant suite — npm test
-scripts/discovery/ # passive planner + dormant gated re-verification runner
+scripts/discovery/ # passive planner + gated re-verification runner
 src/               # defensive Python CLI
 docs/              # constitution, API contract, discovery model, specs
 docs/archive/      # unmaintained: session handoffs, write-up notes
@@ -200,7 +204,7 @@ python3 -m http.server 5500 --directory lab
 # needs ENVIRONMENT=development and an allowlist entry for that login
 ```
 
-Passive discovery planning runs **on your machine**, never inside the Worker:
+The discovery runner nominates candidates; only the Worker opens target sockets:
 
 ```bash
 export SHODAN_API_KEY=... LEAKY_API_BASE=... LEAKY_ADMIN_TOKEN=...
@@ -209,9 +213,10 @@ python3 scripts/discovery/run_multilane.py --self-test   # gates only, no packet
 python3 scripts/discovery/run_multilane.py --dry-run     # passive pull, no packets
 ```
 
-Active probing and ingest are suspended until a strongly consistent pre-probe
-lease and complete, resumable opt-out deletion are implemented. See the
-[2026-08-25 security review](docs/SECURITY_REVIEW_2026-08-25.md).
+Production scheduling uses the same runner with authenticated ingest. Strong
+leases, one-time permits, authoritative pagination, resumable opt-out deletion,
+indexed retention, and generation-switched reconciliation are prerequisites,
+not optional modes. See [ADR 0002](docs/decisions/0002-governed-active-measurement.md).
 
 ## Roadmap
 
@@ -219,9 +224,9 @@ Ordered by what closes a question the project already admits is open, then by
 value per hour. Full detail, including what would make each item *wrong*, in
 **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
-**Accepted direction:** passive internet measurement plus live checks inside the
-operator's own boundary. Hosted checks and active discovery remain suspended.
-See [ADR 0001](docs/decisions/0001-passive-local-first.md).
+**Accepted direction:** passive nomination plus governed, minimally intrusive
+re-verification and bounded hosted self-checks. See
+[ADR 0002](docs/decisions/0002-governed-active-measurement.md).
 
 Bounded work that is valuable either way:
 

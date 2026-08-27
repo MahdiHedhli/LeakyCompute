@@ -1,16 +1,14 @@
 # ADR 0002: Governed active measurement
 
-- **Status:** accepted for implementation; traffic remains disabled
+- **Status:** accepted and active in production
 - **Date:** 2026-08-27
 - **Supersedes:** ADR 0001 as the long-term product direction
 
 ## Decision
 
-LeakyCompute will build the controls required for governed third-party
-re-verification and hosted self-checks. This decision authorizes architecture,
-migration, dark deployment, and packet-free verification. It does not authorize
-target traffic before the re-enable suite passes and the maintainer makes a
-separate activation decision.
+LeakyCompute runs governed third-party re-verification and hosted self-checks.
+The control-plane migration, production-owned canary, full invariant suite, and
+explicit maintainer activation were completed on 27 August 2026.
 
 The architecture has two deliberately separate boundaries:
 
@@ -19,16 +17,17 @@ The architecture has two deliberately separate boundaries:
    and safer than coordinating D1 rows, KV indexes, and per-host objects. It
    owns probe leases, the authoritative corpus, provenance, exclusions, purge
    jobs, retention scheduling, security counters, and aggregate generations.
-2. A small external probe service is the only component allowed to connect to a
-   target address. The API Worker reaches it over mTLS at a dedicated unproxied
-   service hostname. It accepts no caller URL or hostname: only a canonical
-   public IP, reviewed service ID, and one-time permit bound to that address,
-   port, operation, and expiry.
+2. The API Worker's `cloudflare:sockets` runtime is the only component allowed
+   to connect to a target address. It accepts no caller URL or hostname: only a
+   consumed permit containing a canonical public IP, reviewed service ID, fixed
+   port, operation, and expiry. The sole hostname exception is an isolated,
+   disabled-by-default owned-canary profile bound to a configured target and
+   marker; third-party traffic never uses DNS.
 
-The API Worker remains the public policy boundary. The probe service calls back
-to consume the permit immediately before opening a socket. Permit consumption
-is the linearization point for opt-outs: the control plane re-checks the current
-IP/CIDR/ASN exclusions and rate limits in the same serialized operation. A
+The API Worker remains the public policy and packet-emission boundary. It calls
+the control plane to consume the permit immediately before opening a socket.
+Permit consumption is the linearization point for opt-outs: the control plane
+re-checks current IP/CIDR/ASN exclusions in the same serialized operation. A
 permit denied or already consumed emits no target traffic.
 
 ## Control-plane invariants
@@ -52,7 +51,7 @@ permit denied or already consumed emits no target traffic.
 - Authorization, revocation, opt-out, and permit capacity are reserved ahead of
   telemetry. Telemetry failure cannot prevent a security-state write.
 
-## Probe-service invariants
+## Probe-runtime invariants
 
 - No DNS resolution of target input; the socket destination is the validated IP
   in the consumed permit.
@@ -66,17 +65,21 @@ permit denied or already consumed emits no target traffic.
 - Response data is minimized before it leaves the service and never logged with
   a raw target address.
 
-## Staged activation
+## Activation record
 
-1. Implement and test the control plane locally.
-2. Migrate KV state and compare it read-only against current production.
-3. Deploy the control plane dark; keep both traffic kill switches off.
-4. Deploy the probe service with test-only/documentation-range fixtures and
-   verify mTLS, permit replay refusal, target pinning, and error taxonomy.
-5. Run the full re-enable suite under concurrency, interruption, oversized
-   corpus, late-page purge, exclusion races, and service failure.
-6. Present the evidence and exact first-run bounds to the maintainer. Activation
-   is a separate, explicit decision.
+1. The control plane was implemented and tested locally.
+2. KV state was migrated into the authoritative store and reconciled in full.
+3. The control plane and socket runtime were deployed with traffic switches off.
+4. An isolated operator-owned HTTPS canary verified permit consumption, target
+   pinning, response markers, and error taxonomy without touching a third party.
+5. The full re-enable suite passed under concurrency, interruption, oversized
+   corpus, late-page purge, exclusion races, and runtime failure.
+6. The maintainer explicitly activated hosted checks and governed discovery.
+7. The first production run exposed runner defects in provenance recovery,
+   partial-metric publication, Shodan field compatibility, and overlapping
+   hosted/discovery path registries. Each failed closed or was contained; the
+   defects were patched, regression-tested, and production re-verified before
+   normal scheduling was accepted.
 
 ## Why not D1 alone
 
@@ -89,12 +92,12 @@ distributed transaction between a lease coordinator and the corpus database.
 
 ## Consequences
 
-- ADR 0001 remains the authority for current production behavior until the
-  activation decision. Passive/local-first mode is still live today.
+- ADR 0001 remains the historical record of the suspension, but this ADR now
+  governs production behavior.
 - Workers KV becomes a migration source and optional public cache, not the
   authority for any decision that can permit traffic or deny access.
-- The external probe origin is new infrastructure with its own patching,
-  certificate rotation, egress policy, monitoring, and incident-response burden.
+- Target traffic stays inside the reviewed Worker runtime, avoiding a separate
+  probe origin, certificate lifecycle, and bearer-token hop.
 - Hosted checks initially cover only the caller's Cloudflare-observed address.
   Arbitrary override checks remain disabled until ownership proof and target ASN
   resolution are independently designed and tested.

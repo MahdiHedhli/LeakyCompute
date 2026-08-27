@@ -120,9 +120,10 @@ A clean result always ships with the `limitations` caveat attached.
 **I-9. The default target is the caller's own egress IP** (`CF-Connecting-IP`).
 That path needs no attestation because it is inherently self-authorized.
 
-*Deployment status:* hosted checks are disabled. Workers cannot reliably fetch
-IP-literal destinations, so a failed platform subrequest cannot be presented as
-evidence that the caller's host is clean. The local CLI remains available.
+*Deployment status:* hosted self-checks are active through the address-pinned
+socket runtime. A strongly consistent `hosted_self` lease and one-time permit
+precede target traffic; platform and target failures remain inconclusive. The
+local CLI remains available for internal systems and ranges.
 
 **I-10. Any other target requires an explicit `authorized: true` attestation.**
 No attestation, no scan. Refusals are logged. Public overrides are additionally
@@ -240,10 +241,11 @@ per host per 14 days; per-/24 and per-ASN concurrency ceilings and minimum
 spacing; a global rate ceiling below `HARD_MAX_RATE` that no flag can raise.
 Missing last-seen data fails closed: no clock, no probe.
 
-*Enforcement status:* active discovery is suspended. The current runner writes
-attempt clocks only after a completed run, so a crash could contact a host
-without advancing its clock. Dry-run and self-test modes remain available; live
-operation requires a durable pre-probe lease/attempt record.
+*Enforcement status:* active discovery is enabled only through the governed
+path. The Durable Object persists the attempt and 14-day next-eligible time
+before returning a one-time permit, and the Worker consumes that permit
+immediately before opening the socket. A crash therefore cannot make the host
+eligible again. Dry-run and self-test modes remain packet-free.
 
 **I-25. Opt-out is honoured before the probe, not after.** An exclusion list (IP,
 CIDR, or ASN) is consulted before any request is emitted, and the runner refuses

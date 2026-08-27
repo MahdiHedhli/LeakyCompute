@@ -393,9 +393,8 @@ async function handleCheck(request, env, ctx) {
   const legacyTestTransport =
     env.ENVIRONMENT !== "production" && env.LEGACY_TEST_TRANSPORT === "true";
   // Cloudflare Workers' global fetch cannot target IP literals directly. The
-  // default self-check target is the caller's IP, so enabling this without a
-  // separate address-pinning probe service produces universal false negatives.
-  // Fail visibly instead of presenting a platform refusal as a clean result.
+  // production path therefore uses the address-pinned socket runtime after a
+  // one-time permit; these switches fail visibly if either boundary is absent.
   if (
     env.HOSTED_CHECKS_ENABLED !== "true" ||
     env.PROBE_SERVICE_ENABLED !== "true" ||

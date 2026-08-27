@@ -106,6 +106,24 @@ The restricted scope list is intentional. Wrangler's default login currently
 requests write access across many unrelated Cloudflare products; inspect and
 minimise OAuth scopes rather than approving that default.
 
+With this intentionally minimal OAuth grant, Wrangler can upload and promote a
+Worker version but then report that it cannot look up the custom-domain zone.
+Do not broaden the token to silence that post-upload route check. Confirm the
+new version with `npx --yes wrangler@4.126.0 deployments list`, then verify the
+custom API hostname directly. Treat the deploy as failed only if the promoted
+version or live endpoint is wrong.
+
+The strong-state migration uses `CONTROL_MIGRATION_TOKEN` only as a temporary
+bootstrap secret. Set it for migration, verify `/v1/admin/control/health`, full
+pagination, purge/retention, and aggregate reconciliation, then delete it:
+
+```bash
+npx --yes wrangler@4.126.0 secret delete CONTROL_MIGRATION_TOKEN
+```
+
+Do not leave the migration credential installed after activation. The normal
+admin token cannot invoke the bootstrap migration route.
+
 `wrangler.toml` also enables Workers Caching and the `STATS_RATE_LIMITER`
 binding. These are part of the Worker version and require no additional secret
 or dashboard-created resource. Do not remove either independently:

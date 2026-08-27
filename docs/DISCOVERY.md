@@ -1,10 +1,10 @@
-# Discovery model (passive/local-first; active suspended)
+# Discovery model (passive nomination; governed verification)
 
 **Current status:** passive reports, index comparisons, local-container
-validation, and dry-run governance plans are available. Active discovery and
-ingest are disabled. The active design below is retained only where it explains
-the safety model or a future re-enable prerequisite; it is not an operating
-instruction. The authoritative order is [`ROADMAP.md`](ROADMAP.md).
+validation, dry-run governance plans, and weekly governed verification are
+available. The runner cannot open a target socket: only the API Worker's pinned
+runtime can do so after the Durable Object commits and consumes a one-time
+permit. The authoritative order is [`ROADMAP.md`](ROADMAP.md).
 
 ## Critical fact about the archive seed
 
@@ -63,7 +63,7 @@ port:11434 "Ollama"
 
 Prefer **`product:Ollama`** for seeding. Banner-only under-indexes; bare `port:11434` over-indexes (~183k).
 
-Reviewed metadata path for local validation or a future re-enable:
+Reviewed metadata path for local validation and governed verification:
 `GET /api/ps` or `GET /api/tags` only.
 
 ### 2) Ray — port 8265
@@ -84,27 +84,26 @@ Then fingerprint `/api/version` or dashboard HTML. Exposure story: reachable das
 http.title:"Jupyter" port:8888 -http.html:"token"
 ```
 
-Reviewed metadata path for local validation or a future re-enable: `GET /`
+Reviewed metadata path for local validation and governed verification: `GET /`
 only (no kernel exec).
 
 ---
 
-## Coverage was probe-bound; active verification is now suspended
+## Coverage is probe-bound; passive and active measurements stay separate
 
 Read this before adding any source.
 
-The historical design allowed 0.25/sec, one worker, and bounded runs. That made
-active verification the bottleneck: more indexes changed which hosts were
-sampled, not how much could be verified. The architectural distinction remains
-important even with active traffic off:
+The design uses a slow global rate, one runner worker, and bounded runs. Active
+verification remains the bottleneck: more indexes change which hosts are
+sampled, not how much can be verified. The distinction remains architectural:
 
 | Lane | Cost | Rule |
 |---|---|---|
 | **Passive census** — counts, facets, candidate hostnames | zero probes | More sources is strictly better. Anchor published totals here. |
-| **Active verification** — read-only metadata GETs | **suspended** | Requires the strong state and deletion architecture in the roadmap before it can return. |
+| **Active verification** — read-only metadata GETs | governed and bounded | Fresh provenance, durable cooldown lease, current exclusion check, one-time permit, and pinned Worker socket are mandatory. |
 
 Historical runs fused these lanes, and the by-country chart still inherits
-Shodan's scan bias. New source work is passive and must publish source-specific
+Shodan's scan bias. New source work must publish source-specific
 overlap/disagreement rather than imply an internet-wide population.
 
 ---
@@ -305,14 +304,21 @@ Public indexes ──► source-specific passive counts/facets
        │
        ├─► compare overlap, disagreement, freshness, and bias
        │
-       └─► governance dry-run plan (private local file)
+       └─► fresh candidate nomination
                          │
-                         └─► STOP — no target request, no ingest
+                         ▼
+              exclusions + cooldown + rate gates
+                         │
+                         ▼
+              durable lease + one-time permit
+                         │
+                         ▼
+                address-pinned Worker GET
 ```
 
-The historical active pipeline remains fail-closed in code so its gates can be
-tested, but it is not an available mode. See the roadmap before retaining or
-removing that dormant implementation.
+The legacy packet-sending runner remains hard-disabled. Production scheduling
+uses only the governed path above, and a passive lane failure aborts rather than
+falling back to historical corpus targets.
 
 ---
 
@@ -320,10 +326,10 @@ removing that dormant implementation.
 
 | Layer | Limit |
 |--------|--------|
-| Active probing | **Suspended** pending durable pre-probe leases |
-| Hosted public check | **Suspended**; use the local defensive CLI |
-| Neighborhood | prefix **≥ /28**; prefer **/30** |
-| Hosts per ASN | default **8**, max **25** |
+| Active probing | runner ceiling **0.5/s**; production schedule requests **0.2/s** |
+| Hosted public check | separate per-address and daily budgets |
+| Neighborhood | one in flight per IPv4 /24 or IPv6 /48; 30-second spacing |
+| ASN | two in flight; unknown ASN shares the most conservative bucket |
 | Worker ingest | **≤150**/request, **10**/hour |
 
 ---
@@ -343,8 +349,11 @@ python3 scripts/discovery/discover.py --asn-report \
 python3 scripts/discovery/discover.py --asn-report \
   --shodan-query 'http.title:"Jupyter" port:8888 -http.html:"token"'
 
-# Governance plan only — active probing is suspended until every attempt is
-# durably recorded before the packet is sent.
+# Governance plan only — no target packets.
 python3 scripts/discovery/run_multilane.py --dry-run \
   --output data/discovery-multilane.json
 ```
+
+The authenticated production workflow uses the same runner with `--ingest`.
+Never run it without the documented control plane, exclusions, and admin
+credentials; active packets originate only from the Worker's consumed permit.

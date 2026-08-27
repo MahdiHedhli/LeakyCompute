@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <title>LeakyCompute — measurement and opt-out</title>
-  <meta name="description" content="LeakyCompute's suspended active-measurement policy, historical request shape, and permanent address-space opt-out." />
+  <meta name="description" content="LeakyCompute's governed active-measurement policy, request shape, and permanent address-space opt-out." />
   <meta name="theme-color" content="#0a0e17" />
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="css/style.css?v=e9b6d61c" />
@@ -21,7 +21,7 @@
           >DON'T PANIC // Threat Research</a
         >
         <h1>MEASUREMENT &amp; OPT-OUT</h1>
-        <div class="tag">active probing is suspended — exclusions remain permanent</div>
+        <div class="tag">governed measurement is active — exclusions remain permanent</div>
       </div>
       <nav class="nav">
         <a href="index.html">Home</a>
@@ -33,12 +33,14 @@
     </header>
 
     <section class="hero">
-      <h2>ACTIVE PROBING SUSPENDED // OPT OUT STILL HONORED</h2>
+      <h2>GOVERNED MEASUREMENT // OPT OUT HONORED BEFORE TRAFFIC</h2>
       <p>
-        LeakyCompute currently sends no active discovery or hosted-check traffic.
-        If you do not want your address space included in any future measurement,
-        say so now. You do not have to explain why. Exclusions are applied when we
-        receive them, do not expire, and also trigger deletion of retained records.
+        LeakyCompute sends bounded read-only requests only to fresh candidates
+        nominated by public indexes, plus hosted self-checks of the caller's own
+        public address. If you do not want your address space included, say so.
+        You do not have to explain why. Exclusions become active when received,
+        block new permits, do not expire, and trigger verified deletion of retained
+        records and attempt state.
       </p>
       <p>
         <a class="primary"
@@ -53,12 +55,12 @@
     </section>
 
     <section class="panel">
-      <h3>What historical probes sent</h3>
+      <h3>What probes send</h3>
       <p>
-        Active measurement is suspended. When it operated, every request was a
-        read-only <code>GET</code> against a version, health, or listing endpoint.
-        It checked whether a service answered an unauthenticated request and never
-        sent an action to prove what that access would allow.
+        Every request is a read-only <code>GET</code> against a reviewed version,
+        health, or listing endpoint. It checks whether a service answers an
+        unauthenticated request and never sends an action to prove what that access
+        would allow.
       </p>
       <table class="probe-table">
         <thead>
@@ -76,27 +78,25 @@
         redirects or scan ports; each service was contacted only on a reviewed port.
       </p>
       <p>
-        Historical traffic used the User-Agent <code>LeakyCompute-SafeProbe</code>.
-        If active measurement is ever redesigned and re-enabled, attributable traffic
-        remains a requirement and this page will be updated before it starts.
+        Traffic uses the User-Agent <code>LeakyCompute-SafeProbe</code>. A durable
+        cooldown lease is written before target traffic, and the Worker consumes a
+        one-time permit immediately before opening an address-pinned socket.
       </p>
       <p>
-        <strong>Where historical probes came from.</strong> Completed runs used
-        maintainer systems and GitHub-hosted Actions runners; the hosted checker was
-        designed for Cloudflare Workers but is disabled because that platform cannot
-        reliably fetch IP-literal targets. These are shared source pools, so the
-        User-Agent—not reverse DNS—was the project identifier. Any future source
-        architecture must be documented here before traffic resumes.
+        <strong>Where probes come from.</strong> Candidate nomination and scheduling
+        run on GitHub-hosted Actions runners, but target requests originate from the
+        Cloudflare Worker socket runtime. Cloudflare uses shared egress pools, so the
+        User-Agent—not reverse DNS—is the project identifier.
       </p>
     </section>
 
     <section class="panel">
       <h3>How your host came to our attention</h3>
       <p>
-        We did not find hosts by scanning. Every address historically contacted
-        already appeared in a public index such as Shodan or was supplied by its
-        owner. Current internet measurement reads public records and sends the listed
-        hosts no traffic.
+        We do not find hosts by scanning or walking neighboring address space. Every
+        address contacted must carry a public-index observation no more than seven
+        days old, or belong to an approved owner request. A retained historical row
+        without that timestamp is not permission to contact it again.
       </p>
       <p>
         This also means opting out here does not remove you from those indexes. Shodan
@@ -109,7 +109,7 @@
     <section class="panel">
       <h3>What we keep</h3>
       <p>
-        Retained historical records may contain address, port, service, version
+        Retained rolling records may contain address, port, service, version
         string, first and last seen, and geo/ASN metadata. We do not retain model
         lists, job records, or page contents. Records expire 180 days after last
         contact. Raw addresses are never published; public figures are aggregate
@@ -137,7 +137,7 @@
         checked against the code rather than taken on trust:
         <a href="https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md"
            target="_blank" rel="noopener">SECURITY.md</a>.
-        If you find a way for a dormant or future probe path to bypass these rules,
+        If you find a way for a probe path to bypass these rules,
         that is a security issue in our software and we want to hear about it — open a
         private advisory on the repository.
       </p>

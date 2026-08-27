@@ -12,8 +12,8 @@ preview_urls = false
 [observability]
 enabled = true
 
-# Dark control plane for governed active measurement. The existing traffic kill
-# switches stay authoritative until migration and the re-enable suite complete.
+# Strong control plane for governed active measurement. Traffic switches remain
+# independent emergency controls after activation.
 [[durable_objects.bindings]]
 name = "DISCOVERY_CONTROL"
 class_name = "DiscoveryControlPlane"
@@ -22,8 +22,8 @@ class_name = "DiscoveryControlPlane"
 tag = "discovery-control-v1"
 new_sqlite_classes = ["DiscoveryControlPlane"]
 
-# Staged perimeter migration: keep workers.dev until every public/lab consumer
-# has moved to this hostname and the new route passes end-to-end verification.
+# The public and lab consumers use this custom hostname; workers.dev and preview
+# URLs remain disabled.
 [[routes]]
 pattern = "api.leakycompute.mahdihedhli.com"
 custom_domain = true
@@ -39,8 +39,9 @@ enabled = true
 [vars]
 ENVIRONMENT = "production"
 # The production checker uses an address-pinned Cloudflare TCP socket runtime.
-# Keep these independent traffic switches off until migration, the isolated
-# owned canary, and the complete re-enable suite have all passed.
+# Migration, the isolated owned canary, and the re-enable suite passed on
+# 2026-08-27. Keep the switches independent so either traffic path can be
+# stopped without weakening the other.
 HOSTED_CHECKS_ENABLED = "true"
 ACTIVE_DISCOVERY_ENABLED = "true"
 PROBE_SERVICE_ENABLED = "true"

@@ -1,5 +1,37 @@
 # Adversarial security review — 2026-08-25
 
+## Activation addendum — 2026-08-27
+
+This document preserves the suspension decision and evidence as of 25 August.
+The architectural blockers below were subsequently implemented as a single
+SQLite-backed Durable Object control plane plus an address-pinned Worker socket
+runtime. The production migration, authoritative pagination, resumable purge,
+indexed retention, generation-switched reconciliation, owned canary, and full
+re-enable suite completed before the maintainer explicitly activated hosted
+self-checks and governed discovery on 27 August. ADR 0002 is the current
+production authority.
+
+The first governed production run exposed four additional defects:
+
+- a public Actions log briefly received raw Shodan/API response material before
+  the run was deleted; responses are now minimized and all error logging reports
+  shape/status only;
+- a historical source label without an observation timestamp was incorrectly
+  converted into fresh provenance, producing one target attempt; missing or
+  malformed timestamps now fail closed and historical membership alone cannot
+  authorize traffic;
+- a failed or subset passive lane could overwrite the complete public index
+  measurement; only a successful all-lane run may publish that metric, and the
+  last complete value was restored;
+- overlapping hosted and discovery service profiles rejected the reviewed
+  discovery path at the socket boundary; the registries now union their reviewed
+  paths and an end-to-end regression covers the overlap.
+
+Passive lane failures now abort before corpus reads or target work, workflow
+logs contain no raw target addresses, and the corrected path was re-tested in a
+capped production run. These incidents remain part of the audit trail rather
+than being rewritten out of the original review.
+
 ## Status
 
 Daybreak Blue and the primary agent reviewed the Worker, static clients,

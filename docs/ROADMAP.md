@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status date:** 2026-08-25
+**Status date:** 2026-08-27
 **Authority:** this is the current execution order. `SECURITY.md` remains the
 constitution; the 2026-08-25 security review supplies the open security
 requirements. Older specs and archived handoffs preserve reasoning, not current
@@ -14,8 +14,8 @@ authorization to run active traffic.
 | Research lab | Available behind Cloudflare Access and the researcher allowlist |
 | Local defensive CLI | Available for infrastructure the operator controls |
 | Passive discovery reports and dry-run plans | Available; send no target traffic |
-| Hosted `/v1/check` | Suspended; production returns `503 hosted_checks_temporarily_disabled` |
-| Active discovery and ingest | Suspended; scheduled active runs were removed |
+| Hosted `/v1/check` | Active through the address-pinned Worker socket runtime |
+| Active discovery and ingest | Active weekly through fresh provenance, durable leases, one-time permits, exclusions, cooldowns, and rate gates |
 | 2026-08 discovery incident | Contained; 13 artifacts and 13 log sets deleted and verified |
 
 Nothing on this roadmap silently widens what the project touches. Passive source
@@ -45,7 +45,8 @@ Retain the public-index provenance rule and read-only metadata probes, but rebui
 the state model before sending traffic again. The implementation decision is
 recorded in
 [`decisions/0002-governed-active-measurement.md`](decisions/0002-governed-active-measurement.md).
-This authorizes design, migration, and dark deployment—not a probe run.
+The maintainer explicitly activated the completed design on 2026-08-27 after
+the migration, owned canary, and re-enable suite passed.
 
 **What would make this step wrong:** allowing the existing dormant runner to
 become the de facto decision. It remains fail-closed until the choice and its
@@ -81,7 +82,7 @@ prerequisites are explicit.
 These are useful whether the project remains passive or later restores active
 measurement.
 
-### 1b. Strong state model — required only before active discovery returns
+### 1b. Strong state model — completed before active discovery returned
 
 Treat this as one storage/control-plane migration, not a series of KV patches:
 
@@ -104,24 +105,24 @@ Treat this as one storage/control-plane migration, not a series of KV patches:
 7. **Conservative unknown-ASN handling.** Missing ASN belongs to a shared bounded
    bucket; it never skips the per-ASN safety gate.
 
-D1, Durable Objects, or a combination are candidates. The design must be chosen
-from transactional/query requirements, not from attachment to the current KV
-schema.
+Implemented as a single SQLite-backed Durable Object. KV remains a migration
+source and compatibility/public cache, not the authority for probe permission,
+exclusions, retention, or corpus traversal.
 
-**Exit criteria:** the re-enable tests in the security review pass under
-concurrency, interruption, a corpus larger than every page limit, and a matching
-record beyond the first purge page. Until then, active discovery stays off.
+**Exit criteria met 2026-08-27:** the re-enable tests pass under concurrency,
+interruption, a corpus larger than every page limit, a matching record beyond
+the first purge page, an owned production canary, and a capped governed run.
 
-### 1c. Hosted checks are a separate architecture
+### 1c. Hosted checks — completed with a separate purpose and policy path
 
 Cloudflare Workers global `fetch` cannot reliably target IP literals, while
 hostnames reintroduce DNS rebinding and CIDR/ASN opt-out ambiguity. Hosted checks
-may return only behind a trusted probe service that can pin validated public
-addresses, apply IP/CIDR/ASN exclusions, enforce strong rate limits, and
-distinguish platform failures from clean results.
+therefore use the same address-pinned socket runtime as discovery but a separate
+`hosted_self` purpose, lease policy, and rate budget. Platform and target errors
+remain inconclusive and cannot become clean results.
 
-This work is not a prerequisite for the local CLI or passive research. A missing
-hosted checker is not a reason to weaken target validation.
+The local CLI remains the preferred path for internal systems and owned ranges;
+the hosted checker is intentionally narrower.
 
 ---
 

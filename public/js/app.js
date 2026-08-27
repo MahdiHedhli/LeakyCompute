@@ -219,7 +219,7 @@
       // Short in the card so the focal number is not competing with a
       // paragraph; the full provenance sits in the methodology note below,
       // where it can be read next to the other two numbers it contrasts with.
-      $("indexed-sub").textContent = "Counted from public records. Never probed (I-21).";
+      $("indexed-sub").textContent = "Counted from public index sources. Never probed (I-21).";
       $("indexed-stamp").textContent = idx.last_observed_at
         ? `as of ${stamp(idx.last_observed_at)}`
         : "as of —";
@@ -234,7 +234,7 @@
       $("live-observations").textContent = fmt(data.live_instrumented?.exposed_total);
       $("live-checks").textContent = fmt(data.live_instrumented?.checks_total);
       liveSub.textContent =
-        "Retained historical hosts re-verified with a read-only GET; active probing is suspended.";
+        "Distinct hosts retained in the rolling 180-day corpus after a bounded read-only GET.";
       $("confirmed-asof").textContent = stamp(
         rev.last_reverified_at || data.live_instrumented?.last_check_at || data.updated_at
       );
@@ -254,7 +254,7 @@
         "API offline or not configured — showing snapshot fallback. Set public/js/config.js API_BASE after deploy.";
       apiNote.dataset.state = "err";
       snapSub.textContent = "Local snapshot fallback (seed).";
-      liveSub.textContent = "Historical re-verification data unavailable.";
+      liveSub.textContent = "Rolling re-verification data unavailable.";
     }
   }
 
@@ -271,13 +271,20 @@
   };
 
   function renderServiceCard(s) {
+    const inconclusive = ["platform_error", "authorization_error", "target_error"].includes(
+      s.error_class
+    );
     const state = s.exposed
       ? "exposed"
+      : inconclusive
+      ? "inconclusive"
       : s.detected
       ? "detected"
       : "clear";
     const stateText = s.exposed
       ? "EXPOSED"
+      : inconclusive
+      ? "inconclusive"
       : s.detected
       ? s.authenticated
         ? "reachable · auth enforced"
@@ -338,13 +345,16 @@
     const verdict = $("verdict");
     const report = $("report");
     const sev = data.overall_severity || "none";
+    const inconclusive = data.conclusive === false && !data.any_exposed;
 
     verdict.hidden = false;
-    verdict.className = `verdict sev-${sev}`;
+    verdict.className = inconclusive ? "verdict inconclusive" : `verdict sev-${sev}`;
     verdict.innerHTML =
       `<div class="verdict-line">${
         data.any_exposed
           ? "&#9888; EXPOSED — an AI service answered an unauthenticated read"
+          : inconclusive
+          ? "&#9888; INCONCLUSIVE — do not treat this as a clean result"
           : "&#10003; No exposed AI service observed"
       }</div>` +
       `<div class="verdict-sub">target ${esc(data.target)} · severity ${esc(
@@ -389,6 +399,13 @@
       });
       const data = await res.json();
       if (!res.ok) {
+        // Platform policy failures intentionally use HTTP 503, but still carry
+        // the structured per-service report. Render that as inconclusive rather
+        // than collapsing it into a generic request failure.
+        if (Array.isArray(data.services)) {
+          renderReport(data);
+          return;
+        }
         out.classList.add("exposed");
         out.textContent = `${data.error || "request failed"}${
           data.message ? `\n${data.message}` : ""

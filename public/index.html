@@ -51,8 +51,8 @@
       </p>
       <p class="lede">
         The three numbers below come from three different places: what an archived
-        catalog claimed, what public indexes list today, and what bounded historical
-        re-verification confirmed before active probing was suspended.
+        catalog claimed, what public indexes list today, and what bounded rolling
+        re-verification has confirmed.
       </p>
       <div class="counters counters-3">
         <div class="card snapshot">
@@ -80,7 +80,7 @@
           <div class="badge" id="indexed-stamp">as of —</div>
         </div>
         <div class="card live">
-          <div class="label">Historical re-verification · confirmed exposed<span class="ast">*</span></div>
+          <div class="label">Rolling re-verification · confirmed exposed<span class="ast">*</span></div>
           <div class="value" id="live-exposed">—</div>
           <div class="sub" id="live-sub">Loading…</div>
           <div class="badge" title="Distinct hosts currently held. Observations count every time a host answered, so a host seen in two runs counts twice there and once here.">
@@ -93,11 +93,11 @@
       <div class="footnote" id="methodology-note">
         <p>
           <span class="ast">*</span> <strong>Confirmed exposed</strong> is a retained
-          historical count from bounded read-only re-verification, last updated
-          <span id="confirmed-asof">—</span>. Active probing is suspended, so this
-          number is not a live census and will become stale. When the measurements
-          were collected, targets had to be present in a public index or supplied
-          by their owner, and the exclusion, cadence, rate, and port gates applied.
+          count from bounded read-only re-verification, last updated
+          <span id="confirmed-asof">—</span>. It is a rolling, source-shaped corpus,
+          not a live internet census. Targets must have fresh public-index provenance
+          or an approved owner request, and must pass exclusion, cooldown, rate,
+          service, port, and one-time-permit gates before a request is emitted.
         </p>
         <p>
           <strong>Current</strong> is counted, not probed — we read what public
@@ -125,7 +125,7 @@
       </div>
       <div class="geo-block" style="margin-top:20px">
         <h3 style="font-size:12px;letter-spacing:0.1em;color:var(--amber);text-transform:uppercase;margin-bottom:10px">
-          Historical re-verification by country
+          Rolling re-verification by country
         </h3>
         <p class="hint" id="geo-note">Unique re-verified hosts · sorted by count · no raw IPs</p>
         <div class="row" style="margin:8px 0;gap:8px;align-items:center">
@@ -150,12 +150,12 @@
     </section>
 
     <section class="panel">
-      <h3>Local self-check</h3>
+      <h3>Hosted self-check</h3>
       <p class="hint" style="margin-bottom:12px">
-        <strong>Hosted checks are suspended.</strong> This deployment
-        cannot reliably connect to IP-literal targets, so a hosted “clean” result
-        would be false assurance. Run the local defensive CLI inside infrastructure
-        you control; results stay on your machine.
+        Check the public address Cloudflare sees for this browser. The Worker pins
+        that validated address behind a one-time permit and sends only reviewed,
+        read-only requests. Connection and platform failures are inconclusive—not
+        clean results. Use the local CLI for internal systems or owned ranges.
       </p>
 
       <label class="check" hidden>
@@ -174,11 +174,11 @@
       </div>
 
       <div class="row">
-        <button type="button" id="check-btn" disabled>Hosted check unavailable</button>
+        <button type="button" id="check-btn">Check my public IP</button>
       </div>
       <div id="verdict" class="verdict" hidden></div>
       <div id="report" class="report"></div>
-      <div id="result" class="result">Use the local CLI linked below.</div>
+      <div id="result" class="result">No host checked yet.</div>
 
       <div class="more-than-one">
         <strong>Need an address or range checked?</strong>
@@ -203,9 +203,10 @@
     <section class="panel">
       <h3>Methodology &amp; ethics</h3>
       <p class="hint">
-        LeakyCompute is a defensive research project. Active internet probing and
-        hosted checks are suspended. The public surface does not mass-scan the
-        internet and does not ship exploit payloads.
+        LeakyCompute is a defensive research project. Public indexes nominate
+        candidates; the system does not discover hosts by walking address space.
+        Governed verification sends only bounded read-only requests and never
+        ships exploit payloads or demonstrates impact.
         Researchers request GitHub-SSO lab access via issue; approval writes an allowlist entry used by the gated lab.
       </p>
     </section>
@@ -222,6 +223,6 @@
     </footer>
   </div>
   <script src="js/config.js?v=257df91c"></script>
-  <script src="js/app.js?v=9c63efce"></script>
+  <script src="js/app.js?v=governed-20260827"></script>
 </body>
 </html>

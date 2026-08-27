@@ -757,4 +757,24 @@ section("every gated route resolves identity the same way");
   });
 }
 
+section("the public checker cannot paint an inconclusive result green");
+
+{
+  const publicDir = path.join(SRC, "..", "..", "public");
+  const page = fs.readFileSync(path.join(publicDir, "index.html"), "utf8");
+  const client = fs.readFileSync(path.join(publicDir, "js", "app.js"), "utf8");
+
+  await check("the active hosted-check button is available", async () => {
+    assert.match(page, /id="check-btn">Check my public IP<\/button>/);
+    assert.doesNotMatch(page, /Hosted checks are suspended/);
+  });
+
+  await check("HTTP 503 structured reports and target errors render inconclusive", async () => {
+    assert.ok(client.includes('data.conclusive === false'));
+    assert.ok(client.includes('Array.isArray(data.services)'));
+    assert.ok(client.includes('INCONCLUSIVE — do not treat this as a clean result'));
+    assert.ok(client.includes('"platform_error", "authorization_error", "target_error"'));
+  });
+}
+
 finish();

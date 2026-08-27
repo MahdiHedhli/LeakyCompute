@@ -187,6 +187,7 @@ label.check input { margin-top: 3px; }
 .verdict.sev-medium { border-left-color: var(--amber); }
 .verdict.sev-low, .verdict.sev-info { border-left-color: var(--cyan); }
 .verdict.sev-none { border-left-color: var(--green); }
+.verdict.inconclusive { border-left-color: var(--amber); }
 
 .report { display: grid; gap: 10px; margin-top: 12px; }
 .svc {
@@ -195,6 +196,7 @@ label.check input { margin-top: 3px; }
 }
 .svc.exposed { border-color: var(--red); }
 .svc.detected { border-color: var(--amber); }
+.svc.inconclusive { border-color: var(--amber); }
 .svc.clear { opacity: 0.72; }
 
 .svc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -207,6 +209,7 @@ label.check input { margin-top: 3px; }
 }
 .svc-state.exposed { color: var(--red); border-color: var(--red); }
 .svc-state.detected { color: var(--amber); border-color: var(--amber); }
+.svc-state.inconclusive { color: var(--amber); border-color: var(--amber); }
 .svc-state.clear { color: var(--green); border-color: var(--line2); }
 
 .svc-meta { margin-top: 8px; font-size: 12px; color: var(--dim); }

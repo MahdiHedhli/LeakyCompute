@@ -9,7 +9,7 @@ describes the contract; when they disagree, the code wins and this file is a bug
 |---|---|---|---|
 | `/` , `/v1/health` | GET | none | liveness |
 | `/v1/stats` | GET | none | public aggregate counters |
-| `/v1/check` | POST | Turnstile (if configured) | suspended hosted self-check |
+| `/v1/check` | POST | Turnstile (if configured) | bounded hosted self-check of the caller's public address |
 | `/v1/research/me` | GET | Cloudflare Access | researcher identity + allowlist state |
 | `/v1/research/catalog` | GET | Access + allowlist | gated catalog |
 | `/v1/admin/allowlist` | POST | `X-Admin-Token` | approve / revoke researchers |
@@ -24,11 +24,13 @@ CORS is allowlisted via the `ALLOWED_ORIGINS` var. All responses are
 
 ## POST /v1/check
 
-**Deployment status: suspended.** Production returns
-`503 hosted_checks_temporarily_disabled`. Cloudflare Workers cannot reliably
-fetch IP-literal destinations, which are the only target form that can be
-validated and pinned without DNS rebinding or CIDR opt-out bypass. The engine
-below remains its tested contract for a future trusted probe service.
+**Deployment status: active for the caller's Cloudflare-observed public
+address.** Production uses an address-pinned `cloudflare:sockets` runtime after
+the Durable Object commits and consumes a one-time `hosted_self` permit. Global
+`fetch` is not used for target traffic. A platform or target failure is returned
+as inconclusive, never as a clean result. Caller-selected overrides remain
+suspended because the Worker cannot authoritatively apply ASN-wide opt-outs to
+an arbitrary address.
 
 Every request this endpoint makes to a target is a read-only `GET`. See
 [SECURITY.md](SECURITY.md) for the invariants that constrain it.
@@ -199,7 +201,7 @@ Jupyter never gets OSV results in practice — it reports no version.
 
 | Status | `error` | Cause |
 |---|---|---|
-| 503 | `hosted_checks_temporarily_disabled` | production kill switch; use the local CLI |
+| 503 | `hosted_checks_temporarily_disabled` | emergency/configuration kill switch; use the local CLI |
 | 400 | `authorization_required` | `target` set without `authorized: true` |
 | 400 | `missing_target` / `invalid_target` / `hostname_target_not_allowed` / `target_too_long` | target validation |
 | 400 | `private_target_not_allowed` | non-public, special-purpose, multicast, private, loopback, link-local or CGNAT target |
