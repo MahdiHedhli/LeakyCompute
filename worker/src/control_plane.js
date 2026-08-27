@@ -170,6 +170,13 @@ export class DiscoveryControlPlane {
     this.ctx = ctx;
     this.env = env;
     this.sql = ctx.storage.sql;
+    if (env.ENVIRONMENT === "production" && env.CONTROL_PLANE_READY === "true") {
+      // Production cutover is complete and the single named object is already
+      // migrated. Do not execute even no-op DDL here: Cloudflare charges those
+      // statements against the free-tier row-write budget and can make every
+      // read fail after a new Worker version instantiates the object.
+      return;
+    }
     let schemaReady = true;
     try {
       // DDL and INSERT OR IGNORE consume the Durable Object row-write budget
