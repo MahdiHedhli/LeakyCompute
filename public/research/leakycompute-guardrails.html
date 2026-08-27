@@ -49,12 +49,12 @@
           The project began after I saw a short-lived public catalog of exposed AI infrastructure. The raw number was arresting, but the more useful question was what that number actually meant. Was a host merely visible in a search index? Had it answered a recent request? Did an endpoint expose metadata, inference, a workflow engine, or a path to code execution? Those are different claims, and collapsing them into one counter makes the research less useful.
         </p>
         <p>
-          So LeakyCompute now presents three measurements side by side. As of 27 August 2026, an archive-era catalog listed <strong>19,348 hosts</strong>. Public index sources listed <strong>19,376 hosts</strong>. The rolling 180-day re-verification corpus retained <strong>1,350 distinct hosts</strong> that answered a read-only request. These figures are not additive. Each has a different source, time boundary, and confidence level.
+          So LeakyCompute now presents three measurements side by side. As of 27 August 2026, an archive-era catalog listed <strong>19,348 hosts</strong>. Public index sources listed <strong>19,376 hosts</strong>. The rolling 180-day re-verification corpus retained <strong>1,351 distinct hosts</strong> that answered a read-only request. These figures are not additive. Each has a different source, time boundary, and confidence level.
         </p>
         <div class="article-metrics" aria-label="Three separate LeakyCompute measurements">
           <div><span>19,348</span><strong>archive listings</strong><small>captured 27 July 2026, not re-verified</small></div>
           <div><span>19,376</span><strong>indexed records</strong><small>counted from public index sources, not probed</small></div>
-          <div><span>1,350</span><strong>re-verified hosts</strong><small>rolling 180-day read-only observations</small></div>
+          <div><span>1,351</span><strong>re-verified hosts</strong><small>rolling 180-day read-only observations</small></div>
         </div>
         <p>
           The current index count is entirely Shodan-derived, so source bias is not a footnote. It is part of the result. Tunnelled services are also invisible to this method. The live project page keeps the timestamp and source split next to the numbers so they cannot quietly turn into a timeless claim.
@@ -70,10 +70,10 @@
           The system is split across three trust boundaries. The public site receives only aggregates. Approved researchers can reach a minimised corpus through the lab. Administrative ingest and authorization remain behind a third boundary. Keeping those surfaces separate limits what a bug in any one of them can expose.
         </p>
         <p>
-          That design still surfaced meaningful classes of exposure. As of 27 August 2026, the rolling 180-day retained corpus contained 959 host–stack pairs where models or inference were reachable, 188 host–stack pairs where unauthenticated workflow execution was reachable, 129 host–stack pairs where training metadata or artifacts were readable, and 78 host–stack pairs where Jupyter or Ray exposed the prerequisites for code execution. These are host–stack pairs, not distinct hosts. A host can expose several stacks and appear in more than one class, while a re-verified host may fall into none of them. The four classes therefore overlap, are not exhaustive at the host level, and should not be summed to the 1,350 distinct hosts above. These are reachability classifications. I did not submit jobs, run notebooks, pull models, send prompts, or otherwise demonstrate impact on third-party systems.
+          That design still surfaced meaningful classes of exposure. As of 27 August 2026, the rolling 180-day retained corpus contained 960 host–stack pairs where models or inference were reachable, 188 host–stack pairs where unauthenticated workflow execution was reachable, 129 host–stack pairs where training metadata or artifacts were readable, and 78 host–stack pairs where Jupyter or Ray exposed the prerequisites for code execution. These are host–stack pairs, not distinct hosts. A host can expose several stacks and appear in more than one class, while a re-verified host may fall into none of them. The four classes therefore overlap, are not exhaustive at the host level, and should not be summed to the 1,351 distinct hosts above. These are reachability classifications. I did not submit jobs, run notebooks, pull models, send prompts, or otherwise demonstrate impact on third-party systems.
         </p>
         <p>
-          The 1,350 figure is an as-of count from a rolling corpus, not a permanently frozen snapshot. Resumed verification adds or refreshes qualifying observations in that corpus, while remediation and retention can cause other records to leave it.
+          The 1,351 figure is an as-of count from a rolling corpus, not a permanently frozen snapshot. Resumed verification adds or refreshes qualifying observations in that corpus, while remediation and retention can cause other records to leave it.
         </p>
         <p>
           Discovery and verification remain separate operations. Scheduled discovery never walks address space or synthesizes neighboring targets; candidates must be nominated by fresh records from approved public indexes—currently Shodan, with Censys planned. Operator-owned hosted checks use a separate authorization path and never become discovery provenance.
