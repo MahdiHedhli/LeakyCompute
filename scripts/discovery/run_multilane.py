@@ -57,6 +57,7 @@ from discover import (  # noqa: E402
     GlobalRateLimiter,
     hosts_for_asn,
     http_json,
+    payload_shape,
     parse_asn_facets,
     shodan_search,
 )
@@ -267,9 +268,12 @@ def fetch_hits(api_base: str, token: str, limit: int = 500) -> list[dict]:
         status, data = http_json(
             f"{api_base.rstrip('/')}/v1/admin/control/hosts?{query}",
             headers={"X-Admin-Token": token},
+            max_response_bytes=256 * 1024,
         )
         if status != 200 or not isinstance(data, dict) or not isinstance(data.get("records"), list):
-            raise IntervalDataUnavailable(f"could not read authoritative corpus: HTTP {status} {data}")
+            raise IntervalDataUnavailable(
+                f"could not read authoritative corpus: HTTP {status}; response={payload_shape(data)}"
+            )
         hits.extend(h for h in data["records"] if isinstance(h, dict) and h.get("ip"))
         next_cursor = str(data.get("next_cursor") or "")
         if data.get("complete") is True or not next_cursor:
@@ -312,9 +316,12 @@ def fetch_probe_clock(api_base: str, token: str) -> dict[str, str]:
         status, data = http_json(
             f"{api_base.rstrip('/')}/v1/admin/control/attempts?{query}",
             headers={"X-Admin-Token": token},
+            max_response_bytes=256 * 1024,
         )
         if status != 200 or not isinstance(data, dict) or not isinstance(data.get("attempts"), list):
-            raise IntervalDataUnavailable(f"could not read authoritative probe clock: HTTP {status} {data}")
+            raise IntervalDataUnavailable(
+                f"could not read authoritative probe clock: HTTP {status}; response={payload_shape(data)}"
+            )
         for row in data["attempts"]:
             if isinstance(row, dict) and row.get("ip") and row.get("last_attempt_at"):
                 clock[str(row["ip"])] = row["last_attempt_at"]
@@ -601,7 +608,13 @@ def match_to_candidate(m: dict, lane: dict) -> dict:
         "source": f"shodan:{lane['id']}",
         # I-22(a): the index listing is the entitlement to probe, so it travels
         # with the candidate instead of being inferred from which lane ran.
-        "provenance": index_provenance("shodan", lane["query"], lane["id"], "lane_search"),
+        "provenance": index_provenance(
+            "shodan",
+            lane["query"],
+            lane["id"],
+            "lane_search",
+            m.get("timestamp"),
+        ),
         **geo,
     }
 
@@ -666,6 +679,7 @@ def fetch_final_verification(api_base: str, token: str) -> list[dict]:
             f"{api_base.rstrip('/')}/v1/admin/control/expiring?{query}",
             timeout=20,
             headers={"X-Admin-Token": token},
+            max_response_bytes=256 * 1024,
         )
         if status != 200 or not isinstance(data, dict) or not isinstance(data.get("due"), list):
             print(f"[!] final-verification queue unavailable (HTTP {status})")
@@ -1137,7 +1151,9 @@ def ingest(api_base: str, token: str, results: list[dict], meta: dict) -> list:
             timeout=120,
         )
         if st != 200:
-            raise SystemExit(f"ingest failed: {st} {data}")
+            raise SystemExit(
+                f"ingest failed: HTTP {st}; response={payload_shape(data)}"
+            )
         print(f"  ingest batch ok: {data}")
         outs.append(data)
         time.sleep(2.5)

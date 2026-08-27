@@ -24,6 +24,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -31,6 +32,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts", "discovery"))
 
 import provenance as P  # noqa: E402
 import run_multilane as R  # noqa: E402
+import discover as D  # noqa: E402
 
 FAILURES = 0
 
@@ -507,6 +509,50 @@ def _litellm_is_not_billed():
 check("the litellm lane does not spend the operator's money", _litellm_is_not_billed)
 
 
+def _shodan_minimized_and_errors_sanitized():
+    original = D.http_json
+    seen = {}
+
+    def small(url, **kwargs):
+        seen["url"] = url
+        seen["cap"] = kwargs.get("max_response_bytes")
+        return 200, {
+            "total": 1,
+            "matches": [{
+                "ip_str": "93.184.216.34",
+                "port": 11434,
+                "timestamp": iso(1),
+                "location": {"country_code": "US"},
+            }],
+        }
+
+    try:
+        D.http_json = small
+        rows, _, _, total = D.shodan_search("secret", "product:Ollama", 1)
+        query = seen["url"].split("?", 1)[1]
+        params = urllib.parse.parse_qs(query)
+        assert params["minify"] == ["true"]
+        assert "data" not in params["fields"][0]
+        assert "ollama" not in params["fields"][0]
+        assert seen["cap"] == 256 * 1024
+        assert rows[0]["timestamp"] and total == 1
+
+        hostile = "93.184.216.34 SECRET-MODEL-CONTENT"
+        D.http_json = lambda *_args, **_kwargs: (200, hostile)
+        try:
+            D.shodan_search("secret", "product:Ollama", 1)
+            raise AssertionError("malformed Shodan response was accepted")
+        except SystemExit as exc:
+            message = str(exc)
+            assert hostile not in message
+            assert "response=text length=" in message
+    finally:
+        D.http_json = original
+
+
+check("Shodan data is minimized and failure logs cannot disclose response content", _shodan_minimized_and_errors_sanitized)
+
+
 def _no_redirect_following():
     """
     I-6, off-Worker. The Worker has enforced redirect:"manual" since it shipped;
@@ -514,8 +560,6 @@ def _no_redirect_following():
     opener, which follows 3xx silently — so a probed host could aim our next GET
     at an address in no public index (I-22), at a path nobody reviewed (I-2).
     """
-    import discover as D
-
     handler = D._NO_REDIRECT_OPENER.handle_error.get("http", {})
     assert D.http_json.__code__.co_names.count("urlopen") == 0, (
         "http_json is back on the default opener, which follows redirects"
@@ -535,8 +579,6 @@ def _probe_agent_is_the_published_one():
     LeakyCompute-SafeProbe; the runner's own USER_AGENT constant was never
     referenced, so probes went out under a different name entirely.
     """
-    import discover as D
-
     assert D.PROBE_USER_AGENT.startswith("LeakyCompute-SafeProbe/")
     assert R.USER_AGENT == D.PROBE_USER_AGENT, "the runner probes under a different name"
     page = open(os.path.join(ROOT, "public", "scanning.html")).read()

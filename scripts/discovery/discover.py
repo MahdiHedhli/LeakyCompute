@@ -121,6 +121,7 @@ def http_json(
     data: dict | None = None,
     headers: dict | None = None,
     timeout: float = 30.0,
+    max_response_bytes: int = MAX_RESPONSE_BYTES,
 ) -> tuple[int | None, Any]:
     body = None if data is None else json.dumps(data).encode()
     hdrs = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -134,7 +135,7 @@ def http_json(
         # third-party target or talks to our own API; neither needs to be
         # redirected, and a flag is one edit away from the target choosing.
         with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as resp:
-            raw = resp.read(MAX_RESPONSE_BYTES + 1)[:MAX_RESPONSE_BYTES].decode(
+            raw = resp.read(max_response_bytes + 1)[:max_response_bytes].decode(
                 "utf-8", errors="replace"
             )
             try:
@@ -143,7 +144,7 @@ def http_json(
                 return resp.status, raw
     except urllib.error.HTTPError as e:
         raw = (
-            e.read(MAX_RESPONSE_BYTES + 1)[:MAX_RESPONSE_BYTES].decode(
+            e.read(max_response_bytes + 1)[:max_response_bytes].decode(
                 "utf-8", errors="replace"
             )
             if e.fp
@@ -155,6 +156,18 @@ def http_json(
             return e.code, raw
     except Exception as e:
         return None, str(e)
+
+
+def payload_shape(payload: Any) -> str:
+    """Describe an API response without logging its untrusted contents."""
+    if isinstance(payload, dict):
+        keys = sorted(str(key)[:40] for key in payload.keys())[:20]
+        return f"object keys={keys}"
+    if isinstance(payload, list):
+        return f"array length={len(payload)}"
+    if isinstance(payload, str):
+        return f"text length={len(payload)}"
+    return type(payload).__name__
 
 
 def probe_ollama(ip: str, port: int, timeout: float, limiter: GlobalRateLimiter) -> dict:
@@ -215,13 +228,28 @@ def shodan_search(
     index_total = None
     page = max(1, int(start_page))
     while len(out) < limit:
-        params: dict[str, Any] = {"key": api_key, "query": query, "page": page}
+        params: dict[str, Any] = {
+            "key": api_key,
+            "query": query,
+            "page": page,
+            "minify": "true",
+            # Shodan banners can contain entire model configurations and other
+            # operator data. Request only the fields needed to nominate and
+            # contextualise a candidate; never download or log banner bodies.
+            "fields": (
+                "ip_str,port,asn,org,isp,product,version,timestamp,"
+                "location.city,location.country_code,location.country_name,"
+                "location.latitude,location.longitude"
+            ),
+        }
         if facets and page == 1:
             params["facets"] = facets
         url = "https://api.shodan.io/shodan/host/search?" + urllib.parse.urlencode(params)
-        status, data = http_json(url, timeout=60)
+        status, data = http_json(url, timeout=60, max_response_bytes=256 * 1024)
         if status != 200 or not isinstance(data, dict):
-            raise SystemExit(f"Shodan search failed: HTTP {status} {data}")
+            raise SystemExit(
+                f"Shodan search failed: HTTP {status}; response={payload_shape(data)}"
+            )
         # `total` rides on every page, not just the first. Reading it only in
         # the page==1 branch left it None for every lane that resumed from a
         # cursor — which is every lane after the first run.
@@ -254,6 +282,8 @@ def shodan_search(
                     "isp": m.get("isp"),
                     "asn": asn,
                     "product": (m.get("product") or ""),
+                    "version": (m.get("version") or ""),
+                    "timestamp": m.get("timestamp"),
                     "country": loc.get("country_name"),
                     "country_code": loc.get("country_code"),
                     "city": loc.get("city"),
