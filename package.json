@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Defensive exposed-AI research instrument (Worker + static UIs)",
   "scripts": {
-    "test": "npm run test:supply-chain && node worker/test/target.test.mjs && node worker/test/access.test.mjs && node worker/test/pages-bridge.test.mjs && node worker/test/probe.test.mjs && node worker/test/osv.test.mjs && node worker/test/exclusions.test.mjs && node worker/test/worker.test.mjs && node worker/test/stats_isolation.test.mjs && node worker/test/retention.test.mjs && node worker/test/routes.test.mjs && node worker/test/noproxy.test.mjs && node worker/test/provenance.test.mjs",
+    "test": "npm run test:supply-chain && node worker/test/target.test.mjs && node worker/test/access.test.mjs && node worker/test/pages-bridge.test.mjs && node worker/test/probe.test.mjs && node worker/test/osv.test.mjs && node worker/test/exclusions.test.mjs && node worker/test/worker.test.mjs && node worker/test/stats_isolation.test.mjs && node worker/test/retention.test.mjs && node worker/test/routes.test.mjs && node worker/test/noproxy.test.mjs && node worker/test/provenance.test.mjs && node worker/test/control_plane.test.mjs",
     "test:supply-chain": "node scripts/check_supply_chain.mjs",
     "dev:worker": "wrangler dev",
     "deploy:worker": "wrangler deploy",

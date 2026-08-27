@@ -85,6 +85,30 @@ function inPrefix(value, base, prefixBits, totalBits) {
   return value >> shift === base >> shift;
 }
 
+function canonicalIpv6(words) {
+  // A unique storage form prevents equivalent IPv6 spellings from acquiring
+  // independent cooldown leases. Display compression is deliberately separate.
+  return words.map((word) => word.toString(16).padStart(4, "0")).join(":");
+}
+
+export function canonicalizeIp(text) {
+  const source = String(text || "").trim().toLowerCase().replace(/^\[|\]$/g, "");
+  const v4 = parseIpv4(source);
+  if (v4) return v4.bytes.join(".");
+  const v6 = parseIpv6(source);
+  return v6 ? canonicalIpv6(v6.words) : null;
+}
+
+/** Conservative neighbourhood bucket used by the durable probe gate. */
+export function addressBucket(text) {
+  const canonical = canonicalizeIp(text);
+  if (!canonical) return null;
+  const v4 = parseIpv4(canonical);
+  if (v4) return `${v4.bytes[0]}.${v4.bytes[1]}.${v4.bytes[2]}.0/24`;
+  const v6 = parseIpv6(canonical);
+  return `${v6.words.slice(0, 3).map((word) => word.toString(16)).join(":")}::/48`;
+}
+
 const IPV4_SPECIAL = [
   ["0.0.0.0", 8],       // current network / unspecified
   ["10.0.0.0", 8],      // private
@@ -150,8 +174,9 @@ export function validateTarget(host) {
     return { ok: false, error: "invalid_target" };
   }
 
-  if (parseIpv4(h) || parseIpv6(h)) {
-    return { ok: true, host: h, kind: "ip" };
+  const canonical = canonicalizeIp(h);
+  if (canonical) {
+    return { ok: true, host: canonical, kind: "ip" };
   }
 
   const looksLikeHostname =

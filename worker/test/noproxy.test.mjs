@@ -310,6 +310,8 @@ const RELAY_TOKENS = [
   // `return new Response(upstream.body)` is the canonical two-line proxy. Every
   // Response we construct is built from our own serialised data instead.
   const RESPONSE_INVENTORY = {
+    // Internal Durable Object protocol; body is always JSON.stringify(body).
+    "worker/src/control_plane.js": ["JSON.stringify(body)"],
     "worker/src/lib/cors.js": [
       "JSON.stringify(data, null, 0)",
       "JSON.stringify(data, null, 0)",

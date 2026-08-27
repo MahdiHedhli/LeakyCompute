@@ -4,7 +4,8 @@
  * Lab:     GET /v1/research/me, GET /v1/research/catalog,
  *          GET /v1/research/lab/{catalog,map,validation,host}
  * Admin:   POST /v1/admin/allowlist, /v1/admin/exclusions,
- *          /v1/admin/discovery/{ingest,sweep}; GET /v1/admin/exclusions,
+ *          /v1/admin/discovery/{ingest,sweep,lease,permit,complete};
+ *          GET /v1/admin/exclusions, /v1/admin/control/health,
  *          /v1/admin/discovery/hits
  * Cron:    I-26 retention sweep (see scheduled() and [triggers] in wrangler.toml)
  *
@@ -57,6 +58,7 @@ import {
 } from "./lib/discovery.js";
 import { enrichServicesWithOsv } from "./lib/osv.js";
 import { routeLab } from "./lib/lab.js";
+export { DiscoveryControlPlane } from "./control_plane.js";
 
 // Embedded compact snapshot meta (full catalog served from Pages/lab static seed)
 const SNAPSHOT_NOTE =
@@ -157,6 +159,25 @@ export default {
 
       if (path === "/v1/admin/discovery/cursors" && request.method === "POST") {
         return handleSetCursor(request, env);
+      }
+
+      // Dark control-plane routes. They can persist/consume permission state,
+      // but neither route sends a target request and both production traffic
+      // kill switches remain off.
+      if (path === "/v1/admin/control/health" && request.method === "GET") {
+        return handleControlHealth(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/lease" && request.method === "POST") {
+        return handleControlPost(request, env, "/lease/acquire");
+      }
+
+      if (path === "/v1/admin/discovery/permit" && request.method === "POST") {
+        return handleControlPost(request, env, "/permit/consume");
+      }
+
+      if (path === "/v1/admin/discovery/complete" && request.method === "POST") {
+        return handleControlPost(request, env, "/lease/complete");
       }
 
       return json({ error: "not_found" }, 404, request, env);
@@ -714,6 +735,62 @@ function requireAdmin(request, env) {
   return !!(expected && token && token === expected);
 }
 
+function controlStub(env) {
+  if (!env.DISCOVERY_CONTROL) return null;
+  const id = env.DISCOVERY_CONTROL.idFromName("global");
+  return env.DISCOVERY_CONTROL.get(id);
+}
+
+async function controlCall(env, path, { method = "POST", body } = {}) {
+  const stub = controlStub(env);
+  if (!stub) return { status: 503, body: { error: "control_plane_unavailable" } };
+  const response = await stub.fetch(`https://control.internal${path}`, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = { error: "invalid_control_plane_response" };
+  }
+  return { status: response.status, body: payload };
+}
+
+async function handleControlHealth(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const result = await controlCall(env, "/health", { method: "GET" });
+  return json(result.body, result.status, request, env);
+}
+
+async function handleControlPost(request, env, path) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  if (env.CONTROL_PLANE_READY !== "true") {
+    return json(
+      {
+        error: "control_plane_not_ready",
+        message: "Strong-state migration and verification have not completed.",
+      },
+      503,
+      request,
+      env
+    );
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400, request, env);
+  }
+  const result = await controlCall(env, path, { body });
+  return json(result.body, result.status, request, env);
+}
+
 async function handleAdminAllowlist(request, env) {
   if (!requireAdmin(request, env)) {
     await logAbuse(env, {
@@ -790,11 +867,38 @@ async function handleAdminExclusions(request, env) {
     allowBroad: !!body.allow_broad,
   });
 
+  // During the dark migration KV remains the live authority, but every newly
+  // accepted exclusion is mirrored into the strong control plane immediately.
+  // A mirror failure is reported; it never rolls back the already-active KV
+  // exclusion while target traffic is disabled.
+  let control_plane = { ok: true, accepted: 0 };
+  if (result.accepted.length) {
+    try {
+      const mirrored = await controlCall(env, "/exclusions/add", {
+        body: {
+          entries: result.accepted,
+          meta: {
+            issue_number: body.issue_number ?? null,
+            source: body.source || "removal-request",
+          },
+        },
+      });
+      control_plane = {
+        ok: mirrored.status >= 200 && mirrored.status < 300 && mirrored.body.ok !== false,
+        status: mirrored.status,
+        accepted: mirrored.body.accepted?.length || 0,
+        error: mirrored.body.error || null,
+      };
+    } catch (error) {
+      control_plane = { ok: false, accepted: 0, error: String(error?.message || error) };
+    }
+  }
+
   const purged = await purgeExcludedRecords(env);
 
   // Rejected lines are reported, never silently dropped: an operator who
   // fat-fingers a CIDR must find out, not assume they are excluded.
-  return json({ ok: true, ...result, purged }, 200, request, env);
+  return json({ ok: true, ...result, control_plane, purged }, 200, request, env);
 }
 
 /**

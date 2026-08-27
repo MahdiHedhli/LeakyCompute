@@ -3,7 +3,12 @@
  * single forgotten special-purpose prefix turns /v1/check into an SSRF path.
  */
 import assert from "node:assert/strict";
-import { isPrivateOrLocal, validateTarget } from "../src/lib/check.js";
+import {
+  addressBucket,
+  canonicalizeIp,
+  isPrivateOrLocal,
+  validateTarget,
+} from "../src/lib/check.js";
 
 let failures = 0;
 function check(name, fn) {
@@ -103,6 +108,20 @@ for (const target of ["::::", "1::2::3", "fe80::1%eth0", "256.1.1.1"] ) {
     assert.equal(validateTarget(target).ok, false);
   });
 }
+
+console.log("\n[T5] equivalent address spellings share one durable identity");
+check("compressed and expanded IPv6 canonicalize identically", () => {
+  assert.equal(
+    canonicalizeIp("2606:4700:4700::1111"),
+    canonicalizeIp("2606:4700:4700:0:0:0:0:1111")
+  );
+});
+check("IPv4 neighbourhoods are /24", () => {
+  assert.equal(addressBucket("8.8.8.10"), "8.8.8.0/24");
+});
+check("IPv6 neighbourhoods are /48", () => {
+  assert.equal(addressBucket("2606:4700:4700::1111"), "2606:4700:4700::/48");
+});
 
 if (failures) {
   console.error(`\n${failures} target-boundary assertion(s) failed`);

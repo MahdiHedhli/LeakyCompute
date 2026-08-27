@@ -29,7 +29,7 @@ decisions and must stay separate in code, documentation, and metrics.
 This decision determines whether the large storage/control-plane project in
 section 1b is necessary.
 
-### Option A — passive and local-first (accepted 2026-08-25)
+### Option A — passive and local-first (accepted 2026-08-25; current runtime)
 
 Keep internet measurement to index-derived counts and comparisons. Keep live
 checks inside infrastructure the operator controls. Retire dormant active paths
@@ -39,11 +39,13 @@ This is the selected path. The decision and its code-retirement consequences are
 recorded in
 [`decisions/0001-passive-local-first.md`](decisions/0001-passive-local-first.md).
 
-### Option B — restore governed active re-verification (not selected)
+### Option B — restore governed active re-verification (selected for implementation 2026-08-27)
 
 Retain the public-index provenance rule and read-only metadata probes, but rebuild
-the state model before sending traffic again. Choosing this option authorizes a
-design phase, not a probe run.
+the state model before sending traffic again. The implementation decision is
+recorded in
+[`decisions/0002-governed-active-measurement.md`](decisions/0002-governed-active-measurement.md).
+This authorizes design, migration, and dark deployment—not a probe run.
 
 **What would make this step wrong:** allowing the existing dormant runner to
 become the de facto decision. It remains fail-closed until the choice and its

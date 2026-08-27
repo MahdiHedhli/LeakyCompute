@@ -12,6 +12,16 @@ preview_urls = false
 [observability]
 enabled = true
 
+# Dark control plane for governed active measurement. The existing traffic kill
+# switches stay authoritative until migration and the re-enable suite complete.
+[[durable_objects.bindings]]
+name = "DISCOVERY_CONTROL"
+class_name = "DiscoveryControlPlane"
+
+[[migrations]]
+tag = "discovery-control-v1"
+new_sqlite_classes = ["DiscoveryControlPlane"]
+
 # Staged perimeter migration: keep workers.dev until every public/lab consumer
 # has moved to this hostname and the new route passes end-to-end verification.
 [[routes]]
@@ -32,6 +42,11 @@ ENVIRONMENT = "production"
 # the hosted checker off until requests go through a trusted resolver/pinning
 # probe service; otherwise every result is a platform-shaped false negative.
 HOSTED_CHECKS_ENABLED = "false"
+# These are separate kill switches. A dark control-plane deployment must not
+# make either the runner or the external probe service reachable by accident.
+ACTIVE_DISCOVERY_ENABLED = "false"
+PROBE_SERVICE_ENABLED = "false"
+CONTROL_PLANE_READY = "false"
 # Comma-separated allowed browser origins (GitHub Pages + Pages lab + localhost)
 ALLOWED_ORIGINS = "http://localhost:8787,http://127.0.0.1:8787,http://localhost:5500,http://127.0.0.1:5500,https://mahdihedhli.github.io,https://leakycompute.mahdihedhli.com,https://leakycompute-lab.pages.dev"
 # Research snapshot (archive seed) — dual counter "C"

@@ -127,6 +127,12 @@ const ADMIN_ROUTES = [
   // so it is not something an unauthenticated caller may read or move.
   { method: "GET", path: "/v1/admin/discovery/cursors" },
   { method: "POST", path: "/v1/admin/discovery/cursors", body: { lane: "ollama", page: 2 } },
+  // Dark control plane. These routes mutate permission state but cannot emit a
+  // target request; they are still admin-only because they carry raw addresses.
+  { method: "GET", path: "/v1/admin/control/health" },
+  { method: "POST", path: "/v1/admin/discovery/lease", body: {} },
+  { method: "POST", path: "/v1/admin/discovery/permit", body: {} },
+  { method: "POST", path: "/v1/admin/discovery/complete", body: {} },
 ];
 
 /* ------------------------------------------------------------------ */
