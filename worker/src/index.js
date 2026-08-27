@@ -55,9 +55,16 @@ import {
   reconcileCorpusCounts,
   RECONCILE_ADMIN_MAX_SCAN,
   RETENTION_DAYS,
+  migrationHostPage,
+  migrationAttemptPage,
 } from "./lib/discovery.js";
 import { enrichServicesWithOsv } from "./lib/osv.js";
 import { routeLab } from "./lib/lab.js";
+import {
+  completionOutcome,
+  runDiscoveryPermit,
+  runHostedPermit,
+} from "./lib/socket_probe.js";
 export { DiscoveryControlPlane } from "./control_plane.js";
 
 // Embedded compact snapshot meta (full catalog served from Pages/lab static seed)
@@ -168,6 +175,60 @@ export default {
         return handleControlHealth(request, env);
       }
 
+      if (path === "/v1/admin/control/migrate" && request.method === "POST") {
+        return handleControlMigration(request, env);
+      }
+
+      if (path === "/v1/admin/control/reconcile" && request.method === "POST") {
+        return handleControlMaintenance(request, env, "/reconcile/run");
+      }
+
+      if (path === "/v1/admin/control/retention" && request.method === "POST") {
+        return handleControlMaintenance(request, env, "/retention/run");
+      }
+
+      if (path === "/v1/admin/control/purge" && request.method === "POST") {
+        return handleControlMaintenance(request, env, "/purge/resume");
+      }
+
+      if (path === "/v1/admin/control/hosts" && request.method === "GET") {
+        return handleControlPage(request, env, "/hosts/page");
+      }
+
+      if (path === "/v1/admin/control/hosts" && request.method === "POST") {
+        return handleControlMaintenance(request, env, "/hosts/upsert");
+      }
+
+      if (path === "/v1/admin/control/attempts/import" && request.method === "POST") {
+        return handleControlMaintenance(request, env, "/attempts/import");
+      }
+
+      if (path === "/v1/admin/control/attempts" && request.method === "GET") {
+        return handleControlPage(request, env, "/attempts/page");
+      }
+
+      if (path === "/v1/admin/control/expiring" && request.method === "GET") {
+        return handleControlPage(request, env, "/hosts/expiring");
+      }
+
+      if (path === "/v1/admin/control/retire" && request.method === "POST") {
+        return handleControlMaintenance(request, env, "/hosts/retire");
+      }
+
+      if (path === "/v1/admin/control/canary" && request.method === "POST") {
+        return handleOwnedCanary(request, env);
+      }
+
+      if (path === "/v1/admin/control/exclusions" && request.method === "POST") {
+        return handleControlMaintenance(request, env, "/exclusions/add");
+      }
+
+      if (path === "/v1/admin/control/aggregates" && request.method === "GET") {
+        if (!requireAdmin(request, env)) return json({ error: "unauthorized" }, 401, request, env);
+        const result = await controlCall(env, "/aggregates/current", { method: "GET" });
+        return json(result.body, result.status, request, env);
+      }
+
       if (path === "/v1/admin/discovery/lease" && request.method === "POST") {
         return handleControlPost(request, env, "/lease/acquire");
       }
@@ -178,6 +239,10 @@ export default {
 
       if (path === "/v1/admin/discovery/complete" && request.method === "POST") {
         return handleControlPost(request, env, "/lease/complete");
+      }
+
+      if (path === "/v1/admin/discovery/probe" && request.method === "POST") {
+        return handleDiscoveryProbe(request, env);
       }
 
       return json({ error: "not_found" }, 404, request, env);
@@ -203,6 +268,22 @@ export default {
    * the cron is what makes 180 days a deletion rather than an intention.
    */
   async scheduled(event, env, ctx) {
+    if (env.CONTROL_PLANE_READY === "true" && env.DISCOVERY_CONTROL) {
+      ctx.waitUntil((async () => {
+        const retention = await controlCall(env, "/retention/run", { body: {} });
+        if (retention.status !== 200 || retention.body.ok === false) {
+          throw new Error(`durable retention failed: ${retention.body.error || retention.status}`);
+        }
+        let reconciliation;
+        do {
+          reconciliation = await controlCall(env, "/reconcile/run", { body: { limit: 500 } });
+          if (reconciliation.status !== 200 || reconciliation.body.ok === false) {
+            throw new Error(`durable reconciliation failed: ${reconciliation.body.error || reconciliation.status}`);
+          }
+        } while (!reconciliation.body.complete && !reconciliation.body.restarted);
+      })().catch((err) => console.error("durable maintenance failed:", err?.message || err)));
+      return;
+    }
     // The sweep is bounded per invocation (KV operations count against the
     // Worker's subrequest ceiling) and resumes from a stored cursor, so a
     // corpus larger than one window is walked over successive nights rather
@@ -283,7 +364,15 @@ async function handleStats(request, env) {
   }
 
   const live = await getLiveStats(env);
-  const payload = await publicStatsPayload(env, live);
+  let authoritative = null;
+  if (env.CONTROL_PLANE_READY === "true") {
+    const aggregate = await controlCall(env, "/aggregates/current", { method: "GET" });
+    if (aggregate.status !== 200 || aggregate.body.ok === false) {
+      return publicJson({ error: "stats_temporarily_unavailable" }, 503);
+    }
+    authoritative = aggregate.body;
+  }
+  const payload = await publicStatsPayload(env, live, { authoritative });
   payload.methodology = SNAPSHOT_NOTE;
   return publicJson(payload, 200, {
     "Cache-Control": "public, max-age=30",
@@ -301,22 +390,35 @@ function clientIp(request) {
 }
 
 async function handleCheck(request, env, ctx) {
+  const legacyTestTransport =
+    env.ENVIRONMENT !== "production" && env.LEGACY_TEST_TRANSPORT === "true";
   // Cloudflare Workers' global fetch cannot target IP literals directly. The
   // default self-check target is the caller's IP, so enabling this without a
   // separate address-pinning probe service produces universal false negatives.
   // Fail visibly instead of presenting a platform refusal as a clean result.
-  if (env.HOSTED_CHECKS_ENABLED !== "true") {
+  if (
+    env.HOSTED_CHECKS_ENABLED !== "true" ||
+    env.PROBE_SERVICE_ENABLED !== "true" ||
+    env.CONTROL_PLANE_READY !== "true"
+  ) {
+    if (legacyTestTransport && env.HOSTED_CHECKS_ENABLED === "true") {
+      // Unit/integration fixtures below use localhost HTTP servers. This branch
+      // is unreachable in production and exists only to retain those tests
+      // while production uses cloudflare:sockets.
+    } else {
     return json(
       {
         error: "hosted_checks_temporarily_disabled",
         message:
-          "Hosted checks are temporarily disabled because this deployment cannot " +
-          "reliably connect to IP-literal targets. Use the local defensive CLI for infrastructure you control.",
+          "Hosted checks are temporarily disabled until the durable permission " +
+          "ledger and address-pinned probe runtime are both ready. Use the local " +
+          "defensive CLI for infrastructure you control.",
       },
       503,
       request,
       env
     );
+    }
   }
 
   const ip = clientIp(request);
@@ -467,83 +569,90 @@ async function handleCheck(request, env, ctx) {
     ports.ollama = body.port;
   }
 
-  // Rate limits
-  const ownWin = intEnv(env, "RL_OWN_WINDOW_SEC", 900);
-  const ownMax = intEnv(env, "RL_OWN_MAX", 5);
-  const ownDay = intEnv(env, "RL_OWN_DAY_MAX", 20);
-  const ovWin = intEnv(env, "RL_OVERRIDE_WINDOW_SEC", 900);
-  const ovMax = intEnv(env, "RL_OVERRIDE_MAX", 2);
-  const ovDay = intEnv(env, "RL_OVERRIDE_DAY_MAX", 5);
-  const gDay = intEnv(env, "RL_GLOBAL_DAY_MAX", 2000);
-
-  const global = await consume(env, "global:check", gDay, 86400);
-  if (!global.ok) {
-    await logAbuse(env, {
-      action: "check",
-      result: "rate_limited_global",
-      clientIp: ip,
-      override,
-    });
-    return json({ error: "rate_limited", scope: "global", reset: global.reset }, 429, request, env);
-  }
-
-  if (mode === "own_ip") {
-    const w = await consume(env, `own:${ip}`, ownMax, ownWin);
-    const d = await consume(env, `own_day:${ip}`, ownDay, 86400);
-    if (!w.ok || !d.ok) {
-      await logAbuse(env, {
-        action: "check",
-        result: "rate_limited_own",
-        clientIp: ip,
-      });
-      return json(
-        { error: "rate_limited", scope: "own_ip", reset: (!w.ok ? w.reset : d.reset) },
-        429,
-        request,
-        env
-      );
-    }
-  } else {
-    const w = await consume(env, `ov:${ip}`, ovMax, ovWin);
-    const d = await consume(env, `ov_day:${ip}`, ovDay, 86400);
-    if (!w.ok || !d.ok) {
-      await logAbuse(env, {
-        action: "check",
-        result: "rate_limited_override",
-        clientIp: ip,
-        target: targetHost,
-        override: true,
-      });
-      return json(
-        { error: "rate_limited", scope: "override", reset: (!w.ok ? w.reset : d.reset) },
-        429,
-        request,
-        env
-      );
-    }
-  }
-
-  const run = await runChecks(targetHost, { services, ports, timeoutMs });
-  if (!run.ok) {
-    return json(
-      {
-        error: run.error,
-        service: run.service,
-        allowed_ports: run.allowed,
-        message:
-          "Only the known AI service ports are accepted. This checker is not a general-purpose port prober.",
-      },
-      400,
-      request,
-      env
+  // Each service gets its own pre-committed lease and one-time permit. The
+  // permit is consumed immediately before the TCP socket opens, so a crash,
+  // replay, late opt-out, or overlapping request cannot emit unaccounted
+  // traffic. The destination and path come back from the durable authority.
+  let rawResults;
+  if (legacyTestTransport) {
+    const global = await consume(env, "global:check", intEnv(env, "RL_GLOBAL_DAY_MAX", 800), 86400);
+    const window = await consume(
+      env,
+      `own:${ip}`,
+      intEnv(env, "RL_OWN_MAX", 3),
+      intEnv(env, "RL_OWN_WINDOW_SEC", 900)
     );
+    const daily = await consume(env, `own_day:${ip}`, intEnv(env, "RL_OWN_DAY_MAX", 12), 86400);
+    if (!global.ok || !window.ok || !daily.ok) {
+      return json({ error: "rate_limited", scope: global.ok ? "own_ip" : "global" }, 429, request, env);
+    }
+    const legacyRun = await runChecks(targetHost, { services, ports, timeoutMs });
+    if (!legacyRun.ok) {
+      return json({
+        error: legacyRun.error,
+        service: legacyRun.service,
+        allowed_ports: legacyRun.allowed,
+      }, 400, request, env);
+    }
+    rawResults = legacyRun.results;
+  } else {
+  const probeOne = async (service) => {
+    const lease = await controlCall(env, "/lease/acquire", {
+      body: {
+        purpose: "hosted_self",
+        ip: targetHost,
+        asn: request.cf?.asn || null,
+        service,
+        port: ports[service],
+      },
+    });
+    if (lease.status !== 200) return { gate: lease };
+    const consumed = await controlCall(env, "/permit/consume", {
+      body: { permit_id: lease.body.permit_id },
+    });
+    if (consumed.status !== 200) return { gate: consumed };
+    const run = await runHostedPermit(consumed.body, { timeoutMs });
+    const result = run.result || {
+      service,
+      port: consumed.body.port,
+      detected: false,
+      exposed: false,
+      error: run.error || "probe_runtime_failed",
+      error_class: run.error_class || "platform_error",
+      findings: [],
+      remediation: [],
+    };
+    const outcome = completionOutcome(result);
+    await controlCall(env, "/lease/complete", {
+      body: { lease_id: consumed.body.lease_id, outcome },
+    });
+    return { result, outcome };
+  };
+
+  const runs = [];
+  for (const service of services) {
+    const item = await probeOne(service);
+    if (item.gate) {
+      const error = item.gate.body?.error || "probe_permission_denied";
+      if (item.gate.status === 429) {
+        return json({ error: "rate_limited", scope: item.gate.body.scope }, 429, request, env);
+      }
+      return json({ error, message: "No target traffic was sent." }, item.gate.status, request, env);
+    }
+    runs.push(item);
+  }
+    rawResults = runs.map((item) => item.result);
   }
 
   // Tier-2: attach OSV.dev vulns when we have a confirmed version string.
   // enrichServicesWithOsv also merges top hits into svc.findings, so
   // overallSeverity() already reflects version-aware CVE/GHSA severity.
-  const results = await enrichServicesWithOsv(run.results, env);
+  const results = await enrichServicesWithOsv(rawResults, env);
   const anyExposed = results.some((r) => r.exposed);
+  const platformFailure = results.some((r) =>
+    r.error_class === "platform_error" || r.error_class === "authorization_error"
+  );
+  const inconclusive = platformFailure || results.some((r) => r.error_class === "target_error");
   const severity = overallSeverity(results);
   const ollama = results.find((r) => r.service === "ollama");
 
@@ -560,7 +669,7 @@ async function handleCheck(request, env, ctx) {
     }),
     logAbuse(env, {
       action: "check",
-      result: anyExposed ? "exposed" : "not_exposed",
+      result: anyExposed ? "exposed" : inconclusive ? "inconclusive" : "not_exposed",
       clientIp: ip,
       target: mode === "override" ? targetHost : null,
       override: mode === "override",
@@ -582,8 +691,28 @@ async function handleCheck(request, env, ctx) {
   // parallel writes for the same host would read the same `prev` and clobber
   // each other. Collapse every exposed service into a single write.
   const exposedServices = results.filter((r) => r.exposed);
+  if (exposedServices.length && !legacyTestTransport) {
+    const authoritative = await controlCall(env, "/hosts/upsert", {
+      body: {
+        records: [{
+          ip: targetHost,
+          port: exposedServices[0].port,
+          ports: exposedServices.map((r) => r.port),
+          stack: exposedServices[0].service,
+          stacks: exposedServices.map((r) => r.service),
+          source: "public_self_check",
+          asn: request.cf?.asn || null,
+          last_seen: new Date().toISOString(),
+        }],
+      },
+    });
+    if (authoritative.status !== 200 || authoritative.body.accepted !== 1) {
+      return json({ error: "result_storage_failed", result_preserved: false }, 503, request, env);
+    }
+  }
   if (exposedServices.length) {
-    // Store the probed host (client IP for own mode, target for override)
+    // Store the probed host in KV as a compatibility cache for the lab during
+    // the cutover. Durable SQLite above is authoritative in production.
     tasks.push(
       recordExposedHost(env, {
         ip: targetHost,
@@ -607,10 +736,13 @@ async function handleCheck(request, env, ctx) {
       checked_at: new Date().toISOString(),
       overall_severity: severity,
       any_exposed: anyExposed,
+      conclusive: !inconclusive,
       services: results,
       guidance: anyExposed
         ? "At least one AI service answered an unauthenticated read from the public internet. Work through the per-service remediation below."
-        : "No unauthenticated AI service responded from our vantage point.",
+        : inconclusive
+          ? "The check was inconclusive for at least one service. Do not treat this as a clean result; review the per-service errors or run the local checker."
+          : "No unauthenticated AI service responded from our vantage point.",
       limitations:
         "A clean result is not proof of safety. Probes originate from Cloudflare's network and cover only " +
         "the listed services on their known ports, so a filtered, rate-limited, or geo-blocked host looks " +
@@ -625,7 +757,7 @@ async function handleCheck(request, env, ctx) {
       models: ollama?.exposed ? ollama.models || [] : [],
       error: ollama?.error || null,
     },
-    200,
+    platformFailure ? 503 : 200,
     request,
     env
   );
@@ -759,11 +891,183 @@ async function controlCall(env, path, { method = "POST", body } = {}) {
 }
 
 async function handleControlHealth(request, env) {
-  if (!requireAdmin(request, env)) {
+  if (!requireControlMaintenance(request, env)) {
     return json({ error: "unauthorized" }, 401, request, env);
   }
   const result = await controlCall(env, "/health", { method: "GET" });
   return json(result.body, result.status, request, env);
+}
+
+function requireControlMaintenance(request, env) {
+  if (requireAdmin(request, env)) return true;
+  const supplied = request.headers.get("X-Migration-Token") || "";
+  const expected = env.CONTROL_MIGRATION_TOKEN || "";
+  return !!(supplied && expected && supplied === expected);
+}
+
+async function readJsonBody(request) {
+  try {
+    return await request.json();
+  } catch {
+    return {};
+  }
+}
+
+async function handleControlMaintenance(request, env, path) {
+  if (!requireControlMaintenance(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const result = await controlCall(env, path, { body: await readJsonBody(request) });
+  return json(result.body, result.status, request, env);
+}
+
+async function handleControlPage(request, env, path) {
+  if (!requireAdmin(request, env)) return json({ error: "unauthorized" }, 401, request, env);
+  if (env.CONTROL_PLANE_READY !== "true") {
+    return json({ error: "control_plane_not_ready" }, 503, request, env);
+  }
+  const url = new URL(request.url);
+  const query = new URLSearchParams();
+  if (url.searchParams.get("cursor")) query.set("cursor", url.searchParams.get("cursor"));
+  query.set("limit", String(Math.min(Number(url.searchParams.get("limit")) || 100, 500)));
+  if (url.searchParams.get("days")) query.set("days", url.searchParams.get("days"));
+  const result = await controlCall(env, `${path}?${query}`, { method: "GET" });
+  return json(result.body, result.status, request, env);
+}
+
+async function handleControlMigration(request, env) {
+  if (!requireControlMaintenance(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  const asked = await readJsonBody(request);
+  const statusResult = await controlCall(env, "/migration/status", { method: "GET" });
+  if (statusResult.status !== 200) return json(statusResult.body, statusResult.status, request, env);
+  const status = statusResult.body;
+
+  const exclusions = await loadExclusions(env);
+  const exclusionResult = await controlCall(env, "/exclusions/add", {
+    body: { entries: exclusions, meta: { source: "kv_migration" } },
+  });
+  if (exclusionResult.status !== 200) {
+    return json({ ok: false, phase: "exclusions", ...exclusionResult.body }, exclusionResult.status, request, env);
+  }
+  for (const job of exclusionResult.body.purge_jobs || []) {
+    if (job.status !== "complete") {
+      await controlCall(env, "/purge/resume", { body: { id: job.id, limit: 500 } });
+    }
+  }
+
+  let importedHosts = 0;
+  let importedAttempts = 0;
+  let hostsComplete = status.hosts_complete;
+  let attemptsComplete = status.attempts_complete;
+  let hostCursor = status.host_cursor || "";
+  let attemptCursor = status.attempt_cursor || "";
+
+  if (!hostsComplete) {
+    const page = await migrationHostPage(env, { cursor: hostCursor, limit: asked.host_limit || 40 });
+    if (page.records.length) {
+      const imported = await controlCall(env, "/hosts/upsert", { body: { records: page.records } });
+      if (imported.status !== 200) {
+        return json({ ok: false, phase: "hosts", ...imported.body }, imported.status, request, env);
+      }
+      importedHosts = Number(imported.body.accepted || 0);
+    }
+    hostCursor = page.next_cursor || hostCursor;
+    hostsComplete = page.complete;
+  }
+
+  if (!attemptsComplete) {
+    const page = await migrationAttemptPage(env, { cursor: attemptCursor, limit: asked.attempt_limit || 200 });
+    if (page.attempts.length) {
+      const imported = await controlCall(env, "/attempts/import", { body: { attempts: page.attempts } });
+      if (imported.status !== 200) {
+        return json({ ok: false, phase: "attempts", ...imported.body }, imported.status, request, env);
+      }
+      importedAttempts = Number(imported.body.imported || 0);
+    }
+    attemptCursor = page.next_cursor || attemptCursor;
+    attemptsComplete = page.complete;
+  }
+
+  const checkpoint = await controlCall(env, "/migration/checkpoint", {
+    body: {
+      host_cursor: hostCursor,
+      attempt_cursor: attemptCursor,
+      hosts_complete: hostsComplete,
+      attempts_complete: attemptsComplete,
+      imported_hosts: importedHosts,
+      imported_attempts: importedAttempts,
+    },
+  });
+
+  const reconciliation = await controlCall(env, "/reconcile/run", { body: { limit: 500 } });
+  const health = await controlCall(env, "/health", { method: "GET" });
+  let completion = null;
+  if (
+    checkpoint.body.hosts_complete && checkpoint.body.attempts_complete &&
+    reconciliation.body.complete && Number(health.body.pending_purges || 0) === 0
+  ) {
+    completion = await controlCall(env, "/migration/complete", {
+      body: {
+        expected_hosts: Number(health.body.hosts),
+        expected_attempts: Number(health.body.attempts),
+      },
+    });
+  }
+  return json({
+    ok: true,
+    phase: completion?.body?.ok ? "complete" : "migrating",
+    migration: checkpoint.body,
+    reconciliation: reconciliation.body,
+    control: health.body,
+    completion: completion?.body || null,
+  }, 200, request, env);
+}
+
+async function handleOwnedCanary(request, env) {
+  if (!requireControlMaintenance(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  if (env.CONTROL_PLANE_READY !== "true" || env.CANARY_PROBE_ENABLED !== "true") {
+    return json({ error: "owned_canary_disabled" }, 503, request, env);
+  }
+  const ip = String(env.CANARY_TARGET_IP || "");
+  const lease = await controlCall(env, "/lease/acquire", {
+    body: {
+      purpose: "owned_canary",
+      ip,
+      asn: "AS-UNKNOWN",
+      service: "owned_canary",
+      port: 10000,
+    },
+  });
+  if (lease.status !== 200) return json(lease.body, lease.status, request, env);
+  const consumed = await controlCall(env, "/permit/consume", {
+    body: { permit_id: lease.body.permit_id },
+  });
+  if (consumed.status !== 200) return json(consumed.body, consumed.status, request, env);
+  const run = await runDiscoveryPermit(consumed.body, {
+    timeoutMs: Math.min(intEnv(env, "CHECK_TIMEOUT_MS", 2500), 5000),
+  });
+  const result = run.result || {
+    exposed: false,
+    answered: false,
+    error: run.error || "probe_runtime_failed",
+    error_class: run.error_class || "platform_error",
+  };
+  const markerOk = result.status === 200 && result.canary_marker === "owned";
+  const outcome = markerOk ? "exposed" : completionOutcome(result);
+  await controlCall(env, "/lease/complete", {
+    body: { lease_id: consumed.body.lease_id, outcome },
+  });
+  return json({
+    ok: markerOk,
+    canary: "operator_owned",
+    target_matched_configuration: consumed.body.ip === ip,
+    destination: { port: consumed.body.port, path: "/leakycompute-owned-canary" },
+    result,
+  }, markerOk ? 200 : 503, request, env);
 }
 
 async function handleControlPost(request, env, path) {
@@ -789,6 +1093,60 @@ async function handleControlPost(request, env, path) {
   }
   const result = await controlCall(env, path, { body });
   return json(result.body, result.status, request, env);
+}
+
+async function handleDiscoveryProbe(request, env) {
+  if (!requireAdmin(request, env)) return json({ error: "unauthorized" }, 401, request, env);
+  if (
+    env.CONTROL_PLANE_READY !== "true" ||
+    env.ACTIVE_DISCOVERY_ENABLED !== "true" ||
+    env.PROBE_SERVICE_ENABLED !== "true"
+  ) {
+    return json({ error: "active_discovery_temporarily_disabled" }, 503, request, env);
+  }
+  const body = await readJsonBody(request);
+  if (!body.permit_id) return json({ error: "permit_id_required" }, 400, request, env);
+  const consumed = await controlCall(env, "/permit/consume", {
+    body: { permit_id: body.permit_id },
+  });
+  if (consumed.status !== 200) return json(consumed.body, consumed.status, request, env);
+
+  const run = await runDiscoveryPermit(consumed.body, {
+    timeoutMs: intEnv(env, "CHECK_TIMEOUT_MS", 2500),
+  });
+  const result = run.result || {
+    exposed: false,
+    answered: false,
+    error: run.error || "probe_runtime_failed",
+    error_class: run.error_class || "platform_error",
+  };
+  const outcome = completionOutcome(result);
+  await controlCall(env, "/lease/complete", {
+    body: { lease_id: consumed.body.lease_id, outcome },
+  });
+
+  if (outcome === "exposed") {
+    await controlCall(env, "/hosts/upsert", {
+      body: {
+        records: [{
+          ip: consumed.body.ip,
+          port: consumed.body.port,
+          stack: consumed.body.service,
+          version: result.version || null,
+          source: `public_index:${consumed.body.provenance?.source || "unknown"}`,
+          index_observed_at: consumed.body.provenance?.observed_at || null,
+          asn: consumed.body.asn,
+          last_seen: new Date().toISOString(),
+        }],
+      },
+    });
+  }
+  return json({
+    ok: true,
+    lease_id: consumed.body.lease_id,
+    outcome,
+    result,
+  }, 200, request, env);
 }
 
 async function handleAdminAllowlist(request, env) {
@@ -872,11 +1230,12 @@ async function handleAdminExclusions(request, env) {
   // A mirror failure is reported; it never rolls back the already-active KV
   // exclusion while target traffic is disabled.
   let control_plane = { ok: true, accepted: 0 };
-  if (result.accepted.length) {
+  const authoritativeExclusions = await loadExclusions(env);
+  if (authoritativeExclusions.length) {
     try {
       const mirrored = await controlCall(env, "/exclusions/add", {
         body: {
-          entries: result.accepted,
+          entries: authoritativeExclusions,
           meta: {
             issue_number: body.issue_number ?? null,
             source: body.source || "removal-request",
@@ -888,7 +1247,25 @@ async function handleAdminExclusions(request, env) {
         status: mirrored.status,
         accepted: mirrored.body.accepted?.length || 0,
         error: mirrored.body.error || null,
+        purges: [],
       };
+      for (const job of mirrored.body.purge_jobs || []) {
+        let state = { job };
+        for (let i = 0; i < 20 && state.job?.status !== "complete"; i++) {
+          const step = await controlCall(env, "/purge/resume", {
+            body: { id: job.id, limit: 500 },
+          });
+          if (step.status !== 200) {
+            state = { job, error: step.body.error || `status_${step.status}` };
+            break;
+          }
+          state = step.body;
+        }
+        control_plane.purges.push(state);
+        if (state.job?.status !== "complete" || !state.receipt?.verified_zero_matches) {
+          control_plane.ok = false;
+        }
+      }
     } catch (error) {
       control_plane = { ok: false, accepted: 0, error: String(error?.message || error) };
     }

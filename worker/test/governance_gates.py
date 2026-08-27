@@ -139,6 +139,8 @@ check("'we probed it before' is not provenance", _circular)
 def _corpus_index_source():
     prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(1))
     assert prov and prov["index"] == "shodan", prov
+    current = P.provenance_from_corpus_source("public_index:shodan", iso(1))
+    assert current and current["index"] == "shodan", current
     ok, _ = eligible([cand("1.1.1.8", provenance=prov)])
     assert ok == ["1.1.1.8"], "a corpus row that names an index keeps its entitlement"
 
@@ -597,7 +599,13 @@ def _self_test_cli():
 check("--self-test drops every ineligible candidate before the plan is written", _self_test_cli)
 
 
-def _active_runner_suspended():
+def _active_runner_requires_governed_path():
+    try:
+        R.run_probes([], 0.1, 1, 1.0)
+        raise AssertionError("legacy run_probes unexpectedly remained callable")
+    except RuntimeError as exc:
+        assert "legacy_target_probe_disabled" in str(exc)
+
     proc = subprocess.run(
         [sys.executable, os.path.join(ROOT, "scripts", "discovery", "run_multilane.py"),
          "--ingest"],
@@ -606,11 +614,11 @@ def _active_runner_suspended():
         timeout=30,
         env={k: v for k, v in os.environ.items() if not k.startswith(("SHODAN", "LEAKY"))},
     )
-    assert proc.returncode != 0, "active runner unexpectedly became reachable"
-    assert "Active re-verification is suspended" in proc.stderr + proc.stdout
+    assert proc.returncode != 0, "active runner ran without its authenticated control plane"
+    assert "SHODAN_API_KEY required" in proc.stderr + proc.stdout
 
 
-check("active runner fails closed until attempts are durable before probes", _active_runner_suspended)
+check("legacy probing stays hard-disabled and active mode requires the governed path", _active_runner_requires_governed_path)
 
 
 # ---------------------------------------------------------------------------

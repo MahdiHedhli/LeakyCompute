@@ -114,7 +114,10 @@ def provenance_from_corpus_source(source, observed_at=None) -> dict | None:
     s = str(source or "").strip().lower()
     if not s:
         return None
-    head = s.split(":", 1)[0].split("_", 1)[0]
+    if s.startswith("public_index:"):
+        head = s.split(":", 2)[1]
+    else:
+        head = s.split(":", 1)[0].split("_", 1)[0]
     if head not in PUBLIC_INDEXES:
         return None
     return index_provenance(head, None, None, "corpus_record", observed_at)

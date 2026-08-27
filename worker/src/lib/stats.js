@@ -89,17 +89,29 @@ export async function putValidatedCatalog(env, catalog) {
   );
 }
 
-export async function publicStatsPayload(env, live) {
+export async function publicStatsPayload(env, live, { authoritative = null } = {}) {
   const snapshot_models = parseInt(env.SNAPSHOT_MODELS || "0", 10) || 0;
   const snapshot_hosts = parseInt(env.SNAPSHOT_HOSTS || "0", 10) || 0;
   // lazy import to avoid circular issues at module init
   const { getGeoStats, getCorpusCounts, getCountryStackStats, getVulnSummary, RETENTION_DAYS } =
     await import("./discovery.js");
   const { exposureClassCounts } = await import("./exposure.js");
-  const geo = await getGeoStats(env);
-  const countryStack = await getCountryStackStats(env);
+  const legacyGeo = await getGeoStats(env);
+  const legacyCountryStack = await getCountryStackStats(env);
   const vulnSummary = await getVulnSummary(env);
   const corpus = await getCorpusCounts(env);
+  const dimensions = authoritative?.dimensions || null;
+  const toSorted = (map, keyName, max = 50) => Object.entries(map || {})
+    .map(([key, count]) => ({ [keyName]: key, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, max);
+  const geo = dimensions ? {
+    by_country: toSorted(dimensions.country, "country"),
+    by_asn: toSorted(dimensions.asn, "asn"),
+    by_stack: toSorted(dimensions.stack, "stack"),
+  } : legacyGeo;
+  const countryStack = dimensions?.country_stack || legacyCountryStack;
+  const reverifiedHosts = dimensions?.corpus?.reverified_hosts ?? corpus.reverified_hosts ?? 0;
   return {
     // Spec §4: three provenance-separated numbers, never summed. They answer
     // different questions — what an archive once listed, what an index lists
@@ -137,10 +149,10 @@ export async function publicStatsPayload(env, live) {
     },
     reverified: {
       label: "Re-verified",
-      hosts: corpus.reverified_hosts || 0,
+      hosts: reverifiedHosts,
       window_days: RETENTION_DAYS,
       source: "read-only GET by us",
-      last_reverified_at: corpus.last_reverified_at || null,
+      last_reverified_at: authoritative?.completed_at || corpus.last_reverified_at || null,
       // Q-3 and Q-4 both bound this number; the card must carry them or the
       // reader takes it for the population.
       note:

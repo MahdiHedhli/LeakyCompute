@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { SERVICES } from "../src/lib/services.js";
+import { DISCOVERY_PROFILES, SERVICES } from "../src/lib/services.js";
 import { check, section, finish } from "./_harness.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -248,6 +248,16 @@ const FETCH_INVENTORY = {
     }
     assert.ok(calls >= 2, "expected the confirm and exposure probes to call safeGet");
   });
+
+  await check("the production TCP destination is the canonical consumed permit only", () => {
+    const socket = fs.readFileSync(path.join(WORKER_SRC, "lib", "socket_probe.js"), "utf8");
+    assert.match(socket, /import\("cloudflare:sockets"\)/);
+    assert.match(socket, /connect\(\s*\{ hostname: canonical, port: Number\(port\) \}/);
+    assert.match(socket, /canonical !== ip \|\| isPrivateOrLocal\(canonical\)/);
+    assert.match(socket, /resolvePort\(service, port\)/);
+    assert.match(socket, /reviewedPaths\(service\)\.has\(path\)/);
+    assert.ok(!/connect\(\s*\{[^}]*hostname:\s*(body|request|url|target)/.test(socket));
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,12 +357,23 @@ section("[P4] I-2: probe paths stay metadata/health/version/listing only");
     "/api/jobs/",
     "/tree",
     "/",
+    "/api/ps",
+    "/api/config",
+    "/v1/models",
+    "/health/liveliness",
+    "/system_stats",
+    "/config",
+    "/health",
+    "/v2",
+    "/data/plugins_listing",
+    "/leakycompute-owned-canary",
   ]);
   const paths = [];
   for (const svc of Object.values(SERVICES)) {
     for (const step of svc.confirm || []) if (step.path) paths.push(step.path);
     if (svc.exposure?.path) paths.push(svc.exposure.path);
   }
+  for (const profile of Object.values(DISCOVERY_PROFILES)) paths.push(profile.path);
 
   await check("every registered probe path is in the I-2 table", () => {
     const extra = [...new Set(paths)].filter((p) => !ALLOWED_PATHS.has(p));
@@ -467,6 +488,7 @@ section("[P7] probe-request hygiene: I-6 redirects, I-7 body cap, I-23 identity"
 
 {
   const svcRaw = fs.readFileSync(path.join(WORKER_SRC, "lib", "services.js"), "utf8");
+  const socketRaw = fs.readFileSync(path.join(WORKER_SRC, "lib", "socket_probe.js"), "utf8");
 
   await check("I-6: the probe never follows a redirect off the target", () => {
     assert.match(svcRaw, /redirect:\s*"manual"/);
@@ -474,17 +496,22 @@ section("[P7] probe-request hygiene: I-6 redirects, I-7 body cap, I-23 identity"
       !/redirect:\s*"(follow|error)"/.test(svcRaw),
       "a followed redirect lets a target bounce our probe to a third host"
     );
+    assert.ok(!/location[^\n]{0,120}(socketGet|connect)\s*\(/i.test(socketRaw));
   });
 
   await check("I-7: the response body is read with a hard cap", () => {
     assert.match(svcRaw, /maxBytes\s*=\s*32\s*\*\s*1024/);
     assert.match(svcRaw, /while\s*\(received\s*<\s*maxBytes\)/);
+    assert.match(socketRaw, /const BODY_CAP = 32 \* 1024/);
+    assert.match(socketRaw, /received < HEADER_CAP \+ maxBytes/);
   });
 
   await check("I-23: the Worker probes under an identifiable SafeProbe agent", () => {
     const ua = /"User-Agent":\s*"([^"]+)"/.exec(svcRaw);
     assert.ok(ua, "the probe sends no User-Agent at all");
     assert.match(ua[1], /^LeakyCompute-SafeProbe\//);
+    assert.match(socketRaw, /const USER_AGENT = "LeakyCompute-SafeProbe\//);
+    assert.match(socketRaw, /`GET \$\{path\} HTTP\/1\.0/);
   });
 }
 

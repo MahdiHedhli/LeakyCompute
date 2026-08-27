@@ -714,6 +714,41 @@ export async function listHits(env, { limit = 500, sort = "last_seen" } = {}) {
   return out;
 }
 
+/**
+ * Resumable, authoritative KV migration page. This is intentionally separate
+ * from listHits(): migration walks the whole index in stable lexical order,
+ * while the admin UI asks for a recent, presentation-sorted window.
+ */
+export async function migrationHostPage(env, { cursor = "", limit = 40 } = {}) {
+  if (!env.KV) return { records: [], next_cursor: null, complete: true };
+  const index = (await env.KV.get(HITS_INDEX, "json")) || [];
+  const ordered = [...new Set(Array.isArray(index) ? index : [])]
+    .filter((ip) => String(ip) > String(cursor || ""))
+    .sort();
+  const ips = ordered.slice(0, Math.max(1, Math.min(Number(limit) || 40, 40)));
+  const rows = await Promise.all(
+    ips.map((ip) => env.KV.get(`${HIT_PREFIX}${ip}`, "json"))
+  );
+  return {
+    records: rows.filter(Boolean),
+    next_cursor: ips.length ? ips[ips.length - 1] : null,
+    complete: ordered.length <= ips.length,
+  };
+}
+
+export async function migrationAttemptPage(env, { cursor = "", limit = 200 } = {}) {
+  const attempts = await getProbeAttempts(env);
+  const ordered = Object.entries(attempts)
+    .filter(([ip]) => String(ip) > String(cursor || ""))
+    .sort(([a], [b]) => a.localeCompare(b));
+  const page = ordered.slice(0, Math.max(1, Math.min(Number(limit) || 200, 200)));
+  return {
+    attempts: page.map(([ip, at]) => ({ ip, last_attempt_at: at })),
+    next_cursor: page.length ? page[page.length - 1][0] : null,
+    complete: ordered.length <= page.length,
+  };
+}
+
 export async function mergeValidatedModels(env, modelHits) {
   if (!env.KV || !Array.isArray(modelHits)) return;
   const catalog = (await env.KV.get("catalog:validated", "json")) || {

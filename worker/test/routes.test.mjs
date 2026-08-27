@@ -37,6 +37,7 @@ async function seededEnv(overrides = {}) {
     // Dev identity bypass; the lab's gate still requires the allowlist entry.
     ENVIRONMENT: "development",
     HOSTED_CHECKS_ENABLED: "true",
+    LEGACY_TEST_TRANSPORT: "true",
     ALLOWED_ORIGINS: "https://mahdihedhli.github.io",
     ADMIN_SYNC_TOKEN: ADMIN,
     CHECK_TIMEOUT_MS: "200",
@@ -130,9 +131,23 @@ const ADMIN_ROUTES = [
   // Dark control plane. These routes mutate permission state but cannot emit a
   // target request; they are still admin-only because they carry raw addresses.
   { method: "GET", path: "/v1/admin/control/health" },
+  { method: "POST", path: "/v1/admin/control/migrate", body: {} },
+  { method: "POST", path: "/v1/admin/control/reconcile", body: {} },
+  { method: "POST", path: "/v1/admin/control/retention", body: {} },
+  { method: "POST", path: "/v1/admin/control/purge", body: {} },
+  { method: "GET", path: "/v1/admin/control/hosts" },
+  { method: "POST", path: "/v1/admin/control/hosts", body: { records: [] } },
+  { method: "GET", path: "/v1/admin/control/attempts" },
+  { method: "POST", path: "/v1/admin/control/attempts/import", body: { attempts: [] } },
+  { method: "GET", path: "/v1/admin/control/expiring" },
+  { method: "POST", path: "/v1/admin/control/retire", body: { ips: [] } },
+  { method: "POST", path: "/v1/admin/control/canary", body: {} },
+  { method: "POST", path: "/v1/admin/control/exclusions", body: { entries: [] } },
+  { method: "GET", path: "/v1/admin/control/aggregates" },
   { method: "POST", path: "/v1/admin/discovery/lease", body: {} },
   { method: "POST", path: "/v1/admin/discovery/permit", body: {} },
   { method: "POST", path: "/v1/admin/discovery/complete", body: {} },
+  { method: "POST", path: "/v1/admin/discovery/probe", body: {} },
 ];
 
 /* ------------------------------------------------------------------ */

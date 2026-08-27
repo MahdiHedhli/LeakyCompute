@@ -68,6 +68,7 @@ function freshEnv(overrides = {}) {
     KV: makeKV(),
     ENVIRONMENT: "test",
     HOSTED_CHECKS_ENABLED: "true",
+    LEGACY_TEST_TRANSPORT: "true",
     ALLOWED_ORIGINS: "https://mahdihedhli.github.io",
     CHECK_TIMEOUT_MS: "1500",
     RL_OWN_MAX: "3",

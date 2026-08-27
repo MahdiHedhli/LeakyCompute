@@ -92,7 +92,10 @@ function baseUrl(host, port) {
  * Single read-only GET with its own timeout, bounded body, and no redirect
  * following (a redirect must never take us to a different host).
  */
-async function safeGet(url, { timeoutMs, maxBytes = 32 * 1024, accept }) {
+async function safeGet(url, { timeoutMs, maxBytes = 32 * 1024, accept, transport }) {
+  if (transport) {
+    return transport(url, { timeoutMs, maxBytes, accept });
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const started = Date.now();
@@ -126,6 +129,7 @@ async function safeGet(url, { timeoutMs, maxBytes = 32 * 1024, accept }) {
       json: null,
       latency_ms: Date.now() - started,
       error: err?.name === "AbortError" ? "timeout" : "unreachable",
+      error_class: "target_error",
     };
   } finally {
     clearTimeout(timer);
@@ -353,9 +357,35 @@ export const SERVICES = {
 
 export const TIER1 = ["ollama", "ray", "jupyter"];
 
+/**
+ * The unattended discovery runner is intentionally broader than the public
+ * self-check, but every lane is still pinned to one reviewed, read-only GET.
+ * This registry is the authority used by both the durable lease gate and the
+ * socket runtime. A runner-supplied path or port is never trusted.
+ */
+export const DISCOVERY_PROFILES = Object.freeze({
+  // Production egress verification only. The control plane refuses this
+  // profile for discovery/hosted purposes and binds it to CANARY_TARGET_IP.
+  owned_canary: { ports: [10000], path: "/leakycompute-owned-canary" },
+  ollama: { ports: [11434, 11435], path: "/api/ps" },
+  jupyter: { ports: [8888, 8889, 8890], path: "/" },
+  ray: { ports: [8265, 8266], path: "/api/version" },
+  open_webui: { ports: [8080], path: "/api/config" },
+  localai: { ports: [8080], path: "/v1/models" },
+  litellm: { ports: [4000], path: "/health/liveliness" },
+  vllm: { ports: [8000, 8080], path: "/v1/models" },
+  openai_compat_8000: { ports: [8000], path: "/v1/models" },
+  openai_compat_8080: { ports: [8080], path: "/v1/models" },
+  comfyui: { ports: [8188], path: "/system_stats" },
+  gradio: { ports: [7860], path: "/config" },
+  mlflow: { ports: [5000], path: "/health" },
+  triton: { ports: [8000], path: "/v2" },
+  tensorboard: { ports: [6006], path: "/data/plugins_listing" },
+});
+
 /** Every port this checker is ever willing to touch. */
 export const ALLOWED_PORTS = new Set(
-  Object.values(SERVICES).flatMap((s) => s.allowedPorts)
+  Object.values(DISCOVERY_PROFILES).flatMap((s) => s.ports)
 );
 
 /**
@@ -364,18 +394,22 @@ export const ALLOWED_PORTS = new Set(
  * from being usable as a general-purpose port prober.
  */
 export function resolvePort(serviceId, requested) {
-  const svc = Object.hasOwn(SERVICES, serviceId) ? SERVICES[serviceId] : null;
-  if (!svc) return { ok: false, error: "unknown_service" };
+  const hosted = Object.hasOwn(SERVICES, serviceId) ? SERVICES[serviceId] : null;
+  const discovery = Object.hasOwn(DISCOVERY_PROFILES, serviceId)
+    ? DISCOVERY_PROFILES[serviceId]
+    : null;
+  const allowedPorts = hosted?.allowedPorts || discovery?.ports;
+  if (!allowedPorts) return { ok: false, error: "unknown_service" };
   if (requested == null || requested === "") {
-    return { ok: true, port: svc.defaultPort };
+    return { ok: true, port: hosted?.defaultPort || allowedPorts[0] };
   }
   const p = Number(requested);
   if (!Number.isInteger(p)) return { ok: false, error: "invalid_port" };
-  if (!svc.allowedPorts.includes(p)) {
+  if (!allowedPorts.includes(p)) {
     return {
       ok: false,
       error: "port_not_allowed",
-      allowed: svc.allowedPorts,
+      allowed: allowedPorts,
     };
   }
   return { ok: true, port: p };
@@ -389,7 +423,12 @@ export function resolvePort(serviceId, requested) {
  * Probe one service on one port. At most 3 read-only GETs.
  * Connection failure and timeout are "not detected", never an error.
  */
-export async function probeService(host, serviceId, port, { timeoutMs = 2500 } = {}) {
+export async function probeService(
+  host,
+  serviceId,
+  port,
+  { timeoutMs = 2500, transport } = {}
+) {
   const svc = SERVICES[serviceId];
   const base = baseUrl(host, port);
 
@@ -404,6 +443,7 @@ export async function probeService(host, serviceId, port, { timeoutMs = 2500 } =
     latency_ms: null,
     status: 0,
     error: null,
+    error_class: null,
     findings: [],
     remediation: [],
   };
@@ -411,10 +451,12 @@ export async function probeService(host, serviceId, port, { timeoutMs = 2500 } =
   // --- confirm -------------------------------------------------------
   let confirmed = null;
   let lastError = null;
+  let lastErrorClass = null;
   for (const step of svc.confirm) {
-    const r = await safeGet(`${base}${step.path}`, { timeoutMs });
+    const r = await safeGet(`${base}${step.path}`, { timeoutMs, transport });
     if (!r.ok) {
       lastError = r.error;
+      lastErrorClass = r.error_class || "target_error";
       // A transport failure on the first probe means nothing is listening;
       // trying the fallback path would just burn another timeout.
       break;
@@ -436,16 +478,18 @@ export async function probeService(host, serviceId, port, { timeoutMs = 2500 } =
 
   if (!confirmed) {
     result.error = lastError;
+    result.error_class = lastErrorClass;
     return result;
   }
   result.detected = true;
 
   // --- exposure ------------------------------------------------------
-  const ex = await safeGet(`${base}${svc.exposure.path}`, { timeoutMs });
+  const ex = await safeGet(`${base}${svc.exposure.path}`, { timeoutMs, transport });
   if (!ex.ok) {
     // Detected but the exposure probe failed — report detection honestly and
     // do not claim anything about auth.
     result.error = ex.error;
+    result.error_class = ex.error_class || "target_error";
     result.findings.push(buildReachable(svc));
     result.remediation = svc.remediation;
     return result;
@@ -477,7 +521,10 @@ function buildReachable(svc) {
  * Parallel matters: three services sequentially would exceed the request
  * wall-clock budget under a 2.5s per-probe timeout.
  */
-export async function runChecks(host, { services = TIER1, ports = {}, timeoutMs = 2500 } = {}) {
+export async function runChecks(
+  host,
+  { services = TIER1, ports = {}, timeoutMs = 2500, transport } = {}
+) {
   // Defense in depth: callers other than index.js must not be able to amplify
   // subrequests with duplicates or inherited object keys.
   const selected = [...new Set(services)].filter((s) => Object.hasOwn(SERVICES, s));
@@ -489,7 +536,7 @@ export async function runChecks(host, { services = TIER1, ports = {}, timeoutMs 
   }
 
   const results = await Promise.all(
-    resolved.map(({ id, port }) => probeService(host, id, port, { timeoutMs }))
+    resolved.map(({ id, port }) => probeService(host, id, port, { timeoutMs, transport }))
   );
 
   return { ok: true, results };

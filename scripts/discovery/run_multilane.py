@@ -24,8 +24,9 @@ Usage:
 
   python3 scripts/discovery/run_multilane.py --dry-run
 
-Active probing and ingest are suspended until attempt clocks can be committed
-durably before any packet is sent.
+Active probing is performed only by the API's address-pinned runtime after a
+durable one-time permit has been committed. This process never opens a target
+socket itself.
 
   # governance smoke test — no Shodan key, no admin API, no packets
   python3 scripts/discovery/run_multilane.py --self-test --output /tmp/plan.json
@@ -258,13 +259,26 @@ def fetch_hits(api_base: str, token: str, limit: int = 500) -> list[dict]:
         raise IntervalDataUnavailable(
             "api_base and admin token are required to read last-seen data"
         )
-    status, data = http_json(
-        f"{api_base.rstrip('/')}/v1/admin/discovery/hits?limit={limit}",
-        headers={"X-Admin-Token": token},
-    )
-    if status != 200 or not isinstance(data, dict) or not isinstance(data.get("hits"), list):
-        raise IntervalDataUnavailable(f"could not read hit store: HTTP {status} {data}")
-    return [h for h in data["hits"] if isinstance(h, dict) and h.get("ip")]
+    hits: list[dict] = []
+    cursor = ""
+    seen_cursors: set[str] = set()
+    while True:
+        query = urllib.parse.urlencode({"limit": min(max(1, limit), 500), "cursor": cursor})
+        status, data = http_json(
+            f"{api_base.rstrip('/')}/v1/admin/control/hosts?{query}",
+            headers={"X-Admin-Token": token},
+        )
+        if status != 200 or not isinstance(data, dict) or not isinstance(data.get("records"), list):
+            raise IntervalDataUnavailable(f"could not read authoritative corpus: HTTP {status} {data}")
+        hits.extend(h for h in data["records"] if isinstance(h, dict) and h.get("ip"))
+        next_cursor = str(data.get("next_cursor") or "")
+        if data.get("complete") is True or not next_cursor:
+            break
+        if next_cursor == cursor or next_cursor in seen_cursors:
+            raise IntervalDataUnavailable("authoritative corpus pagination repeated a cursor")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return hits
 
 
 def fetch_probe_clock(api_base: str, token: str) -> dict[str, str]:
@@ -290,13 +304,28 @@ def fetch_probe_clock(api_base: str, token: str) -> dict[str, str]:
         raise IntervalDataUnavailable(
             "api_base and admin token are required to read the probe clock"
         )
-    status, data = http_json(
-        f"{api_base.rstrip('/')}/v1/admin/discovery/clock",
-        headers={"X-Admin-Token": token},
-    )
-    if status != 200 or not isinstance(data, dict) or not isinstance(data.get("attempts"), dict):
-        raise IntervalDataUnavailable(f"could not read probe clock: HTTP {status} {data}")
-    return {str(k): v for k, v in data["attempts"].items() if k}
+    clock: dict[str, str] = {}
+    cursor = ""
+    seen_cursors: set[str] = set()
+    while True:
+        query = urllib.parse.urlencode({"limit": 500, "cursor": cursor})
+        status, data = http_json(
+            f"{api_base.rstrip('/')}/v1/admin/control/attempts?{query}",
+            headers={"X-Admin-Token": token},
+        )
+        if status != 200 or not isinstance(data, dict) or not isinstance(data.get("attempts"), list):
+            raise IntervalDataUnavailable(f"could not read authoritative probe clock: HTTP {status} {data}")
+        for row in data["attempts"]:
+            if isinstance(row, dict) and row.get("ip") and row.get("last_attempt_at"):
+                clock[str(row["ip"])] = row["last_attempt_at"]
+        next_cursor = str(data.get("next_cursor") or "")
+        if data.get("complete") is True or not next_cursor:
+            break
+        if next_cursor == cursor or next_cursor in seen_cursors:
+            raise IntervalDataUnavailable("authoritative attempt pagination repeated a cursor")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return clock
 
 
 def last_seen_map(hits: list[dict], attempts: dict[str, str] | None = None) -> dict[str, str]:
@@ -628,15 +657,29 @@ def fetch_final_verification(api_base: str, token: str) -> list[dict]:
     """
     if not api_base or not token:
         return []
-    status, data = http_json(
-        f"{api_base.rstrip('/')}/v1/admin/discovery/expiring",
-        timeout=20,
-        headers={"X-Admin-Token": token},
-    )
-    if status != 200 or not isinstance(data, dict):
-        print(f"[!] final-verification queue unavailable (HTTP {status})")
-        return []
-    return data.get("due") or []
+    due: list[dict] = []
+    cursor = ""
+    seen_cursors: set[str] = set()
+    while True:
+        query = urllib.parse.urlencode({"limit": 500, "days": FINAL_VERIFY_DAYS, "cursor": cursor})
+        status, data = http_json(
+            f"{api_base.rstrip('/')}/v1/admin/control/expiring?{query}",
+            timeout=20,
+            headers={"X-Admin-Token": token},
+        )
+        if status != 200 or not isinstance(data, dict) or not isinstance(data.get("due"), list):
+            print(f"[!] final-verification queue unavailable (HTTP {status})")
+            return []
+        due.extend(row for row in data["due"] if isinstance(row, dict))
+        next_cursor = str(data.get("next_cursor") or "")
+        if data.get("complete") is True or not next_cursor:
+            break
+        if next_cursor == cursor or next_cursor in seen_cursors:
+            print("[!] final-verification pagination repeated a cursor")
+            return []
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return due
 
 
 def retire_hosts(api_base: str, token: str, ips: list[str]) -> None:
@@ -644,7 +687,7 @@ def retire_hosts(api_base: str, token: str, ips: list[str]) -> None:
     if not api_base or not token or not ips:
         return
     status, data = http_json(
-        f"{api_base.rstrip('/')}/v1/admin/discovery/retire",
+        f"{api_base.rstrip('/')}/v1/admin/control/retire",
         timeout=20,
         method="POST",
         headers={"X-Admin-Token": token},
@@ -778,6 +821,9 @@ def version_from_payload(payload: Any) -> str | None:
 
 
 def safe_probe(ip: str, port: int, path: str, timeout: float, limiter: GlobalRateLimiter) -> dict:
+    raise RuntimeError(
+        "legacy_target_probe_disabled: target sockets belong to the permit-consuming Worker runtime"
+    )
     limiter.wait()
     url = f"http://{ip}:{port}{path}"
     # I-23: attributable, and identical to what /scanning tells operators to
@@ -834,6 +880,10 @@ def safe_probe(ip: str, port: int, path: str, timeout: float, limiter: GlobalRat
 
 
 def run_probes(cands: list[dict], rate: float, workers: int, timeout: float) -> list[dict]:
+    raise RuntimeError(
+        "legacy_target_probe_disabled: use run_governed_probes so the durable "
+        "lease is committed before any target traffic"
+    )
     # I-24 global ceiling: the runner's own limit first, then the repo-wide
     # absolute one from discover.py. Neither can be raised by a flag.
     limiter = GlobalRateLimiter(min(rate, RUNNER_MAX_RATE, HARD_MAX_RATE))
@@ -881,6 +931,91 @@ def run_probes(cands: list[dict], rate: float, workers: int, timeout: float) -> 
             # belong only in the local ignored result file and the admin-gated
             # corpus (I-14), never in a public Actions log.
             print(f"[{i}/{len(cands)}] {r.get('stack')} {cc} {mark}")
+    return results
+
+
+def run_governed_probes(
+    cands: list[dict], api_base: str, token: str, rate: float, workers: int, timeout: float
+) -> list[dict]:
+    """Acquire a durable lease, then ask the pinned Worker runtime to consume it.
+
+    No target packet originates here. A refused lease is a skipped candidate,
+    not something the runner may fall back around.
+    """
+    if not api_base or not token:
+        raise SystemExit("active mode needs API base + admin token")
+    limiter = GlobalRateLimiter(min(rate, RUNNER_MAX_RATE, HARD_MAX_RATE))
+    results: list[dict] = []
+
+    def one(c: dict) -> dict:
+        limiter.wait()
+        provenance = c.get("provenance") or {}
+        if provenance.get("path") != "public_index":
+            return {**c, "exposed": False, "answered": False, "skipped": "public_index_required"}
+        lease_status, lease = http_json(
+            f"{api_base.rstrip('/')}/v1/admin/discovery/lease",
+            method="POST",
+            headers={"X-Admin-Token": token},
+            data={
+                "purpose": "active_discovery",
+                "ip": c.get("ip"),
+                "asn": c.get("asn"),
+                "service": c.get("stack"),
+                "port": c.get("port"),
+                "provenance": {
+                    "kind": "public_index",
+                    "source": provenance.get("index"),
+                    "observed_at": provenance.get("observed_at"),
+                    "lane": provenance.get("lane"),
+                    "query": provenance.get("query"),
+                },
+            },
+            timeout=20,
+        )
+        if lease_status != 200 or not isinstance(lease, dict):
+            return {
+                **c,
+                "exposed": False,
+                "answered": False,
+                "skipped": (lease or {}).get("error", f"lease_http_{lease_status}")
+                if isinstance(lease, dict) else f"lease_http_{lease_status}",
+            }
+        probe_status, probe = http_json(
+            f"{api_base.rstrip('/')}/v1/admin/discovery/probe",
+            method="POST",
+            headers={"X-Admin-Token": token},
+            data={"permit_id": lease.get("permit_id")},
+            timeout=max(20, int(timeout * 4)),
+        )
+        if probe_status not in (200, 503) or not isinstance(probe, dict):
+            return {
+                **c,
+                "exposed": False,
+                "answered": False,
+                "error": f"probe_http_{probe_status}",
+                "error_class": "platform_error",
+            }
+        result = probe.get("result") or {}
+        return {
+            **c,
+            **result,
+            "stack": c.get("stack"),
+            "source": c.get("source"),
+            "outcome": probe.get("outcome"),
+        }
+
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, 2))) as pool:
+        futures = {pool.submit(one, candidate): candidate for candidate in cands}
+        for i, future in enumerate(as_completed(futures), 1):
+            result = future.result()
+            results.append(result)
+            if result.get("skipped"):
+                mark = f"SKIP:{result['skipped']}"
+            elif result.get("error_class"):
+                mark = f"ERROR:{result['error_class']}"
+            else:
+                mark = "EXPOSED" if result.get("exposed") else "—"
+            print(f"[{i}/{len(cands)}] {result.get('stack')} {result.get('country_code') or '?'} {mark}")
     return results
 
 
@@ -1030,7 +1165,7 @@ def main() -> int:
     ap.add_argument(
         "--ingest",
         action="store_true",
-        help="disabled compatibility flag; active probing and ingest are suspended",
+        help="also refresh the legacy KV compatibility cache after governed probing",
     )
     ap.add_argument("--from-prior", action="store_true", default=True)
     ap.add_argument("--no-prior", action="store_true")
@@ -1059,15 +1194,6 @@ def main() -> int:
         # Forced, not merely defaulted: the synthetic corpus exists to exercise
         # the gates, and a mistyped flag must not turn it into a probe run.
         args.dry_run = True
-
-    if not args.dry_run:
-        raise SystemExit(
-            "Active re-verification is suspended: the current runner persists "
-            "I-24 probe attempts only after the run, so a crash can contact a "
-            "host without advancing its 14-day clock. Re-enable only after a "
-            "durable pre-probe lease/attempt record is enforced. --dry-run and "
-            "--self-test remain available and send no target traffic."
-        )
 
     # I-24 is a floor, not a default. A flag may slow re-verification down, never
     # speed it up.
@@ -1196,7 +1322,7 @@ def main() -> int:
                     "probe_path": "/api/ps" if not stack or stack == "ollama" else "/",
                     "source": "prior",
                     "provenance": provenance_from_corpus_source(
-                        h.get("source"), h.get("first_seen")
+                        h.get("source"), h.get("index_observed_at")
                     ),
                     "country": h.get("country"),
                     "country_code": h.get("country_code"),
@@ -1243,7 +1369,9 @@ def main() -> int:
             ip = row.get("ip")
             if not ip:
                 continue
-            prov = provenance_from_corpus_source(row.get("source"))
+            prov = provenance_from_corpus_source(
+                row.get("source"), row.get("index_observed_at")
+            )
             if not prov:
                 continue
             final_verify[ip] = {
@@ -1449,7 +1577,9 @@ def main() -> int:
         return 0
 
     print(f"[*] Probing {len(cands)} hosts @ {effective_rate}/s …")
-    results = run_probes(cands, args.rate, args.workers, args.timeout)
+    results = run_governed_probes(
+        cands, args.api_base, args.admin_token, args.rate, args.workers, args.timeout
+    )
     exposed = [r for r in results if r.get("exposed")]
     print(f"[+] exposed={len(exposed)} / {len(results)}")
 
@@ -1460,7 +1590,8 @@ def main() -> int:
         silent = [
             r["ip"]
             for r in results
-            if r.get("ip") in final_verify and not r.get("exposed")
+            if r.get("ip") in final_verify
+            and r.get("outcome") in {"not_observed", "target_error"}
         ]
         answered = len(final_verify) - len(silent)
         print(
