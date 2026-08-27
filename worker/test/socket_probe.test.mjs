@@ -131,17 +131,26 @@ await check("a hosted fingerprint uses only its reviewed confirm and exposure pa
 await check("the owned canary requires its exact fixed path and response marker", async () => {
   const capture = {};
   const run = await runDiscoveryPermit(
-    { ip: "93.184.216.99", port: 10000, service: "owned_canary" },
     {
-      connectImpl: () => fakeSocket(
-        "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n" +
-        '{"leakycompute_canary":"owned"}',
-        capture
-      ),
+      ip: "93.184.216.99",
+      port: 10000,
+      service: "owned_canary",
+      canary_hostname: "canary.example.test",
+    },
+    {
+      connectImpl: (address) => {
+        capture.address = address;
+        return fakeSocket(
+          "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n" +
+          '{"leakycompute_canary":"owned"}',
+          capture
+        );
+      },
     }
   );
   assert.equal(run.result.exposed, true);
   assert.equal(run.result.canary_marker, "owned");
+  assert.deepEqual(capture.address, { hostname: "canary.example.test", port: 10000 });
   assert.match(capture.request, /^GET \/leakycompute-owned-canary HTTP\/1\.0\r\n/);
 });
 

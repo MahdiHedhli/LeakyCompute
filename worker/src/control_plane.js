@@ -1005,9 +1005,12 @@ export class DiscoveryControlPlane {
     const netBucket = addressBucket(ip);
     if (purpose === "owned_canary") {
       const configured = canonicalizeIp(this.env.CANARY_TARGET_IP);
+      const canaryHost = String(this.env.CANARY_TARGET_HOST || "").trim().toLowerCase();
       if (
         this.env.CANARY_PROBE_ENABLED !== "true" ||
-        !configured || ip !== configured || body.service !== "owned_canary"
+        !configured || ip !== configured || body.service !== "owned_canary" ||
+        !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(canaryHost) ||
+        canaryHost.includes("..")
       ) {
         return json({ ok: false, error: "owned_canary_not_authorized" }, 403);
       }
@@ -1161,6 +1164,9 @@ export class DiscoveryControlPlane {
       port: permit.port,
       purpose: permit.purpose,
       provenance: permit.provenance_json ? JSON.parse(permit.provenance_json) : null,
+      canary_hostname: permit.purpose === "owned_canary"
+        ? String(this.env.CANARY_TARGET_HOST || "").trim().toLowerCase()
+        : null,
     });
   }
 

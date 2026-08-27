@@ -144,7 +144,7 @@ export function reviewedPaths(service) {
 
 /** One bounded HTTP GET to one already-authorized address. */
 export async function socketGet(
-  { ip, port, path, service },
+  { ip, port, path, service, connectHostname = null },
   { timeoutMs = 2500, maxBytes = BODY_CAP, connectImpl } = {}
 ) {
   const canonical = canonicalizeIp(ip);
@@ -158,20 +158,29 @@ export async function socketGet(
   if (!reviewedPaths(service).has(path)) {
     return { ok: false, status: 0, error: "path_not_allowed", error_class: "authorization_error" };
   }
+  const canaryHostname = String(connectHostname || "").trim().toLowerCase();
+  if (
+    canaryHostname &&
+    (service !== "owned_canary" ||
+      !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(canaryHostname) ||
+      canaryHostname.includes(".."))
+  ) {
+    return { ok: false, status: 0, error: "canary_hostname_not_allowed", error_class: "authorization_error" };
+  }
 
   const started = Date.now();
   let socket;
   try {
     const connect = connectImpl || (await import("cloudflare:sockets")).connect;
     socket = connect(
-      { hostname: canonical, port: Number(port) },
-      { secureTransport: "off", allowHalfOpen: false }
+      { hostname: canaryHostname || canonical, port: Number(port) },
+      { secureTransport: canaryHostname ? "on" : "off", allowHalfOpen: false }
     );
     await withDeadline(socket.opened, timeoutMs, "connect");
 
     const request = new TextEncoder().encode(
       `GET ${path} HTTP/1.0\r\n` +
-      `Host: ${hostHeader(canonical, port)}\r\n` +
+      `Host: ${hostHeader(canaryHostname || canonical, port)}\r\n` +
       "Accept: application/json, text/html;q=0.8, */*;q=0.5\r\n" +
       `User-Agent: ${USER_AGENT}\r\n` +
       "Connection: close\r\n\r\n"
@@ -262,7 +271,13 @@ export async function runDiscoveryPermit(permit, { timeoutMs = 2500, connectImpl
     return { ok: false, error: "unknown_service", error_class: "authorization_error" };
   }
   const response = await socketGet(
-    { ip: permit.ip, port: permit.port, path: profile.path, service: permit.service },
+    {
+      ip: permit.ip,
+      port: permit.port,
+      path: profile.path,
+      service: permit.service,
+      connectHostname: permit.service === "owned_canary" ? permit.canary_hostname : null,
+    },
     { timeoutMs, connectImpl }
   );
   if (!response.ok) {
