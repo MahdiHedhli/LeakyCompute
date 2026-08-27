@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <title>LeakyCompute: measuring exposed AI without becoming the threat</title>
-  <meta name="description" content="How LeakyCompute measures internet-exposed AI services, what an adversarial Daybreak Blue review found, and why active probing remains suspended." />
+  <meta name="description" content="How LeakyCompute measures internet-exposed AI services, what an adversarial Daybreak Blue review found, and the controls governing resumed research scanning." />
   <meta name="theme-color" content="#0a0e17" />
   <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="../css/style.css?v=research-1" />
@@ -30,7 +30,7 @@
 
     <article class="research-article">
       <header class="article-hero">
-        <p class="article-kicker">Research note // 26 August 2026</p>
+        <p class="article-kicker">Research note // 27 August 2026</p>
         <h2>LeakyCompute: measuring exposed AI without becoming the threat</h2>
         <p class="article-dek">
           Internet-exposed AI services are easy to count badly and surprisingly hard to study responsibly.
@@ -40,7 +40,7 @@
       </header>
 
       <aside class="article-callout">
-        <strong>The short version.</strong> LeakyCompute separates passive index counts, an archive snapshot, and bounded historical re-verification. It reports reachability, never demonstrated impact. After an adversarial Daybreak Blue review surfaced serious flaws in identity, data handling, target validation, and probe scheduling, I patched the immediate issues and moved LeakyCompute into passive/local-first mode. Public-index measurement and operator-owned local checks continue; active third-party discovery and hosted checks remain off.
+        <strong>TLDR:</strong> LeakyCompute is a research project that passively catalogs exposed AI endpoints using minimally intrusive verification. It keeps passive index counts, an archive snapshot, and bounded historical re-verification separate, and reports reachability—not demonstrated impact. After an adversarial Daybreak Blue review found serious flaws in identity, data handling, target validation, and probe scheduling, I suspended active discovery and hosted checks. On 27 August 2026, I shipped verified researcher authorization, durable probe leases and cooldowns, one-time permits, canonical public-address validation, fresh-source requirements, last-moment exclusion checks, conservative rate limits, and tightly constrained probes with pinned destinations, fixed request shapes, no redirects, hard timeouts, and capped responses. With those controls verified in production, research scanning has resumed.
       </aside>
 
       <section>
@@ -49,12 +49,12 @@
           The project began after I saw a short-lived public catalog of exposed AI infrastructure. The raw number was arresting, but the more useful question was what that number actually meant. Was a host merely visible in a search index? Had it answered a recent request? Did an endpoint expose metadata, inference, a workflow engine, or a path to code execution? Those are different claims, and collapsing them into one counter makes the research less useful.
         </p>
         <p>
-          So LeakyCompute now presents three measurements side by side. As of the project's 27 August 2026 snapshot, an archive-era catalog listed <strong>19,348 hosts</strong>. Current public index records listed <strong>19,376 hosts</strong>. Bounded historical re-verification retained <strong>1,350 distinct hosts</strong> that answered a read-only request within a 180-day window. These figures are not additive. Each has a different source, time boundary, and confidence level.
+          So LeakyCompute now presents three measurements side by side. As of 27 August 2026, an archive-era catalog listed <strong>19,348 hosts</strong>. Public index sources listed <strong>19,376 hosts</strong>. The rolling 180-day re-verification corpus retained <strong>1,350 distinct hosts</strong> that answered a read-only request. These figures are not additive. Each has a different source, time boundary, and confidence level.
         </p>
         <div class="article-metrics" aria-label="Three separate LeakyCompute measurements">
-          <div><span>19,348</span><strong>archive listings</strong><small>captured 27 July 2026, not reverified</small></div>
-          <div><span>19,376</span><strong>indexed records</strong><small>counted from public records, not probed</small></div>
-          <div><span>1,350</span><strong>reverified hosts</strong><small>retained historical read-only observations</small></div>
+          <div><span>19,348</span><strong>archive listings</strong><small>captured 27 July 2026, not re-verified</small></div>
+          <div><span>19,376</span><strong>indexed records</strong><small>counted from public index sources, not probed</small></div>
+          <div><span>1,350</span><strong>re-verified hosts</strong><small>rolling 180-day read-only observations</small></div>
         </div>
         <p>
           The current index count is entirely Shodan-derived, so source bias is not a footnote. It is part of the result. Tunnelled services are also invisible to this method. The live project page keeps the timestamp and source split next to the numbers so they cannot quietly turn into a timeless claim.
@@ -67,10 +67,16 @@
           I wrote the safety rules as versioned invariants before treating the project as a measurement platform. The important ones are deliberately unglamorous: use only reviewed metadata, health, version, or listing requests; send GET requests only; never follow redirects; cap every response body; contact only reviewed ports; honor exclusions before any request; and report what was reachable without proving what an attacker could do with it.
         </p>
         <p>
-          Discovery and verification are separate operations. A passive index can nominate a candidate, but the system must not discover new hosts by walking address space. The public site receives aggregates. Approved researchers can reach a minimised corpus through the lab. Administrative ingest and authorization stay behind a third boundary. Keeping those surfaces separate limits what a bug in any one of them can expose.
+          The system is split across three trust boundaries. The public site receives only aggregates. Approved researchers can reach a minimised corpus through the lab. Administrative ingest and authorization remain behind a third boundary. Keeping those surfaces separate limits what a bug in any one of them can expose.
         </p>
         <p>
-          That design still surfaced meaningful classes of exposure. The retained snapshot contains 969 host and stack pairs where models or inference were reachable, 188 where unauthenticated workflow execution was reachable, 129 where training metadata or artifacts were readable, and 78 where Jupyter or Ray exposed the prerequisites for code execution. These are reachability classifications. I did not submit jobs, run notebooks, pull models, send prompts, or otherwise demonstrate impact on third-party systems.
+          That design still surfaced meaningful classes of exposure. As of 27 August 2026, the rolling 180-day retained corpus contained 959 host–stack pairs where models or inference were reachable, 188 host–stack pairs where unauthenticated workflow execution was reachable, 129 host–stack pairs where training metadata or artifacts were readable, and 78 host–stack pairs where Jupyter or Ray exposed the prerequisites for code execution. These are host–stack pairs, not distinct hosts. A host can expose several stacks and appear in more than one class, while a re-verified host may fall into none of them. The four classes therefore overlap, are not exhaustive at the host level, and should not be summed to the 1,350 distinct hosts above. These are reachability classifications. I did not submit jobs, run notebooks, pull models, send prompts, or otherwise demonstrate impact on third-party systems.
+        </p>
+        <p>
+          The 1,350 figure is an as-of count from a rolling corpus, not a permanently frozen snapshot. Resumed verification adds or refreshes qualifying observations in that corpus, while remediation and retention can cause other records to leave it.
+        </p>
+        <p>
+          Discovery and verification remain separate operations. Scheduled discovery never walks address space or synthesizes neighboring targets; candidates must be nominated by fresh records from approved public indexes—currently Shodan, with Censys planned. Operator-owned hosted checks use a separate authorization path and never become discovery provenance.
         </p>
       </section>
 
@@ -94,19 +100,19 @@
 
         <h4>Target validation and probe safety</h4>
         <ol class="finding-list" start="6">
-          <li><strong>False clean results from the hosted checker.</strong> The Worker platform could not reliably fetch IP-literal targets. A failed connection could therefore look like a clean host. Hosted checks were disabled instead of presenting that ambiguity as assurance.</li>
+          <li><strong>False clean results from the hosted checker.</strong> The Worker platform's global fetch API could not reliably reach IP-literal targets. A failed connection could therefore look like a clean host. Target traffic now crosses a dedicated address-pinned TCP socket boundary inside the API Worker. It accepts only a consumed control-plane permit for one canonical IP, reviewed service, port, and request path—with DNS resolution and redirects disabled—and reports connection or platform failures as indeterminate, never clean.</li>
           <li><strong>Address parser bypasses.</strong> Reserved, documentation, benchmark, and multicast ranges were incomplete. Numeric address encodings, hostnames, DNS rebinding, and CIDR opt-out edges created additional bypasses. Targets now pass through one canonical parser, only public-unicast IP literals are accepted, and hostnames are rejected.</li>
-          <li><strong>Probe ledger timing.</strong> The attempt clock was written after a run. A crash could repeat a probe, and ledger eviction could weaken cadence. Active discovery remains disabled pending a durable pre-probe lease.</li>
-          <li><strong>Ungated legacy discovery.</strong> An older runner could probe arbitrary seeds and neighbouring addresses without the newer provenance, exclusion, interval, and rate gates. Its active mode was disabled.</li>
+          <li><strong>Probe ledger timing.</strong> The attempt clock was written after a run. A crash could repeat a probe, and ledger eviction could weaken cadence. The clock now moves through a transactional lease taken before traffic leaves the runner, and a one-time permit means an interrupted run cannot re-authorize itself.</li>
+          <li><strong>Ungated legacy discovery.</strong> An older runner could probe arbitrary seeds and neighboring addresses without the newer provenance, exclusion, interval, and rate gates. That runner is retired from production scheduling and hard-fails any non-dry CLI run before target traffic. The guard is a runtime check rather than removed capability; the code path exists and is gated, not deleted. It remains only for passive reporting and packet-free planning. Scheduled discovery now runs exclusively through the control-plane-gated path.</li>
           <li><strong>Amplification through malformed input.</strong> Duplicate services, inherited object keys, and truthy authorization values could expand a request beyond its intended work. Inputs are now exact, deduplicated, bounded, limited to owned keys, and require the literal boolean value true.</li>
-          <li><strong>Stale provenance.</strong> An old index record could make a now-private or reserved target appear eligible, or preserve standing permission indefinitely. Public-unicast validation now happens first and index provenance expires after seven days.</li>
+          <li><strong>Stale provenance.</strong> An old index record could make a now-private or reserved target appear eligible, or preserve standing permission indefinitely. Public-unicast validation now happens first and index provenance expires after 7 days.</li>
           <li><strong>A costly health check.</strong> One LiteLLM health route can trigger paid upstream completions. The profile now uses its liveness endpoint, which checks service health without spending the operator's API budget.</li>
           <li><strong>Redirect and response-size gaps.</strong> Off-Worker helpers followed redirects, some reads were unbounded, the local Ollama client lacked a response cap, and favicon loading could cross origin. Redirects are blocked across runners, reads are capped at 32 KiB, non-loopback local checks need attestation, and icons stay same-origin.</li>
         </ol>
 
         <h4>State, reconciliation, and automation</h4>
         <ol class="finding-list" start="14">
-          <li><strong>Partial aggregates presented as complete.</strong> A reconciliation job could count only the newest 2,000 records and overwrite complete totals. Recounts now checkpoint a fixed corpus snapshot across bounded runs and publish only after the full snapshot is processed.</li>
+          <li><strong>Partial aggregates presented as complete.</strong> A reconciliation job could count only the newest 2,000 records and overwrite complete totals. Recounts now checkpoint a fixed corpus snapshot and publish only after a complete pass.</li>
           <li><strong>Reusable exclusions.</strong> An exclusion approval could be reused after an issue was edited, and an incomplete purge could be reported as complete. Approvals are now bound to the label event and body, and deletion status reports partial work honestly.</li>
           <li><strong>Unsafe workflow parsing.</strong> One approval flow read the wrong event field and constructed JSON through shell interpolation. It now reads the correct event data and uses a structured JSON builder.</li>
           <li><strong>Enumerable abuse pseudonyms.</strong> When a secret was missing, abuse logs fell back to a public salt. They now use HMAC-SHA256, and production skips the pseudonym rather than weakening it.</li>
@@ -117,12 +123,21 @@
       </section>
 
       <section>
-        <h3>Why probing is still off</h3>
+        <h3>What had to exist before probing came back</h3>
         <p>
-          Most of the concrete bugs above are fixed and covered by tests. That does not make the architecture ready for unattended internet measurement. A durable pre-probe ledger still needs to reserve work before traffic leaves the runner. Corpus storage needs authoritative pagination rather than eventually consistent key-value scans. Opt-out deletion needs a resumable, verifiable completion record. Retention and full reconciliation also need to work across the whole corpus without silently degrading into a partial pass.
+          Fixing the concrete bugs above was not enough. Each one was covered by a test, but tests on individual defects do not make an architecture ready for unattended internet measurement, so I treated four structural gaps as blocking.
         </p>
         <p>
-          Until those controls exist, scheduled active discovery and hosted checks remain suspended. The project can still read public index aggregates, serve the historical research corpus to approved researchers, and let operators run the local checker against infrastructure they own. This is a narrower product, but it is an honest one.
+          A durable pre-probe ledger had to reserve work before traffic left the runner, so a crash mid-probe could not produce a repeat. Corpus storage needed authoritative pagination rather than eventually consistent key-value scans. Opt-out deletion needed a resumable, verifiable completion record. Retention and full reconciliation had to work across the whole corpus without silently degrading into a partial pass.
+        </p>
+        <p>
+          What shipped was a strongly consistent control plane with transactional leases and one-time probe permits, authoritative cursor-paged corpus storage, resumable opt-out jobs with durable completion records, and checkpointed retention and reconciliation jobs that publish new aggregates only after a complete pass. Production verification meant interrupting and resuming each workflow across a multi-page corpus, confirming that no second probe authorization was issued, late-page opt-outs and expired records were removed, partial reconciliations never became public, and only one tightly constrained request reached an operator-owned canary.
+        </p>
+        <p>
+          With those in place, scheduled discovery and hosted checks are running again under the controls listed above. The project reads public index aggregates, serves the historical research corpus to approved researchers, and lets operators run the local checker against infrastructure they own.
+        </p>
+        <p>
+          The scope is narrow by design, and the narrowness is the point.
         </p>
       </section>
 
@@ -132,7 +147,7 @@
           The hardest part of defensive measurement is not writing the probe. It is making every surrounding system keep the same promise. Identity, logs, retries, storage limits, redirects, workflow events, and dependency pins all become part of the safety boundary. A read-only request can still cause harm if it reaches the wrong address, repeats after a crash, spends someone else's API budget, or leaves a sensitive trail in public automation logs.
         </p>
         <p>
-          Daybreak Blue changed the project by forcing those promises into adversarial questions and executable tests. The result is not a claim that LeakyCompute is finished or risk-free. It is a clearer record of what the system can support today, what it cannot, and which controls must exist before any suspended capability returns.
+          Daybreak Blue changed the project by forcing those promises into adversarial questions and executable tests. The result is not a claim that LeakyCompute is finished or risk-free. It is a clearer record of what the system supports today, the controls governing those capabilities, and what remains deliberately out of scope.
         </p>
       </section>
 
