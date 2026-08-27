@@ -422,7 +422,7 @@ try {
   const revoked = await post("/v1/admin/allowlist", {
     op: "revoke", login: "researcher-one",
   });
-  await check("research authorization changes commit through strong storage", () => {
+  await check("research authorization responses never return email aliases", () => {
     assert.deepEqual(
       { status: approved.status, active: approved.body.active, login: approved.body.login },
       { status: 200, active: true, login: "researcher-one" }

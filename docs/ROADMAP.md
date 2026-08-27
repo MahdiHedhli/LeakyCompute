@@ -107,7 +107,9 @@ Treat this as one storage/control-plane migration, not a series of KV patches:
 
 Implemented as a single SQLite-backed Durable Object. KV remains a migration
 source and compatibility/public cache, not the authority for probe permission,
-research authorization, exclusions, retention, or corpus traversal.
+exclusions, retention, or corpus traversal. Transactional researcher
+authorization remains a separate follow-up; its workflows now use a dedicated
+credential and never print alias-bearing responses.
 
 **Exit criteria met 2026-08-27:** the re-enable tests pass under concurrency,
 interruption, a corpus larger than every page limit, a matching record beyond

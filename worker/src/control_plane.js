@@ -263,17 +263,6 @@ export class DiscoveryControlPlane {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS research_entries (
-        login TEXT PRIMARY KEY,
-        active INTEGER NOT NULL,
-        entry_json TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS research_aliases (
-        alias TEXT PRIMARY KEY,
-        login TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
       CREATE INDEX IF NOT EXISTS purge_status ON purge_jobs(status, created_at);
     `);
     this.sql.exec(
@@ -319,9 +308,6 @@ export class DiscoveryControlPlane {
     if (path === "/purge/resume") return this.resumePurge(body);
     if (path === "/retention/run") return this.runRetention(body);
     if (path === "/reconcile/run") return this.runReconciliation(body);
-    if (path === "/research/approve") return this.approveResearcher(body);
-    if (path === "/research/revoke") return this.revokeResearcher(body);
-    if (path === "/research/match") return this.matchResearcher(body);
     return json({ error: "not_found" }, 404);
   }
 
@@ -372,98 +358,6 @@ export class DiscoveryControlPlane {
     return rows(this.sql.exec(
       "SELECT type, value, active FROM exclusions WHERE active = 1 ORDER BY type, value"
     )).map((row) => ({ ...row, active: row.active === 1 }));
-  }
-
-  matchResearcher(body) {
-    const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 8) : [];
-    for (const raw of candidates) {
-      const candidate = String(raw || "").trim().toLowerCase().replace(/^@/, "");
-      if (!candidate || candidate.length > 254) continue;
-      const alias = one(this.sql.exec(
-        "SELECT login FROM research_aliases WHERE alias = ?",
-        candidate
-      ));
-      const login = alias?.login || candidate;
-      const row = one(this.sql.exec(
-        "SELECT active, entry_json FROM research_entries WHERE login = ?",
-        login
-      ));
-      if (row && Number(row.active) === 1) {
-        return json({ ok: true, found: true, entry: JSON.parse(row.entry_json), matched: candidate });
-      }
-    }
-    return json({ ok: true, found: false });
-  }
-
-  approveResearcher(body) {
-    const entry = body.entry && typeof body.entry === "object" ? body.entry : {};
-    const login = String(entry.login || "").trim().toLowerCase().replace(/^@/, "");
-    if (!/^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/.test(login)) {
-      return json({ ok: false, error: "invalid_github_login" }, 400);
-    }
-    const aliases = [...new Set((Array.isArray(entry.aliases) ? entry.aliases : [])
-      .map((value) => String(value || "").trim().toLowerCase())
-      .filter((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
-    )].slice(0, 8);
-    const existing = one(this.sql.exec(
-      "SELECT active, entry_json FROM research_entries WHERE login = ?",
-      login
-    ));
-    if (body.migration === true && existing) {
-      return json({ ok: true, active: Number(existing.active) === 1, migrated: false });
-    }
-    for (const alias of aliases) {
-      const owner = one(this.sql.exec("SELECT login FROM research_aliases WHERE alias = ?", alias));
-      if (owner && owner.login !== login) return json({ ok: false, error: "alias_in_use" }, 409);
-      const primary = one(this.sql.exec("SELECT login FROM research_entries WHERE login = ?", alias));
-      if (primary && primary.login !== login) return json({ ok: false, error: "alias_in_use" }, 409);
-    }
-    const stored = { ...entry, login, aliases, active: true };
-    const now = Date.now();
-    this.ctx.storage.transactionSync(() => {
-      this.sql.exec("DELETE FROM research_aliases WHERE login = ?", login);
-      this.sql.exec(
-        `INSERT INTO research_entries(login, active, entry_json, updated_at)
-         VALUES (?, 1, ?, ?) ON CONFLICT(login) DO UPDATE SET
-         active = 1, entry_json = excluded.entry_json, updated_at = excluded.updated_at`,
-        login,
-        JSON.stringify(stored),
-        now
-      );
-      for (const alias of aliases) {
-        this.sql.exec(
-          `INSERT INTO research_aliases(alias, login, updated_at) VALUES (?, ?, ?)
-           ON CONFLICT(alias) DO UPDATE SET login = excluded.login, updated_at = excluded.updated_at`,
-          alias,
-          login,
-          now
-        );
-      }
-    });
-    return json({ ok: true, active: true, login });
-  }
-
-  revokeResearcher(body) {
-    const requested = String(body.login || "").trim().toLowerCase().replace(/^@/, "");
-    if (!requested) return json({ ok: false, error: "login_required" }, 400);
-    const alias = one(this.sql.exec("SELECT login FROM research_aliases WHERE alias = ?", requested));
-    const login = alias?.login || requested;
-    const prior = one(this.sql.exec("SELECT entry_json FROM research_entries WHERE login = ?", login));
-    const entry = prior ? JSON.parse(prior.entry_json) : { login, aliases: [] };
-    const revoked = { ...entry, login, active: false, revoked_at: new Date().toISOString() };
-    const now = Date.now();
-    this.ctx.storage.transactionSync(() => {
-      this.sql.exec("DELETE FROM research_aliases WHERE login = ?", login);
-      this.sql.exec(
-        `INSERT INTO research_entries(login, active, entry_json, updated_at)
-         VALUES (?, 0, ?, ?) ON CONFLICT(login) DO UPDATE SET
-         active = 0, entry_json = excluded.entry_json, updated_at = excluded.updated_at`,
-        login,
-        JSON.stringify(revoked),
-        now
-      );
-    });
-    return json({ ok: true, active: false, login });
   }
 
   addExclusions(body) {

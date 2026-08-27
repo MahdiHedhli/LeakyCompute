@@ -213,8 +213,11 @@ again before remediation.
 
 The same pass also tightened hosted-check concurrency and plan validation,
 added service-specific response validation, capped public request bodies,
-moved researcher authorization/revocation into transactional strong storage,
-fixed composite purge pagination, preserved authoritative geography, enforced
-the 128-candidate run ceiling, and made runner/control failures visible. No
+kept researcher aliases out of workflow responses, fixed composite purge
+pagination, preserved authoritative geography, enforced the 128-candidate run
+ceiling, and made runner/control failures visible. The attempt to move
+researcher authorization into new transactional tables was rolled back before
+re-enablement because the production Durable Object had exhausted its daily
+free-tier row-write budget; that medium-severity migration remains open. No
 approval or revocation workflow runs existed in the repository history, so no
 email-bearing Action logs required deletion.
