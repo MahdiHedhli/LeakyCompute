@@ -30,19 +30,35 @@ export async function verifyTurnstile(env, token) {
       data.success === true &&
       hostname === expectedHostname &&
       action === "hosted_self_check";
+    const error = ok
+      ? undefined
+      : data.success !== true
+        ? "turnstile_rejected"
+        : hostname !== expectedHostname
+          ? "turnstile_hostname_mismatch"
+          : "turnstile_action_mismatch";
+    const codes = Array.isArray(data["error-codes"])
+      ? data["error-codes"].filter((code) => typeof code === "string").slice(0, 4)
+      : [];
+    if (!ok) {
+      console.warn(JSON.stringify({
+        event: "turnstile_verification_failed",
+        reason: error,
+        codes,
+      }));
+    }
     return {
       ok,
       skipped: false,
-      codes: data["error-codes"] || [],
-      error: ok
-        ? undefined
-        : data.success !== true
-          ? "turnstile_rejected"
-          : hostname !== expectedHostname
-            ? "turnstile_hostname_mismatch"
-            : "turnstile_action_mismatch",
+      codes,
+      error,
     };
   } catch {
+    console.warn(JSON.stringify({
+      event: "turnstile_verification_failed",
+      reason: "turnstile_error",
+      codes: [],
+    }));
     return { ok: false, error: "turnstile_error" };
   }
 }
