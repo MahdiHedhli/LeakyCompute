@@ -307,7 +307,7 @@ out after 90 days and an exclusion deletes them (I-25).
 
 **`POST /v1/admin/discovery/ingest`** — `{ results: [...], run_meta?, indexed_observed? }`.
 Batches capped at 150; rate-limited to 10/hour. `indexed_observed` (also accepted
-as `run_meta.indexed_observed`) is spec §4's passive count: hosts a public index
+as `run_meta.indexed_observed`) is spec §4's passive count: overlapping records returned by public-index queries
 listed, counted and not probed. Results matching a stored exclusion are refused
 and reported as `refused_excluded` rather than written back (I-25).
 

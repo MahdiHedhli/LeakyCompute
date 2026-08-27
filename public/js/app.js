@@ -203,7 +203,7 @@
       // Shodan snapshot — timestamped, because "indexed now" is only meaningful
       // with a "now" attached to it.
       const idx = data.indexed_observed || {};
-      $("indexed-hosts").textContent = fmt(idx.hosts);
+      $("indexed-hosts").textContent = fmt(idx.records ?? idx.hosts);
 
       // Every component of the composite, including the ones at zero. Censys
       // shows "0 (future)" rather than being hidden: a source we mean to add
@@ -219,7 +219,8 @@
       // Short in the card so the focal number is not competing with a
       // paragraph; the full provenance sits in the methodology note below,
       // where it can be read next to the other two numbers it contrasts with.
-      $("indexed-sub").textContent = "Counted from public index sources. Never probed (I-21).";
+      $("indexed-sub").textContent =
+        "Overlapping query records, not distinct hosts. Never probed (I-21).";
       $("indexed-stamp").textContent = idx.last_observed_at
         ? `as of ${stamp(idx.last_observed_at)}`
         : "as of —";

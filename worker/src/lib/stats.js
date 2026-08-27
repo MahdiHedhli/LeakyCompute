@@ -129,7 +129,10 @@ export async function publicStatsPayload(env, live, { authoritative = null } = {
       note: "Listed as exposed in an archive-era catalog. Not re-verified, so it says nothing about today.",
     },
     indexed_observed: {
-      label: "Indexed now",
+      label: "Index matches",
+      records: corpus.indexed_observed_hosts || 0,
+      // Compatibility for older clients; this is a record count, not a
+      // deduplicated host count.
       hosts: corpus.indexed_observed_hosts || 0,
       // Censys is declared at zero rather than omitted: a source we intend to
       // add should be visibly absent, so the shape of what is missing is on the
@@ -144,8 +147,8 @@ export async function publicStatsPayload(env, live, { authoritative = null } = {
       source: corpus.indexed_observed_source || "public index records, counted not probed",
       last_observed_at: corpus.last_observed_at || null,
       note:
-        "Counted from public index records and user-submitted requests. " +
-        "We sent these hosts nothing to arrive at this number (I-21).",
+        "Overlapping matches from public-index queries and user-submitted requests; " +
+        "not a deduplicated host count. We sent them nothing to arrive at this number (I-21).",
     },
     reverified: {
       label: "Re-verified",
