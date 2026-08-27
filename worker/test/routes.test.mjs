@@ -765,8 +765,19 @@ section("the public checker cannot paint an inconclusive result green");
   const client = fs.readFileSync(path.join(publicDir, "js", "app.js"), "utf8");
 
   await check("the active hosted-check button is available", async () => {
-    assert.match(page, /id="check-btn">Check my public IP<\/button>/);
+    assert.match(page, /id="check-btn" disabled>Check my public IP<\/button>/);
     assert.doesNotMatch(page, /Hosted checks are suspended/);
+  });
+
+  await check("the hosted checker cannot run before a single-use Turnstile token", async () => {
+    assert.match(page, /id="turnstile-widget"/);
+    assert.match(page, /script-src 'self' https:\/\/challenges\.cloudflare\.com/);
+    assert.match(page, /frame-src https:\/\/challenges\.cloudflare\.com/);
+    assert.ok(client.includes("if (!turnstileToken)"));
+    assert.ok(client.includes("body.turnstile_token = token"));
+    assert.ok(client.includes("window.turnstile.reset(turnstileWidgetId)"));
+    assert.ok(client.includes("turnstile/v0/api.js?render=explicit&onload=onLeakyTurnstileLoad"));
+    assert.doesNotMatch(client, /console\.(?:log|debug).*token/i);
   });
 
   await check("HTTP 503 structured reports and target errors render inconclusive", async () => {

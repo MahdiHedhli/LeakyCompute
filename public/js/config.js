@@ -7,7 +7,7 @@
 window.LEAKY_CONFIG = {
   // Replace after `wrangler deploy`
   API_BASE: "https://api.leakycompute.mahdihedhli.com",
-  // Optional free Turnstile site key; leave empty to skip client widget
+  // Required for the production hosted self-check. Public identifier only.
   TURNSTILE_SITE_KEY: "",
   LAB_URL: "https://leakycompute-lab.pages.dev",
   REPO_URL: "https://github.com/MahdiHedhli/LeakyCompute",

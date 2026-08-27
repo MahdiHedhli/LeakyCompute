@@ -37,8 +37,9 @@ Every request this endpoint makes to a target is a read-only `GET`. See
 
 ### Request
 
-All fields optional. **An empty body is the common path** — the target defaults
-to the caller's `CF-Connecting-IP`.
+The target and service fields are optional; production requests still require a
+single-use Turnstile token. Without an override, the target defaults to the
+caller's `CF-Connecting-IP`.
 
 ```json
 {
@@ -57,7 +58,7 @@ to the caller's `CF-Connecting-IP`.
 | `services` | string[] | Subset of `["ollama","ray","jupyter"]`. Defaults to all. Unknown names are dropped; an all-unknown list is a 400. |
 | `ports` | object | Per-service port override, validated against that service's allowlist. |
 | `port` | number | **Legacy.** Mapped to `ports.ollama`. Still allowlist-checked. |
-| `turnstile_token` | string | Required only when `TURNSTILE_SECRET_KEY` is set. |
+| `turnstile_token` | string | Required in production. Single-use and validated server-side before a permit is requested. |
 
 **Port allowlist** — this endpoint is not a general-purpose port prober:
 

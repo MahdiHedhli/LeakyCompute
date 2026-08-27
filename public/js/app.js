@@ -28,6 +28,66 @@
 
   let lastGeo = [];
   let lastCountryStack = {};
+  let turnstileWidgetId = null;
+  let turnstileToken = "";
+
+  function hostedCheckUnavailable(message) {
+    const btn = $("check-btn");
+    btn.disabled = true;
+    const out = $("result");
+    out.className = "result exposed";
+    out.textContent = message;
+  }
+
+  function initializeTurnstile() {
+    const sitekey = String(cfg.TURNSTILE_SITE_KEY || "").trim();
+    if (!sitekey) {
+      hostedCheckUnavailable("Hosted self-check is temporarily unavailable: browser verification is not configured.");
+      return;
+    }
+
+    window.onLeakyTurnstileLoad = () => {
+      try {
+        turnstileWidgetId = window.turnstile.render("#turnstile-widget", {
+          sitekey,
+          theme: "dark",
+          size: "flexible",
+          callback(token) {
+            turnstileToken = token;
+            $("check-btn").disabled = false;
+            const out = $("result");
+            out.className = "result";
+            out.textContent = "Browser verification complete. Ready to check your public IP.";
+          },
+          "expired-callback"() {
+            turnstileToken = "";
+            hostedCheckUnavailable("Browser verification expired. Complete it again before checking.");
+          },
+          "timeout-callback"() {
+            turnstileToken = "";
+            hostedCheckUnavailable("Browser verification timed out. Complete it again before checking.");
+          },
+          "error-callback"() {
+            turnstileToken = "";
+            hostedCheckUnavailable("Browser verification failed. No target request was sent.");
+          },
+          "unsupported-callback"() {
+            turnstileToken = "";
+            hostedCheckUnavailable("This browser cannot run the hosted verification. Use the local checker instead.");
+          },
+        });
+      } catch {
+        hostedCheckUnavailable("Browser verification could not start. No target request was sent.");
+      }
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onLeakyTurnstileLoad";
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => hostedCheckUnavailable("Browser verification could not load. No target request was sent.");
+    document.head.appendChild(script);
+  }
 
   // Regional-indicator pair from the ISO code — no flag assets to ship, and it
   // degrades to the letters themselves on platforms without the glyphs.
@@ -378,6 +438,13 @@
     const target = $("target-input").value.trim();
     const authorized = $("auth-check").checked;
 
+    if (!turnstileToken) {
+      hostedCheckUnavailable("Complete browser verification before checking. No target request was sent.");
+      return;
+    }
+    const token = turnstileToken;
+    turnstileToken = "";
+
     $("verdict").hidden = true;
     $("report").innerHTML = "";
     out.className = "result";
@@ -389,8 +456,7 @@
       body.target = target;
       body.authorized = authorized;
     }
-    // Turnstile token hook
-    if (window.turnstileToken) body.turnstile_token = window.turnstileToken;
+    body.turnstile_token = token;
 
     try {
       const res = await fetch(`${cfg.API_BASE}/v1/check`, {
@@ -419,7 +485,10 @@
       out.classList.add("exposed");
       out.textContent = `Request failed: ${err}\nIs API_BASE set in config.js?`;
     } finally {
-      btn.disabled = false;
+      btn.disabled = true;
+      if (turnstileWidgetId !== null && window.turnstile) {
+        window.turnstile.reset(turnstileWidgetId);
+      }
     }
   }
 
@@ -438,6 +507,7 @@
     });
 
     $("check-btn").addEventListener("click", runCheck);
+    initializeTurnstile();
     $("refresh-stats").addEventListener("click", loadStats);
     $("geo-sort").addEventListener("change", () =>
       renderGeo(lastGeo, $("geo-sort").value)

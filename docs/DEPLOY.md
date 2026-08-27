@@ -101,7 +101,7 @@ npx --yes wrangler@4.126.0 secret put RESEARCH_ADMIN_TOKEN
 npx --yes wrangler@4.126.0 secret put ABUSE_LOG_SALT  # high-entropy HMAC key; required for abuse logs
 npx --yes wrangler@4.126.0 secret put ACCESS_TEAM_DOMAIN_SECRET
 npx --yes wrangler@4.126.0 secret put ACCESS_APP_AUD
-# optional:
+# required when HOSTED_CHECKS_ENABLED=true:
 npx --yes wrangler@4.126.0 secret put TURNSTILE_SECRET_KEY
 npx --yes wrangler@4.126.0 deploy
 ```
