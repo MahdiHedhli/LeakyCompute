@@ -851,6 +851,15 @@ def public_index_publication_meta(
     }
 
 
+def require_lane_collection_succeeded(failures: list[str]) -> None:
+    """Abort before corpus reads or target work when any requested lane fails."""
+    if failures:
+        raise SystemExit(
+            "refusing to continue after passive lane failure(s): "
+            + ", ".join(sorted(failures))
+        )
+
+
 VERSION_KEYS = ("version", "server_version", "ray_version", "app_version")
 
 
@@ -1288,6 +1297,7 @@ def main() -> int:
     # cannot dedupe what we did not pull. The label has to say so.
     index_listed: dict[str, int] = {}
     completed_lane_ids: set[str] = set()
+    lane_failures: list[str] = []
     for lane in lanes:
         try:
             start_page = int((cursors.get(lane["id"]) or {}).get("page") or 1)
@@ -1309,9 +1319,19 @@ def main() -> int:
             )
         except SystemExit as e:
             print(f"  lane {lane['id']} aborted: {e}")
+            lane_failures.append(lane["id"])
         except Exception as e:
-            print(f"  lane {lane['id']} error: {e}")
+            # Unexpected exception strings can carry response fragments. The
+            # exception class is enough for the public workflow log; reproduce
+            # locally against synthetic data for detail.
+            print(f"  lane {lane['id']} error: {type(e).__name__}")
+            lane_failures.append(lane["id"])
         time.sleep(1.0)
+
+    # A missing passive lane is not permission to fall back to the historical
+    # corpus. Stop before fetching candidates, leases, or exclusions so the job
+    # is visibly red and no target request can be emitted.
+    require_lane_collection_succeeded(lane_failures)
 
     # I-22(b): approved requests are the only way a host that no index lists can
     # become a target, and only inside the space its owner attested for.

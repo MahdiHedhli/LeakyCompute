@@ -573,7 +573,7 @@ def _shodan_minimized_and_errors_sanitized():
         rows, _, _, total = D.shodan_search("secret", "product:Ollama", 1)
         query = seen["url"].split("?", 1)[1]
         params = urllib.parse.parse_qs(query)
-        assert params["minify"] == ["true"]
+        assert params["minify"] == ["false"]
         assert "data" not in params["fields"][0]
         assert "ollama" not in params["fields"][0]
         assert seen["cap"] == 256 * 1024
@@ -593,6 +593,17 @@ def _shodan_minimized_and_errors_sanitized():
 
 
 check("Shodan data is minimized and failure logs cannot disclose response content", _shodan_minimized_and_errors_sanitized)
+
+
+def _lane_failure_aborts_before_fallback():
+    try:
+        R.require_lane_collection_succeeded(["ollama"])
+        raise AssertionError("a passive lane failure did not stop the run")
+    except SystemExit as exc:
+        assert "ollama" in str(exc)
+
+
+check("a passive lane failure aborts instead of falling back to corpus probes", _lane_failure_aborts_before_fallback)
 
 
 def _no_redirect_following():

@@ -232,7 +232,10 @@ def shodan_search(
             "key": api_key,
             "query": query,
             "page": page,
-            "minify": "true",
+            # Shodan introduced `fields` in 2026 and documents it as mutually
+            # exclusive with minify. `minify=false` plus an explicit allowlist
+            # still returns less data than minify alone, without the API 400.
+            "minify": "false",
             # Shodan banners can contain entire model configurations and other
             # operator data. Request only the fields needed to nominate and
             # contextualise a candidate; never download or log banner bodies.
