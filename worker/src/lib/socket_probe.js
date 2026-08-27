@@ -131,15 +131,15 @@ function hostHeader(ip, port) {
 }
 
 export function reviewedPaths(service) {
+  const paths = new Set();
   if (Object.hasOwn(SERVICES, service)) {
     const profile = SERVICES[service];
-    return new Set([
-      ...profile.confirm.map((step) => step.path),
-      profile.exposure.path,
-    ]);
+    for (const step of profile.confirm) paths.add(step.path);
+    paths.add(profile.exposure.path);
   }
   const profile = DISCOVERY_PROFILES[service];
-  return profile ? new Set([profile.path]) : new Set();
+  if (profile) paths.add(profile.path);
+  return paths;
 }
 
 /** One bounded HTTP GET to one already-authorized address. */

@@ -128,6 +128,21 @@ await check("a hosted fingerprint uses only its reviewed confirm and exposure pa
   );
 });
 
+await check("a discovery profile remains authorized when the service is also hosted", async () => {
+  const capture = {};
+  const run = await runDiscoveryPermit(
+    { ip: "8.8.8.8", port: 11434, service: "ollama" },
+    {
+      connectImpl: () => fakeSocket(
+        "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"models\":[]}",
+        capture
+      ),
+    }
+  );
+  assert.equal(run.result.exposed, true);
+  assert.match(capture.request, /^GET \/api\/ps HTTP\/1\.0\r\n/);
+});
+
 await check("the owned canary requires its exact fixed path and response marker", async () => {
   const capture = {};
   const run = await runDiscoveryPermit(
