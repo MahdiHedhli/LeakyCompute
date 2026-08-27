@@ -43,7 +43,8 @@ that makes the target *do* something. Current tier-1 set:
 | Ray | 8265 | `GET /api/version` (fallback `GET /`) | `GET /api/jobs/` |
 | Jupyter | 8888 | `GET /api/status` (fallback `GET /`) | `GET /tree` |
 
-The off-Worker re-verification runner probes a wider set. Its paths are part of
+The governed re-verification path covers a wider set. The runner nominates and
+schedules; the address-pinned Worker emits the request. These paths are part of
 this invariant, not an implementation detail, so they are listed here and
 asserted in `governance_gates.py` (`every lane probes a reviewed metadata path`):
 
@@ -94,7 +95,7 @@ See `resolvePort()` and the allowlist table in [API.md](API.md).
 bounce a probe to a third host.
 
 **Corrected 2026-08-11 — this had only ever been true of the Worker.** The
-off-Worker runner used urllib's default opener, which follows 301/302/303/307
+legacy runner used urllib's default opener, which follows 301/302/303/307
 automatically, so a probed host could answer with a `Location:` and aim our GET
 at a host that appears in no public index, at a path nobody reviewed. That makes
 the project a request reflector pointed by the target, and it defeats I-22 —
@@ -103,7 +104,7 @@ no-redirect opener. Asserted by `a probed host cannot bounce the runner onto
 another host`.
 
 The general rule: **an invariant enforced in one probe path is not enforced.**
-When probing moved off-Worker, every I-1…I-7 guarantee needed re-proving there,
+When probing first moved off-Worker, every I-1…I-7 guarantee needed re-proving there,
 and only some of them had been.
 
 **I-7. Response bodies are read with a hard cap** (32 KB, `readCapped()`), so a
@@ -172,9 +173,11 @@ override mode. Any client rendering them must escape them.
 
 ## 4. Scope invariants
 
-**I-18 (amended 2026-08-10). The Worker does not scan the internet.** One target
-per request, on request. Bulk re-verification runs off-Worker, rate-limited, and
-only against hosts already listed in a public index (I-22).
+**I-18 (amended 2026-08-27). The Worker is the only target-traffic runtime.**
+The runner nominates bounded candidates, but cannot open a target socket. Each
+request is emitted by the Worker only after its Durable Object commits a lease
+and returns a one-time permit, and only for a host freshly listed by a public
+index (I-22) or covered by an approved owner request.
 
 > The original read "slowly, capped". A fixed per-lane total was never the
 > control that mattered — it limited how much we could honestly say without
@@ -240,6 +243,10 @@ lookup that would not resolve to us.
 per host per 14 days; per-/24 and per-ASN concurrency ceilings and minimum
 spacing; a global rate ceiling below `HARD_MAX_RATE` that no flag can raise.
 Missing last-seen data fails closed: no clock, no probe.
+Active discovery also requires a usable ASN bound into the fresh provenance
+record; missing ASN data fails closed so an ASN-wide opt-out cannot be bypassed.
+If any ASN-wide exclusion exists, discovery pauses unless an independent BGP
+mapping confirms the candidate ASN; the nominating index cannot validate itself.
 
 *Enforcement status:* active discovery is enabled only through the governed
 path. The Durable Object persists the attempt and 14-day next-eligible time
@@ -253,6 +260,9 @@ to probe when it cannot read that list. Exclusions never expire and require no
 justification. Intake is `.github/ISSUE_TEMPLATE/request_removal.yml` plus an
 email route, because needing an account in order to be left alone is not an
 opt-out.
+Activation commits to the Durable Object before the KV compatibility mirror or
+workflow confirmation. A failed strong-state write returns an error and cannot
+produce an `exclusion-active` label.
 
 The verification asymmetry is deliberate and runs opposite to I-22a: a *scan*
 request is actioned only after approval, because a bad-faith one aims our traffic
@@ -303,7 +313,7 @@ honest state, and closing the gaps is tracked work, not a claim.
 | I-14 no raw IPs public | `exposes by_service, no raw IPs` |
 | I-15 hashed abuse logs | `abuse log stores hashed target, never the raw host` |
 | I-25 opt-out honoured before the probe | `NO request reached any target — skipped, not suppressed`, `exclusion beats an attested scan request for the same space`, `an ingest cannot write back a host that is excluded`, `re-filing a removal request purges again, not only the first time`, plus the `exclusions.test.mjs` parsing/matching/bound suite |
-| I-2 probe paths, off-Worker | `every lane probes a reviewed metadata path`, `the litellm lane does not spend the operator's money` |
+| I-2 governed discovery paths | `every lane probes a reviewed metadata path`, `the litellm lane does not spend the operator's money` |
 | I-6 redirects | `I-6: the probe never follows a redirect off the target` (Worker), `a probed host cannot bounce the runner onto another host` (runner) |
 | I-23 attributable probes | `probes carry the agent the public page names`, `every agent this project probes under is attributable to it` |
 | I-24 re-probe interval | `a re-probe inside the interval is skipped, outside it is due`, `the interval is a floor a flag cannot lower` (driven through the CLI), `a host that did not answer still lands in the probe clock` |
@@ -316,8 +326,7 @@ routing does not exist.
 **Not machine-checked yet:** I-3 (no impact proof — the *probe paths* are
 asserted against a reviewed list, but "we never send a request to prove impact"
 is a property of every future change, not of the current table), I-7 (body cap
-in the Worker is asserted; the off-Worker runner has no equivalent — see the
-`triton` lane comment), I-16 (client-side escaping — verified manually against a
+in the Worker is asserted), I-16 (client-side escaping — verified manually against a
 hostile payload, but no regression test), I-17, I-18–I-21 (process/scope
 invariants that live outside the Worker).
 

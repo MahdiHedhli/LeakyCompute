@@ -205,6 +205,15 @@ export function isBroad(entry) {
  */
 export async function addExclusions(env, lines, meta = {}) {
   const existing = await loadExclusions(env);
+  const result = planExclusions(existing, lines, meta);
+  if (result.accepted.length) {
+    await storeExclusions(env, [...existing, ...result.accepted]);
+  }
+  return result;
+}
+
+/** Pure planning step so the Durable Object can activate rules before KV. */
+export function planExclusions(existing, lines, meta = {}) {
   const seen = new Set(existing.map((e) => `${e.type}:${e.value}`));
   const accepted = [];
   const rejected = [];
@@ -233,8 +242,13 @@ export async function addExclusions(env, lines, meta = {}) {
     });
   }
 
-  if (accepted.length) {
-    await env.KV.put(KEY, JSON.stringify([...existing, ...accepted]));
-  }
   return { accepted, rejected, held, total: existing.length + accepted.length };
+}
+
+/** KV is a compatibility mirror; it is never the packet-emission authority. */
+export async function storeExclusions(env, entries) {
+  if (!env.KV || typeof env.KV.put !== "function") {
+    throw new Error("exclusion_kv_unavailable");
+  }
+  await env.KV.put(KEY, JSON.stringify(entries));
 }

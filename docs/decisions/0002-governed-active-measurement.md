@@ -38,8 +38,12 @@ permit denied or already consumed emits no target traffic.
 - Public-index provenance is stored with the lease and must be no older than
   seven days. Operator-owned hosted self-checks are a separate purpose and do
   not turn into discovery provenance.
-- Unknown ASN is the shared `AS-UNKNOWN` bucket and receives the most
-  conservative rate limits. It never bypasses an ASN gate.
+- Active discovery requires a usable ASN bound to the same fresh index record
+  as the target address. Missing or conflicting ASN data fails closed, so it
+  cannot bypass an ASN-wide exclusion.
+- While any ASN-wide exclusion is active, the control plane requires a separate
+  BGP mapping before issuing third-party leases. Until that resolver is wired,
+  the presence of such an exclusion pauses discovery conservatively.
 - Exclusions are authoritative in the control plane. An exclusion becomes
   active before a purge begins and therefore blocks new permits immediately.
 - IP, CIDR, and ASN purges are resumable, cover both host and attempt rows, and

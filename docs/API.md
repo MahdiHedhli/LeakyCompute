@@ -15,7 +15,7 @@ describes the contract; when they disagree, the code wins and this file is a bug
 | `/v1/admin/allowlist` | POST | `X-Admin-Token` | approve / revoke researchers |
 | `/v1/admin/discovery/hits` | GET | `X-Admin-Token` | private hit list (raw IPs) |
 | `/v1/admin/discovery/clock` | GET | `X-Admin-Token` | I-24 re-probe clock (raw IPs) |
-| `/v1/admin/discovery/ingest` | POST | `X-Admin-Token` | ingest off-Worker discovery runs |
+| `/v1/admin/discovery/ingest` | POST | `X-Admin-Token` | mirror emitted governed results into the legacy compatibility cache |
 
 CORS is allowlisted via the `ALLOWED_ORIGINS` var. All responses are
 `Cache-Control: no-store` except `/v1/stats` (`max-age=30`).
@@ -209,6 +209,7 @@ Jupyter never gets OSV results in practice — it reports no version.
 | 400 | `port_not_allowed` | port outside that service's allowlist; response includes `allowed_ports` |
 | 400 | `unknown_service` | every name in `services` unrecognized; response includes `supported` |
 | 403 | `turnstile_failed` | Turnstile verification failed |
+| 413 | `request_too_large` | JSON request body exceeds 8 KiB |
 | 429 | `rate_limited` | includes `scope` (`global` \| `own_ip` \| `override`) and `reset` (epoch seconds) |
 
 ### Rate limits
@@ -224,11 +225,11 @@ the var is unset):
 | override | 24h | 3 (5) |
 | global | 24h | 800 (2000) |
 
-Limits are counted **per check request**, not per outbound probe. One check
-issues at most 9 GETs — per service, up to 2 confirm attempts plus 1 exposure
-probe. Fewer in practice: the confirm loop stops at the first match, the exposure
-probe is skipped entirely when the service isn't confirmed, and a transport
-failure on the first confirm skips the fallback rather than burning a timeout.
+Durable limits are charged per requested service permit. One hosted check can
+request up to three permits (Ollama, Ray, and Jupyter); each service then issues
+at most three reviewed GETs. The whole service/port plan is validated before the
+first permit, concurrent checks for the same address are refused, and the
+confirm loop stops at its first match.
 
 ---
 
@@ -283,7 +284,9 @@ validated catalog, snapshot counts, and live aggregates. `chat_enabled` is
 
 ## Admin endpoints
 
-All require `X-Admin-Token` matching `ADMIN_SYNC_TOKEN`. `401` otherwise, and
+All require `X-Admin-Token` matching the route's purpose-scoped Worker secret:
+`DISCOVERY_ADMIN_TOKEN`, `EXCLUSION_ADMIN_TOKEN`, or `RESEARCH_ADMIN_TOKEN`.
+`401` otherwise, and
 failures are written to the private abuse log.
 
 **`POST /v1/admin/allowlist`** — `{ op: "approve" | "revoke", login, issue_number?, approved_by?, meta? }`

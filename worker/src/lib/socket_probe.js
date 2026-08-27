@@ -294,7 +294,10 @@ export async function runDiscoveryPermit(permit, { timeoutMs = 2500, connectImpl
       },
     };
   }
-  const exposed = response.status === 200;
+  const exposed = response.status === 200 && validatesDiscoveryProfile(permit.service, response);
+  const modelRows = Array.isArray(response.json?.models)
+    ? response.json.models
+    : Array.isArray(response.json?.data) ? response.json.data : [];
   return {
     ok: true,
     result: {
@@ -309,11 +312,11 @@ export async function runDiscoveryPermit(permit, { timeoutMs = 2500, connectImpl
             .map((key) => response.json[key])
             .find((value) => typeof value === "string")?.slice(0, 64) || null
         : null,
-      models: exposed && response.json
-        ? (response.json.models || response.json.data || []).slice?.(0, 25).map((model) => ({
+      models: exposed
+        ? modelRows.slice(0, 25).map((model) => ({
             name: String(model?.name || model?.model || model?.id || "unknown").slice(0, 128),
             size: Number.isFinite(model?.size) ? model.size : null,
-          })) || []
+          }))
         : [],
       canary_marker: permit.service === "owned_canary" && response.json?.leakycompute_canary === "owned"
         ? "owned"
@@ -322,6 +325,36 @@ export async function runDiscoveryPermit(permit, { timeoutMs = 2500, connectImpl
       error_class: null,
     },
   };
+}
+
+function validatesDiscoveryProfile(service, response) {
+  const json = response.json;
+  const text = String(response.text || "").slice(0, 4096).toLowerCase();
+  switch (service) {
+    case "owned_canary": return json?.leakycompute_canary === "owned";
+    case "ollama": return Array.isArray(json?.models);
+    case "ray": return !!json && typeof json === "object" &&
+      [json.ray_version, json.version].some((value) => typeof value === "string");
+    case "jupyter": return /jupyter|notebook|jupyterlab/.test(text);
+    case "open_webui": return !!json && typeof json === "object" &&
+      ["name", "version", "features", "default_models"].some((key) => Object.hasOwn(json, key));
+    case "localai":
+    case "vllm":
+    case "openai_compat_8000":
+    case "openai_compat_8080": return Array.isArray(json?.data);
+    case "litellm": return !!json && typeof json === "object" &&
+      ["status", "healthy_endpoints", "healthy_count"].some((key) => Object.hasOwn(json, key));
+    case "comfyui": return !!json && typeof json === "object" &&
+      (Object.hasOwn(json, "system") || Object.hasOwn(json, "devices"));
+    case "gradio": return !!json && typeof json === "object" &&
+      (Array.isArray(json.components) || typeof json.version === "string");
+    case "mlflow": return /mlflow/.test(text);
+    case "triton": return !!json && typeof json === "object" &&
+      typeof json.name === "string" && Array.isArray(json.extensions);
+    case "tensorboard": return !!json && typeof json === "object" &&
+      Object.keys(json).some((key) => /scalars|graphs|images|histograms/.test(key));
+    default: return false;
+  }
 }
 
 export function completionOutcome(results) {

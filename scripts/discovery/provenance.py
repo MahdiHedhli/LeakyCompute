@@ -71,14 +71,26 @@ def parse_ts(value) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
-def index_provenance(index: str, query: str, lane: str, via: str, observed_at=None) -> dict:
+def index_provenance(
+    index: str,
+    query: str,
+    lane: str,
+    via: str,
+    observed_at=None,
+    *,
+    ip=None,
+    asn=None,
+    country_code=None,
+) -> dict:
     """Record for I-22(a): this host was read out of a public index listing."""
     if isinstance(observed_at, datetime):
         ts = observed_at.isoformat()
     elif observed_at:
         ts = str(observed_at)
     else:
-        ts = _now().isoformat()
+        # Never manufacture freshness. A public-index result without its own
+        # observation time cannot authorize target traffic.
+        ts = None
     return {
         "path": PATH_PUBLIC_INDEX,
         "index": str(index or "").strip().lower(),
@@ -86,6 +98,9 @@ def index_provenance(index: str, query: str, lane: str, via: str, observed_at=No
         "lane": lane,
         "via": via,
         "observed_at": ts,
+        "ip": str(ip).strip() if ip else None,
+        "asn": str(asn).strip().upper() if asn else None,
+        "country_code": str(country_code).strip().upper() if country_code else None,
     }
 
 

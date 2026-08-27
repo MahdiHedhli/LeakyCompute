@@ -46,13 +46,18 @@ jobs:
         env:
           SHODAN_API_KEY: ${{ secrets.SHODAN_API_KEY }}
           LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
-          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
           MAX_TOTAL: ${{ github.event.inputs.max_total || '120' }}
           LANES: ${{ github.event.inputs.lanes || 'ollama,jupyter,ray,open_webui,litellm,vllm,comfyui' }}
         run: |
           set -euo pipefail
           if [ -z "${SHODAN_API_KEY:-}" ] || [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_ADMIN_TOKEN:-}" ]; then
             echo "Required discovery credentials are not configured."
+            exit 1
+          fi
+          case "$MAX_TOTAL" in (*[!0-9]*|'') echo "max_total must be an integer"; exit 1;; esac
+          if [ "$MAX_TOTAL" -lt 1 ] || [ "$MAX_TOTAL" -gt 128 ]; then
+            echo "max_total must be between 1 and 128"
             exit 1
           fi
           python3 -u scripts/discovery/run_multilane.py \

@@ -48,7 +48,7 @@ jobs:
         id: apply
         env:
           API_BASE: ${{ secrets.LEAKY_API_BASE }}
-          ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+          ADMIN_TOKEN: ${{ secrets.LEAKY_EXCLUSION_ADMIN_TOKEN }}
           ENTRIES: ${{ steps.scope.outputs.entries }}
           ISSUE: ${{ github.event.issue.number }}
           # Broad approval is valid only on the event where a maintainer applies
@@ -58,16 +58,25 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${API_BASE:-}" ] || [ -z "${ADMIN_TOKEN:-}" ]; then
-            echo "Missing LEAKY_API_BASE or LEAKY_ADMIN_SYNC_TOKEN secrets."
+            echo "Missing LEAKY_API_BASE or LEAKY_EXCLUSION_ADMIN_TOKEN secrets."
             exit 1
           fi
           API_BASE="${API_BASE%/}"
-          RESP=$(curl -fsS -X POST "$API_BASE/v1/admin/exclusions" \
-            -H "Content-Type: application/json" \
-            -H "X-Admin-Token: $ADMIN_TOKEN" \
-            -d "{\"entries\":$ENTRIES,\"issue_number\":$ISSUE,\"allow_broad\":$ALLOW_BROAD}")
+          RESP=""
+          for attempt in 1 2 3; do
+            if RESP=$(curl -fsS -X POST "$API_BASE/v1/admin/exclusions" \
+              -H "Content-Type: application/json" \
+              -H "X-Admin-Token: $ADMIN_TOKEN" \
+              -d "{\"entries\":$ENTRIES,\"issue_number\":$ISSUE,\"allow_broad\":$ALLOW_BROAD}"); then
+              break
+            fi
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 2))
+          done
+          jq -e '.ok == true and .active == true and .control_plane.active == true' \
+            >/dev/null <<<"$RESP"
           echo "response=$RESP" >> "$GITHUB_OUTPUT"
-          echo "$RESP"
+          echo "Authoritative exclusion activation confirmed."
 
       - name: Confirm on the issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -81,10 +90,11 @@ jobs:
             const rejected = r.rejected || [];
             const held = r.held || [];
             const purge = r.purged || {};
-            const deletionComplete = purge.complete !== false && !purge.error;
+            const exclusionActive = r.ok === true && r.active === true && r.control_plane?.active === true;
+            const deletionComplete = r.deletion_complete === true;
 
             const lines = [];
-            if (accepted.length) {
+            if (accepted.length && exclusionActive) {
               lines.push(
                 deletionComplete
                   ? `**Exclusion applied.** We have stopped probing the following and deleted existing records:`
@@ -141,7 +151,7 @@ jobs:
               body: lines.join('\n'),
             });
 
-            if (!held.length && !rejected.length) {
+            if (exclusionActive && !held.length && !rejected.length) {
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

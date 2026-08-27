@@ -68,8 +68,8 @@ RL_OVERRIDE_WINDOW_SEC = "900"
 RL_OVERRIDE_MAX = "1"
 RL_OVERRIDE_DAY_MAX = "3"
 RL_GLOBAL_DAY_MAX = "800"
-# Per-probe timeout. Tier-1 services are probed in parallel, so worst-case
-# wall clock is roughly 2x this (confirm + exposure), not 3x this.
+# Per-probe timeout. Hosted services run sequentially so each one receives its
+# own durable lease and completion record.
 CHECK_TIMEOUT_MS = "2500"
 # Tier-1 services and their permitted ports are defined in
 # worker/src/lib/services.js. Ports are validated against that per-service
@@ -134,4 +134,6 @@ preview_id = "32c933f498d646afae8eb1e617063f8b"
 # Secrets (set via wrangler secret put — never commit):
 #   TURNSTILE_SECRET_KEY   optional; if unset, Turnstile check is skipped (dev only)
 #   ABUSE_LOG_SALT         secret HMAC key for private abuse-log pseudonyms
-#   ADMIN_SYNC_TOKEN       GitHub Action uses this to write allowlist entries
+#   DISCOVERY_ADMIN_TOKEN  governed discovery and control maintenance
+#   EXCLUSION_ADMIN_TOKEN  opt-out activation and listing only
+#   RESEARCH_ADMIN_TOKEN   researcher approval and revocation only

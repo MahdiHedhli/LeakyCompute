@@ -89,6 +89,12 @@ def filter_candidates(cands: list[dict], entries: list[dict]) -> tuple[list[dict
     for c in cands:
         ip_raw = c.get("ip")
         asn = _norm_asn(c.get("asn"))
+        # ASN exclusions cannot be evaluated without a current ASN. Active
+        # discovery therefore fails closed instead of treating "unknown" as a
+        # separate rate bucket that can bypass an operator's opt-out.
+        if not asn:
+            excluded.append({**c, "excluded_by": "missing_asn"})
+            continue
         if asn and asn in asns:
             excluded.append({**c, "excluded_by": asn})
             continue

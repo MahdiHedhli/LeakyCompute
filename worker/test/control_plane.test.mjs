@@ -83,10 +83,12 @@ const provenance = {
   kind: "public_index",
   source: "shodan",
   observed_at: "2026-08-27T12:00:00Z",
+  ip: "8.8.8.8",
+  asn: "AS15169",
 };
 
 function candidate(overrides = {}) {
-  return {
+  const value = {
     purpose: "active_discovery",
     ip: "8.8.8.8",
     asn: "AS15169",
@@ -96,6 +98,10 @@ function candidate(overrides = {}) {
     provenance,
     ...overrides,
   };
+  if (!Object.hasOwn(overrides, "provenance")) {
+    value.provenance = { ...provenance, ip: value.ip, asn: value.asn };
+  }
+  return value;
 }
 
 let failures = 0;
@@ -210,15 +216,30 @@ try {
     "/v1/admin/discovery/lease",
     candidate({ ip: "64.6.64.6", asn: null, service: "jupyter", port: 8888 })
   );
-  const unknown2 = await post(
+  await check("active discovery without a usable ASN fails closed", () => {
+    assert.equal(unknown1.status, 403);
+    assert.equal(unknown1.body.error, "target_asn_required");
+  });
+
+  const swapped = await post(
     "/v1/admin/discovery/lease",
-    candidate({ ip: "64.6.65.6", asn: null, service: "jupyter", port: 8888 })
+    candidate({ ip: "64.6.65.6", asn: "AS15169", provenance })
   );
-  await check("unknown ASN uses one shared conservative bucket", () => {
-    assert.equal(unknown1.status, 200);
-    assert.equal(unknown1.body.asn, "AS-UNKNOWN");
-    assert.equal(unknown2.status, 429);
-    assert.equal(unknown2.body.scope, "active_unknown_asn");
+  await check("provenance cannot be moved to another target", () => {
+    assert.equal(swapped.status, 403);
+    assert.equal(swapped.body.error, "fresh_public_index_provenance_required");
+  });
+
+  const hostedA = await post("/v1/admin/discovery/lease", {
+    purpose: "hosted_self", ip: "64.6.65.7", asn: "AS19281", service: "ollama", port: 11434, now,
+  });
+  const hostedB = await post("/v1/admin/discovery/lease", {
+    purpose: "hosted_self", ip: "64.6.65.7", asn: "AS19281", service: "ray", port: 8265, now,
+  });
+  await check("concurrent hosted checks cannot orphan an earlier permit", () => {
+    assert.equal(hostedA.status, 200);
+    assert.equal(hostedB.status, 409);
+    assert.equal(hostedB.body.error, "probe_in_progress");
   });
 
   const discoveryCanary = await post(
@@ -393,6 +414,35 @@ try {
     assert.equal(aggregates.status, 200);
     assert.equal(aggregates.body.dimensions.corpus.reverified_hosts, 6);
     assert.equal(aggregates.body.dimensions.stack.ollama, 6);
+  });
+
+  const approved = await post("/v1/admin/allowlist", {
+    op: "approve", login: "researcher-one", aliases: ["researcher@example.test"],
+  });
+  const revoked = await post("/v1/admin/allowlist", {
+    op: "revoke", login: "researcher-one",
+  });
+  await check("research authorization changes commit through strong storage", () => {
+    assert.deepEqual(
+      { status: approved.status, active: approved.body.active, login: approved.body.login },
+      { status: 200, active: true, login: "researcher-one" }
+    );
+    assert.deepEqual(
+      { status: revoked.status, active: revoked.body.active, login: revoked.body.login },
+      { status: 200, active: false, login: "researcher-one" }
+    );
+    assert.equal(JSON.stringify(approved.body).includes("researcher@example.test"), false);
+  });
+
+  const asnOptOut = await post("/v1/admin/control/exclusions", { entries: ["AS64555"] });
+  const unverifiedAsnLease = await post(
+    "/v1/admin/discovery/lease",
+    candidate({ ip: "64.6.65.8", asn: "AS64556" })
+  );
+  await check("an ASN-wide opt-out pauses discovery without independent BGP mapping", () => {
+    assert.equal(asnOptOut.status, 200);
+    assert.equal(unverifiedAsnLease.status, 503);
+    assert.equal(unverifiedAsnLease.body.error, "independent_asn_verification_required");
   });
 } finally {
   child.kill("SIGTERM");

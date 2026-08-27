@@ -102,12 +102,12 @@ Treat this as one storage/control-plane migration, not a series of KV patches:
    and revocations ahead of telemetry.
 6. **Resumable reconciliation.** Recount into versioned staging state and switch
    generations only after the entire corpus is processed.
-7. **Conservative unknown-ASN handling.** Missing ASN belongs to a shared bounded
-   bucket; it never skips the per-ASN safety gate.
+7. **Fail-closed ASN handling.** Active discovery requires a usable ASN bound to
+   the same fresh index record as the target; missing ASN data receives no lease.
 
 Implemented as a single SQLite-backed Durable Object. KV remains a migration
 source and compatibility/public cache, not the authority for probe permission,
-exclusions, retention, or corpus traversal.
+research authorization, exclusions, retention, or corpus traversal.
 
 **Exit criteria met 2026-08-27:** the re-enable tests pass under concurrency,
 interruption, a corpus larger than every page limit, a matching record beyond

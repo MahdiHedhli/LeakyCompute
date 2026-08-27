@@ -69,7 +69,10 @@ def eligible(cands, approved=None):
 # ---------------------------------------------------------------------------
 section("[G1] I-22: no provenance record, no probe")
 
-GOOD_INDEX = P.index_provenance("shodan", "product:Ollama", "ollama", "lane_search")
+GOOD_INDEX = P.index_provenance(
+    "shodan", "product:Ollama", "ollama", "lane_search", iso(0),
+    ip="8.8.8.14", asn="AS64496"
+)
 
 
 def _no_record():

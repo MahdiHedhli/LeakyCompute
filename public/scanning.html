@@ -72,13 +72,31 @@
           <tr><td>Jupyter</td><td>8888</td><td><code>GET /api/status</code>, <code>GET /tree</code></td></tr>
         </tbody>
       </table>
+      <p><strong>Active discovery uses one request per nominated candidate:</strong></p>
+      <table class="probe-table">
+        <thead><tr><th>Profile</th><th>Allowed port(s)</th><th>Exact request</th></tr></thead>
+        <tbody>
+          <tr><td>Ollama</td><td>11434, 11435</td><td><code>GET /api/ps</code></td></tr>
+          <tr><td>Jupyter</td><td>8888–8890</td><td><code>GET /</code></td></tr>
+          <tr><td>Ray</td><td>8265, 8266</td><td><code>GET /api/version</code></td></tr>
+          <tr><td>Open WebUI</td><td>8080</td><td><code>GET /api/config</code></td></tr>
+          <tr><td>LocalAI</td><td>8080</td><td><code>GET /v1/models</code></td></tr>
+          <tr><td>LiteLLM</td><td>4000</td><td><code>GET /health/liveliness</code></td></tr>
+          <tr><td>vLLM / OpenAI-compatible</td><td>8000, 8080</td><td><code>GET /v1/models</code></td></tr>
+          <tr><td>ComfyUI</td><td>8188</td><td><code>GET /system_stats</code></td></tr>
+          <tr><td>Gradio</td><td>7860</td><td><code>GET /config</code></td></tr>
+          <tr><td>MLflow</td><td>5000</td><td><code>GET /health</code></td></tr>
+          <tr><td>Triton</td><td>8000</td><td><code>GET /v2</code></td></tr>
+          <tr><td>TensorBoard</td><td>6006</td><td><code>GET /data/plugins_listing</code></td></tr>
+        </tbody>
+      </table>
       <p>
         Probes never submitted a job, pulled a model, sent a prompt, started a
         kernel, read a file, or attempted to authenticate. They did not follow
         redirects or scan ports; each service was contacted only on a reviewed port.
       </p>
       <p>
-        Traffic uses the User-Agent <code>LeakyCompute-SafeProbe</code>. A durable
+        Traffic uses the User-Agent <code>LeakyCompute-SafeProbe/3.0</code>. A durable
         cooldown lease is written before target traffic, and the Worker consumes a
         one-time permit immediately before opening an address-pinned socket.
       </p>

@@ -143,6 +143,24 @@ await check("a discovery profile remains authorized when the service is also hos
   assert.match(capture.request, /^GET \/api\/ps HTTP\/1\.0\r\n/);
 });
 
+await check("an unrelated HTTP 200 is not classified as an exposed AI service", async () => {
+  const run = await runDiscoveryPermit(
+    { ip: "8.8.4.4", port: 8888, service: "jupyter" },
+    { connectImpl: () => fakeSocket("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n<h1>Welcome</h1>") }
+  );
+  assert.equal(run.result.answered, true);
+  assert.equal(run.result.exposed, false);
+});
+
+await check("hostile non-array model JSON cannot crash an emitted probe", async () => {
+  const run = await runDiscoveryPermit(
+    { ip: "8.8.8.8", port: 11434, service: "ollama" },
+    { connectImpl: () => fakeSocket("HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"models\":{}}") }
+  );
+  assert.equal(run.result.exposed, false);
+  assert.deepEqual(run.result.models, []);
+});
+
 await check("the owned canary requires its exact fixed path and response marker", async () => {
   const capture = {};
   const run = await runDiscoveryPermit(

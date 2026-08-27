@@ -17,12 +17,18 @@ import { json, noContent, publicJson } from "./lib/cors.js";
 import { consume, intEnv } from "./lib/ratelimit.js";
 import { logAbuse } from "./lib/abuse.js";
 import { validateTarget, isPrivateOrLocal } from "./lib/check.js";
-import { loadExclusions, isExcluded, addExclusions } from "./lib/exclusions.js";
+import {
+  loadExclusions,
+  isExcluded,
+  planExclusions,
+  storeExclusions,
+} from "./lib/exclusions.js";
 import {
   runChecks,
   overallSeverity,
   SERVICES,
   TIER1,
+  resolvePort,
 } from "./lib/services.js";
 import {
   getLiveStats,
@@ -421,9 +427,17 @@ async function handleCheck(request, env, ctx) {
   }
 
   const ip = clientIp(request);
+  const contentLength = Number(request.headers.get("Content-Length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > 8 * 1024) {
+    return json({ error: "request_too_large" }, 413, request, env);
+  }
   let body = {};
   try {
-    body = await request.json();
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).length > 8 * 1024) {
+      return json({ error: "request_too_large" }, 413, request, env);
+    }
+    body = raw ? JSON.parse(raw) : {};
   } catch {
     body = {};
   }
@@ -568,6 +582,19 @@ async function handleCheck(request, env, ctx) {
     ports.ollama = body.port;
   }
 
+  for (const service of services) {
+    const resolved = resolvePort(service, ports[service]);
+    if (!resolved.ok) {
+      return json({
+        error: resolved.error,
+        service,
+        allowed_ports: resolved.allowed,
+        message: "No target traffic was sent.",
+      }, 400, request, env);
+    }
+    ports[service] = resolved.port;
+  }
+
   // Each service gets its own pre-committed lease and one-time permit. The
   // permit is consumed immediately before the TCP socket opens, so a crash,
   // replay, late opt-out, or overlapping request cannot emit unaccounted
@@ -701,6 +728,7 @@ async function handleCheck(request, env, ctx) {
           stacks: exposedServices.map((r) => r.service),
           source: "public_self_check",
           asn: request.cf?.asn || null,
+          country_code: request.cf?.country || null,
           last_seen: new Date().toISOString(),
         }],
       },
@@ -860,9 +888,10 @@ async function handleResearchCatalog(request, env) {
   );
 }
 
-function requireAdmin(request, env) {
+function requireAdmin(request, env, secretName = "DISCOVERY_ADMIN_TOKEN") {
   const token = request.headers.get("X-Admin-Token") || "";
-  const expected = env.ADMIN_SYNC_TOKEN || "";
+  const expected = env[secretName] ||
+    (env.ENVIRONMENT === "production" ? "" : env.ADMIN_SYNC_TOKEN || "");
   return !!(expected && token && token === expected);
 }
 
@@ -898,10 +927,10 @@ async function handleControlHealth(request, env) {
 }
 
 function requireControlMaintenance(request, env) {
-  if (requireAdmin(request, env)) return true;
-  const supplied = request.headers.get("X-Migration-Token") || "";
-  const expected = env.CONTROL_MIGRATION_TOKEN || "";
-  return !!(supplied && expected && supplied === expected);
+  // The one-time migration credential was deleted after cutover. Keeping a
+  // dormant second credential path would silently broaden every maintenance
+  // route if that secret were ever recreated by mistake.
+  return requireAdmin(request, env);
 }
 
 async function readJsonBody(request) {
@@ -1120,12 +1149,21 @@ async function handleDiscoveryProbe(request, env) {
     error_class: run.error_class || "platform_error",
   };
   const outcome = completionOutcome(result);
-  await controlCall(env, "/lease/complete", {
+  const completed = await controlCall(env, "/lease/complete", {
     body: { lease_id: consumed.body.lease_id, outcome },
   });
+  if (completed.status !== 200 || completed.body.ok === false) {
+    return json({
+      ok: false,
+      error: "attempt_completion_failed",
+      result_preserved: true,
+      outcome,
+      result,
+    }, 503, request, env);
+  }
 
   if (outcome === "exposed") {
-    await controlCall(env, "/hosts/upsert", {
+    const stored = await controlCall(env, "/hosts/upsert", {
       body: {
         records: [{
           ip: consumed.body.ip,
@@ -1135,10 +1173,20 @@ async function handleDiscoveryProbe(request, env) {
           source: `public_index:${consumed.body.provenance?.source || "unknown"}`,
           index_observed_at: consumed.body.provenance?.observed_at || null,
           asn: consumed.body.asn,
+          country_code: consumed.body.provenance?.country_code || null,
           last_seen: new Date().toISOString(),
         }],
       },
     });
+    if (stored.status !== 200 || stored.body.accepted !== 1) {
+      return json({
+        ok: false,
+        error: "authoritative_result_storage_failed",
+        result_preserved: true,
+        outcome,
+        result,
+      }, 503, request, env);
+    }
   }
   return json({
     ok: true,
@@ -1149,7 +1197,7 @@ async function handleDiscoveryProbe(request, env) {
 }
 
 async function handleAdminAllowlist(request, env) {
-  if (!requireAdmin(request, env)) {
+  if (!requireAdmin(request, env, "RESEARCH_ADMIN_TOKEN")) {
     await logAbuse(env, {
       action: "admin_allowlist",
       result: "unauthorized",
@@ -1172,7 +1220,7 @@ async function handleAdminAllowlist(request, env) {
 
   if (op === "revoke") {
     const entry = await revokeResearcher(env, login);
-    return json({ ok: true, entry }, 200, request, env);
+    return json({ ok: true, login: entry.login, active: false }, 200, request, env);
   }
 
   const entry = await approveResearcher(env, {
@@ -1186,7 +1234,7 @@ async function handleAdminAllowlist(request, env) {
     // and the researcher would still be locked out.
     aliases: Array.isArray(body.aliases) ? body.aliases : [],
   });
-  return json({ ok: true, entry }, 200, request, env);
+  return json({ ok: true, login: entry.login, active: true }, 200, request, env);
 }
 
 /**
@@ -1196,7 +1244,7 @@ async function handleAdminAllowlist(request, env) {
  * duplicated request can only ever widen the list.
  */
 async function handleAdminExclusions(request, env) {
-  if (!requireAdmin(request, env)) {
+  if (!requireAdmin(request, env, "EXCLUSION_ADMIN_TOKEN")) {
     await logAbuse(env, {
       action: "admin_exclusions",
       result: "unauthorized",
@@ -1217,20 +1265,29 @@ async function handleAdminExclusions(request, env) {
     ? body.entries
     : String(body.scope || "").split(/[\r\n,]+/);
 
-  const result = await addExclusions(env, lines, {
+  const existing = await loadExclusions(env);
+  const result = planExclusions(existing, lines, {
     issue_number: body.issue_number ?? null,
     source: body.source || "removal-request",
     // Only a maintainer label can auto-honour space broader than the bound.
     allowBroad: !!body.allow_broad,
   });
 
-  // During the dark migration KV remains the live authority, but every newly
-  // accepted exclusion is mirrored into the strong control plane immediately.
-  // A mirror failure is reported; it never rolls back the already-active KV
-  // exclusion while target traffic is disabled.
-  let control_plane = { ok: true, accepted: 0 };
-  const authoritativeExclusions = await loadExclusions(env);
-  if (authoritativeExclusions.length) {
+  // The Durable Object is the packet-emission authority. Activate there first;
+  // a KV success must never be mistaken for a live opt-out if this call fails.
+  const strongRequired = env.ENVIRONMENT === "production" || env.CONTROL_PLANE_READY === "true";
+  let control_plane = {
+    ok: !strongRequired,
+    active: !strongRequired,
+    accepted: 0,
+    purges: [],
+    legacy_test_mode: !strongRequired || undefined,
+  };
+  const authoritativeExclusions = [...existing, ...result.accepted];
+  if (strongRequired && authoritativeExclusions.length === 0) {
+    control_plane = { ok: true, active: true, accepted: 0, purges: [] };
+  }
+  if (strongRequired && authoritativeExclusions.length) {
     try {
       const mirrored = await controlCall(env, "/exclusions/add", {
         body: {
@@ -1243,6 +1300,7 @@ async function handleAdminExclusions(request, env) {
       });
       control_plane = {
         ok: mirrored.status >= 200 && mirrored.status < 300 && mirrored.body.ok !== false,
+        active: mirrored.status >= 200 && mirrored.status < 300 && mirrored.body.ok !== false,
         status: mirrored.status,
         accepted: mirrored.body.accepted?.length || 0,
         error: mirrored.body.error || null,
@@ -1266,15 +1324,40 @@ async function handleAdminExclusions(request, env) {
         }
       }
     } catch (error) {
-      control_plane = { ok: false, accepted: 0, error: String(error?.message || error) };
+      control_plane = { ok: false, active: false, accepted: 0, error: String(error?.message || error), purges: [] };
     }
+  }
+
+  if (!control_plane.active) {
+    return json(
+      { ok: false, active: false, ...result, control_plane, error: "exclusion_activation_failed" },
+      503,
+      request,
+      env
+    );
+  }
+
+  // Mirror only after authoritative activation. A retry is idempotent and the
+  // exclusion remains active even if this compatibility write is unavailable.
+  try {
+    await storeExclusions(env, authoritativeExclusions);
+  } catch (error) {
+    return json({
+      ok: false,
+      active: true,
+      deletion_complete: false,
+      ...result,
+      control_plane,
+      error: "exclusion_mirror_failed",
+    }, 503, request, env);
   }
 
   const purged = await purgeExcludedRecords(env);
 
   // Rejected lines are reported, never silently dropped: an operator who
   // fat-fingers a CIDR must find out, not assume they are excluded.
-  return json({ ok: true, ...result, control_plane, purged }, 200, request, env);
+  const deletion_complete = control_plane.ok && !purged.error && purged.complete !== false;
+  return json({ ok: true, active: true, deletion_complete, ...result, control_plane, purged }, 200, request, env);
 }
 
 /**
@@ -1310,7 +1393,10 @@ async function purgeExcludedRecords(env) {
 
 /** The discovery runner fetches this before probing and refuses to run without it. */
 async function handleListExclusions(request, env) {
-  if (!requireAdmin(request, env)) {
+  if (
+    !requireAdmin(request, env, "EXCLUSION_ADMIN_TOKEN") &&
+    !requireAdmin(request, env, "DISCOVERY_ADMIN_TOKEN")
+  ) {
     return json({ error: "unauthorized" }, 401, request, env);
   }
   const entries = await loadExclusions(env);

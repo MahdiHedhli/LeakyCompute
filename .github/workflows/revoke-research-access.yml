@@ -32,16 +32,19 @@ jobs:
       - name: Revoke on Worker
         env:
           API_BASE: ${{ secrets.LEAKY_API_BASE }}
-          ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+          ADMIN_TOKEN: ${{ secrets.LEAKY_RESEARCH_ADMIN_TOKEN }}
           LOGIN: ${{ steps.user.outputs.login }}
         run: |
           set -euo pipefail
           API_BASE="${API_BASE%/}"
-          jq -nc --arg login "$LOGIN" '{op:"revoke", login:$login}' \
+          RESP=$(jq -nc --arg login "$LOGIN" '{op:"revoke", login:$login}' \
           | curl -fsS -X POST "$API_BASE/v1/admin/allowlist" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Token: $ADMIN_TOKEN" \
-            --data-binary @-
+            --data-binary @-)
+          jq -e '.ok == true and .active == false and (.login | type == "string")' \
+            >/dev/null <<<"$RESP"
+          echo "Research access revocation confirmed."
 
       - name: Comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

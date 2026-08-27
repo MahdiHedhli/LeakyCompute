@@ -220,15 +220,15 @@ config, not a host we have any standing to touch.
 
 | Service | Preferred query | Port | Reviewed metadata path (local/future) |
 |---------|-----------------|------|-----------------------------------------|
-| Open WebUI | `http.title:"Open WebUI"` | varies | `GET /` |
+| Open WebUI | `http.title:"Open WebUI"` | 8080 | `GET /api/config` |
 | ComfyUI | `http.title:"ComfyUI"` | 8188 | `GET /system_stats` |
-| Gradio | `http.title:"Gradio"` | 7860 | `GET /` |
+| Gradio | `http.title:"Gradio"` | 7860 | `GET /config` |
 | LocalAI | `http.html:"LocalAI"` | 8080 | `GET /v1/models` |
 | LiteLLM | `http.html:"LiteLLM"` | 4000 | `GET /health/liveliness` |
 | vLLM | `http.html:"vLLM"` or `port:8000 http.html:"/v1/models"` | 8000 | `GET /v1/models` |
 | OpenAI-compat | `http.html:"/v1/models"` | 8000/8080 | `GET /v1/models` |
 | MLflow | `http.title:"MLflow"` | 5000 | `GET /health` |
-| TensorBoard | `http.title:"TensorBoard"` | 6006 | `GET /` |
+| TensorBoard | `http.title:"TensorBoard"` | 6006 | `GET /data/plugins_listing` |
 
 Machine-readable profiles: [`scripts/discovery/profiles.yaml`](../scripts/discovery/profiles.yaml).
 
@@ -329,7 +329,7 @@ falling back to historical corpus targets.
 | Active probing | runner ceiling **0.5/s**; production schedule requests **0.2/s** |
 | Hosted public check | separate per-address and daily budgets |
 | Neighborhood | one in flight per IPv4 /24 or IPv6 /48; 30-second spacing |
-| ASN | two in flight; unknown ASN shares the most conservative bucket |
+| ASN | two in flight; missing or unparseable ASN fails closed before a lease |
 | Worker ingest | **≤150**/request, **10**/hour |
 
 ---

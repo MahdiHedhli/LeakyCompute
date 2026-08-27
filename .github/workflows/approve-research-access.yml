@@ -52,7 +52,7 @@ jobs:
       - name: Sync allowlist to Cloudflare Worker
         env:
           API_BASE: ${{ secrets.LEAKY_API_BASE }}
-          ADMIN_TOKEN: ${{ secrets.LEAKY_ADMIN_SYNC_TOKEN }}
+          ADMIN_TOKEN: ${{ secrets.LEAKY_RESEARCH_ADMIN_TOKEN }}
           LOGIN: ${{ steps.user.outputs.login }}
           ISSUE: ${{ steps.user.outputs.issue_number }}
           APPROVER: ${{ github.actor }}
@@ -60,14 +60,14 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${API_BASE:-}" ] || [ -z "${ADMIN_TOKEN:-}" ]; then
-            echo "Missing LEAKY_API_BASE or LEAKY_ADMIN_SYNC_TOKEN secrets."
+            echo "Missing LEAKY_API_BASE or LEAKY_RESEARCH_ADMIN_TOKEN secrets."
             exit 1
           fi
           API_BASE="${API_BASE%/}"
           # Production Access presents the exact signed email. The GitHub handle
           # remains the administrative primary; its email alias is the only
           # production identity that may resolve to it.
-          jq -nc \
+          RESP=$(jq -nc \
             --arg login "$LOGIN" \
             --arg email "${ACCESS_EMAIL:-}" \
             --arg approved_by "$APPROVER" \
@@ -78,7 +78,10 @@ jobs:
           | curl -fsS -X POST "$API_BASE/v1/admin/allowlist" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Token: $ADMIN_TOKEN" \
-            --data-binary @-
+            --data-binary @-)
+          jq -e '.ok == true and .active == true and (.login | type == "string")' \
+            >/dev/null <<<"$RESP"
+          echo "Research access activation confirmed."
 
       - name: Comment and relabel
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

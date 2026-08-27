@@ -194,3 +194,27 @@ write budget are implemented and adversarially tested.
   discriminator cannot emit a target request in either version.
 - The public pause notice, Access redirect, zero remaining discovery artifacts,
   and 13 deleted log endpoints were verified remotely.
+
+## 2026-08-27 Daybreak Blue follow-up
+
+A second adversarial pass after re-enablement found three high-severity edge
+cases. They were treated as new blockers: the scheduled workflow was paused
+again before remediation.
+
+- Active discovery now fails closed when ASN data is missing, and the Worker
+  verifies that the fresh provenance record is bound to the same IP and ASN.
+  Because the nominating index cannot independently validate its own ASN data,
+  any ASN-wide opt-out pauses discovery until a separate BGP mapping is present.
+- ASN-facet candidates preserve Shodan's own observation timestamp; missing or
+  malformed timestamps are never replaced with the current time.
+- Opt-outs activate in the Durable Object before the KV mirror or workflow
+  confirmation. A failed activation returns 503 and cannot add the
+  `exclusion-active` label.
+
+The same pass also tightened hosted-check concurrency and plan validation,
+added service-specific response validation, capped public request bodies,
+moved researcher authorization/revocation into transactional strong storage,
+fixed composite purge pagination, preserved authoritative geography, enforced
+the 128-candidate run ceiling, and made runner/control failures visible. No
+approval or revocation workflow runs existed in the repository history, so no
+email-bearing Action logs required deletion.

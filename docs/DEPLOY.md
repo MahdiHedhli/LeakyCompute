@@ -39,7 +39,7 @@ instead.
 When one arrives that way, register it without putting it in the thread:
 
 ```bash
-# ADMIN_TOKEN is the Worker's ADMIN_SYNC_TOKEN
+# Use the purpose-scoped Worker token for the route being verified.
 curl -fsS -X POST "$LEAKY_API_BASE/v1/admin/allowlist" \
   -H "Content-Type: application/json" \
   -H "X-Admin-Token: $ADMIN_TOKEN" \
@@ -95,7 +95,9 @@ npx --yes wrangler@4.126.0 login \
   --scopes workers_scripts:write \
   --use-keyring
 # wrangler.toml already has KV ids
-npx --yes wrangler@4.126.0 secret put ADMIN_SYNC_TOKEN
+npx --yes wrangler@4.126.0 secret put DISCOVERY_ADMIN_TOKEN
+npx --yes wrangler@4.126.0 secret put EXCLUSION_ADMIN_TOKEN
+npx --yes wrangler@4.126.0 secret put RESEARCH_ADMIN_TOKEN
 npx --yes wrangler@4.126.0 secret put ABUSE_LOG_SALT  # high-entropy HMAC key; required for abuse logs
 # optional:
 npx --yes wrangler@4.126.0 secret put TURNSTILE_SECRET_KEY
@@ -113,16 +115,16 @@ new version with `npx --yes wrangler@4.126.0 deployments list`, then verify the
 custom API hostname directly. Treat the deploy as failed only if the promoted
 version or live endpoint is wrong.
 
-The strong-state migration uses `CONTROL_MIGRATION_TOKEN` only as a temporary
-bootstrap secret. Set it for migration, verify `/v1/admin/control/health`, full
-pagination, purge/retention, and aggregate reconciliation, then delete it:
+The completed strong-state migration used `CONTROL_MIGRATION_TOKEN` as a
+temporary bootstrap secret. It has been deleted, and the Worker no longer
+accepts that header on maintenance routes. Confirm it remains absent:
 
 ```bash
 npx --yes wrangler@4.126.0 secret delete CONTROL_MIGRATION_TOKEN
 ```
 
-Do not leave the migration credential installed after activation. The normal
-admin token cannot invoke the bootstrap migration route.
+Do not recreate the migration credential. Any future migration is an explicit
+architecture change and must introduce a newly reviewed, narrowly scoped path.
 
 `wrangler.toml` also enables Workers Caching and the `STATS_RATE_LIMITER`
 binding. These are part of the Worker version and require no additional secret
@@ -134,7 +136,8 @@ URLs are set in:
 
 - `public/js/config.js` → `API_BASE`
 - `lab/js/config.js` → `API_BASE`
-- GitHub secrets: `LEAKY_API_BASE`, `LEAKY_ADMIN_SYNC_TOKEN`, `LEAKY_LAB_URL`
+- GitHub secrets: `LEAKY_API_BASE`, `LEAKY_DISCOVERY_ADMIN_TOKEN`,
+  `LEAKY_EXCLUSION_ADMIN_TOKEN`, `LEAKY_RESEARCH_ADMIN_TOKEN`, `LEAKY_LAB_URL`
 
 Update `ALLOWED_ORIGINS` in `wrangler.toml` / dashboard vars to include:
 
@@ -174,7 +177,9 @@ Allowlist enforcement is **application-level** (Worker KV) after issue approval 
 | Secret | Purpose |
 |--------|---------|
 | `LEAKY_API_BASE` | Worker URL |
-| `LEAKY_ADMIN_SYNC_TOKEN` | Same as Worker `ADMIN_SYNC_TOKEN` |
+| `LEAKY_DISCOVERY_ADMIN_TOKEN` | Same as Worker `DISCOVERY_ADMIN_TOKEN` |
+| `LEAKY_EXCLUSION_ADMIN_TOKEN` | Same as Worker `EXCLUSION_ADMIN_TOKEN` |
+| `LEAKY_RESEARCH_ADMIN_TOKEN` | Same as Worker `RESEARCH_ADMIN_TOKEN` |
 | `LEAKY_LAB_URL` | Lab URL used in approval comments |
 
 ## 6. Labels

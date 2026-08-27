@@ -2,7 +2,10 @@
 export async function verifyTurnstile(env, token, ip) {
   const secret = env.TURNSTILE_SECRET_KEY;
   if (!secret) {
-    // Dev / not configured: allow but mark
+    if (env.ENVIRONMENT === "production") {
+      return { ok: false, error: "turnstile_not_configured" };
+    }
+    // Local tests and development may explicitly run without the service.
     return { ok: true, skipped: true };
   }
   if (!token) return { ok: false, error: "turnstile_missing" };

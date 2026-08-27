@@ -52,6 +52,7 @@ from typing import Any
 # Reuse helpers from discover.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from discover import (  # noqa: E402
+    HARD_MAX_TOTAL,
     HARD_MAX_RATE,
     PROBE_USER_AGENT,
     GlobalRateLimiter,
@@ -614,6 +615,9 @@ def match_to_candidate(m: dict, lane: dict) -> dict:
             lane["id"],
             "lane_search",
             m.get("timestamp"),
+            ip=m.get("ip_str") or m.get("ip"),
+            asn=geo.get("asn"),
+            country_code=geo.get("country_code"),
         ),
         **geo,
     }
@@ -760,7 +764,14 @@ def collect_lane(
                     "probe_path": lane["probe_path"],
                     "source": h.get("source") or f"shodan_asn:{asn}",
                     "provenance": index_provenance(
-                        "shodan", f"{lane['query']} asn:{asn}", lane["id"], "lane_asn_facet"
+                        "shodan",
+                        f"{lane['query']} asn:{asn}",
+                        lane["id"],
+                        "lane_asn_facet",
+                        h.get("timestamp"),
+                        ip=h.get("ip"),
+                        asn=asn,
+                        country_code=h.get("country_code"),
                     ),
                     "asn": asn,
                     "org": h.get("org"),
@@ -1012,6 +1023,8 @@ def run_governed_probes(
         provenance = c.get("provenance") or {}
         if provenance.get("path") != "public_index":
             return {**c, "exposed": False, "answered": False, "skipped": "public_index_required"}
+        if not c.get("asn"):
+            return {**c, "exposed": False, "answered": False, "skipped": "target_asn_required"}
         lease_status, lease = http_json(
             f"{api_base.rstrip('/')}/v1/admin/discovery/lease",
             method="POST",
@@ -1028,6 +1041,9 @@ def run_governed_probes(
                     "observed_at": provenance.get("observed_at"),
                     "lane": provenance.get("lane"),
                     "query": provenance.get("query"),
+                    "ip": provenance.get("ip"),
+                    "asn": provenance.get("asn"),
+                    "country_code": provenance.get("country_code"),
                 },
             },
             timeout=20,
@@ -1047,12 +1063,12 @@ def run_governed_probes(
             data={"permit_id": lease.get("permit_id")},
             timeout=max(20, int(timeout * 4)),
         )
-        if probe_status not in (200, 503) or not isinstance(probe, dict):
+        if probe_status != 200 or not isinstance(probe, dict):
             return {
                 **c,
                 "exposed": False,
                 "answered": False,
-                "error": f"probe_http_{probe_status}",
+                "error": "probe_commit_failed" if probe_status == 503 else f"probe_http_{probe_status}",
                 "error_class": "platform_error",
             }
         result = probe.get("result") or {}
@@ -1097,7 +1113,8 @@ def self_test_candidates() -> list[dict]:
             "asn": "AS64496",
             "country_code": "ZZ",
             "provenance": index_provenance(
-                "shodan", "product:Ollama", "ollama", "lane_search"
+                "shodan", "product:Ollama", "ollama", "lane_search",
+                datetime.now(timezone.utc).isoformat(), ip="8.8.8.10", asn="AS64496"
             ),
         },
         {
@@ -1117,7 +1134,10 @@ def self_test_candidates() -> list[dict]:
             "source": "curiosity:someone_mentioned_it",
             "asn": "AS64496",
             "country_code": "ZZ",
-            "provenance": index_provenance("hearsay", "?", "jupyter", "lane_search"),
+            "provenance": index_provenance(
+                "hearsay", "?", "jupyter", "lane_search",
+                datetime.now(timezone.utc).isoformat(), ip="8.8.8.12", asn="AS64496"
+            ),
         },
         {
             "ip": "1.1.1.7",
@@ -1163,7 +1183,11 @@ def ingest(api_base: str, token: str, results: list[dict], meta: dict) -> list:
     batch = 100
     outs = []
     for i in range(0, len(results), batch):
-        chunk = results[i : i + batch]
+        chunk = [r for r in results[i : i + batch] if r.get("outcome") in {
+            "exposed", "not_observed", "target_error"
+        }]
+        if not chunk:
+            continue
         # Slim payload for the worker. Provenance stays on this machine: the
         # corpus retains only the fields I-26 lists, and the run's own record
         # (meta, plus the console log) is where the entitlement is auditable.
@@ -1234,7 +1258,12 @@ def main() -> int:
     ap.add_argument("--from-prior", action="store_true", default=True)
     ap.add_argument("--no-prior", action="store_true")
     ap.add_argument("--output", default="data/discovery-multilane.json")
-    ap.add_argument("--max-total", type=int, default=320, help="Cap across all lanes")
+    ap.add_argument(
+        "--max-total",
+        type=int,
+        default=HARD_MAX_TOTAL,
+        help=f"Cap across all lanes (hard maximum {HARD_MAX_TOTAL})",
+    )
     ap.add_argument(
         "--approved-requests",
         default=os.getenv("LEAKY_APPROVED_REQUESTS"),
@@ -1253,6 +1282,9 @@ def main() -> int:
         "candidates. Implies --dry-run; contacts no index and no target.",
     )
     args = ap.parse_args()
+
+    if args.max_total < 1 or args.max_total > HARD_MAX_TOTAL:
+        raise SystemExit(f"--max-total must be between 1 and {HARD_MAX_TOTAL}")
 
     if args.self_test:
         # Forced, not merely defaulted: the synthetic corpus exists to exercise
@@ -1652,6 +1684,12 @@ def main() -> int:
     )
     exposed = [r for r in results if r.get("exposed")]
     print(f"[+] exposed={len(exposed)} / {len(results)}")
+    emitted = [r for r in results if r.get("outcome") in {
+        "exposed", "not_observed", "target_error"
+    }]
+    platform_failures = [r for r in results if r.get("error_class") == "platform_error"]
+    if results and not emitted and platform_failures:
+        raise SystemExit("all governed probes failed at the platform boundary")
 
     # I-26: a final-verification host that stayed silent is deleted now, with
     # the probe as the evidence, rather than waiting for the timer to drop it
