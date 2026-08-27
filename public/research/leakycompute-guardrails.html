@@ -40,7 +40,7 @@
       </header>
 
       <aside class="article-callout">
-        <strong>The short version.</strong> LeakyCompute separates passive index counts, an archive snapshot, and bounded historical re-verification. It reports reachability, never demonstrated impact. After an adversarial Daybreak Blue review found serious flaws in identity, data handling, target validation, and probe scheduling, I suspended active discovery and hosted checks. They stay off until the remaining architectural controls exist.
+        <strong>The short version.</strong> LeakyCompute separates passive index counts, an archive snapshot, and bounded historical re-verification. It reports reachability, never demonstrated impact. After an adversarial Daybreak Blue review surfaced serious flaws in identity, data handling, target validation, and probe scheduling, I patched the immediate issues and moved LeakyCompute into passive/local-first mode. Public-index measurement and operator-owned local checks continue; active third-party discovery and hosted checks remain off.
       </aside>
 
       <section>
@@ -49,12 +49,12 @@
           The project began after I saw a short-lived public catalog of exposed AI infrastructure. The raw number was arresting, but the more useful question was what that number actually meant. Was a host merely visible in a search index? Had it answered a recent request? Did an endpoint expose metadata, inference, a workflow engine, or a path to code execution? Those are different claims, and collapsing them into one counter makes the research less useful.
         </p>
         <p>
-          So LeakyCompute now presents three measurements side by side. As of the project's 25 August 2026 snapshot, an archive-era catalog listed <strong>19,348 hosts</strong>. Current public index records listed <strong>19,376 hosts</strong>. Bounded historical re-verification had retained <strong>1,360 distinct hosts</strong> that answered a read-only request within a 180-day window. These figures are not additive. Each has a different source, time boundary, and confidence level.
+          So LeakyCompute now presents three measurements side by side. As of the project's 27 August 2026 snapshot, an archive-era catalog listed <strong>19,348 hosts</strong>. Current public index records listed <strong>19,376 hosts</strong>. Bounded historical re-verification retained <strong>1,350 distinct hosts</strong> that answered a read-only request within a 180-day window. These figures are not additive. Each has a different source, time boundary, and confidence level.
         </p>
         <div class="article-metrics" aria-label="Three separate LeakyCompute measurements">
           <div><span>19,348</span><strong>archive listings</strong><small>captured 27 July 2026, not reverified</small></div>
           <div><span>19,376</span><strong>indexed records</strong><small>counted from public records, not probed</small></div>
-          <div><span>1,360</span><strong>reverified hosts</strong><small>retained historical read-only observations</small></div>
+          <div><span>1,350</span><strong>reverified hosts</strong><small>retained historical read-only observations</small></div>
         </div>
         <p>
           The current index count is entirely Shodan-derived, so source bias is not a footnote. It is part of the result. Tunnelled services are also invisible to this method. The live project page keeps the timestamp and source split next to the numbers so they cannot quietly turn into a timeless claim.
@@ -106,7 +106,7 @@
 
         <h4>State, reconciliation, and automation</h4>
         <ol class="finding-list" start="14">
-          <li><strong>Partial aggregates presented as complete.</strong> A reconciliation job could count only the newest 2,000 records and overwrite complete totals. Partial recounts now refuse to publish.</li>
+          <li><strong>Partial aggregates presented as complete.</strong> A reconciliation job could count only the newest 2,000 records and overwrite complete totals. Recounts now checkpoint a fixed corpus snapshot across bounded runs and publish only after the full snapshot is processed.</li>
           <li><strong>Reusable exclusions.</strong> An exclusion approval could be reused after an issue was edited, and an incomplete purge could be reported as complete. Approvals are now bound to the label event and body, and deletion status reports partial work honestly.</li>
           <li><strong>Unsafe workflow parsing.</strong> One approval flow read the wrong event field and constructed JSON through shell interpolation. It now reads the correct event data and uses a structured JSON builder.</li>
           <li><strong>Enumerable abuse pseudonyms.</strong> When a secret was missing, abuse logs fell back to a public salt. They now use HMAC-SHA256, and production skips the pseudonym rather than weakening it.</li>
