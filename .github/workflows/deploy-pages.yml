@@ -6,6 +6,12 @@ on:
     paths:
       - "public/**"
       - ".github/workflows/deploy-pages.yml"
+  # Commits pushed with GITHUB_TOKEN intentionally do not emit another push
+  # workflow. Deploy the card written by the isolated preview workflow when
+  # that workflow completes successfully instead.
+  workflow_run:
+    workflows: ["Refresh social preview"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +25,9 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

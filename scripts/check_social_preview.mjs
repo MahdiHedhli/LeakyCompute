@@ -13,6 +13,10 @@ const discoveryWorkflow = await readFile(
   new URL(".github/workflows/scheduled-discovery.yml", root),
   "utf8"
 );
+const pagesWorkflow = await readFile(
+  new URL(".github/workflows/deploy-pages.yml", root),
+  "utf8"
+);
 const renderer = await readFile(
   new URL("scripts/update_social_preview.mjs", root),
   "utf8"
@@ -66,7 +70,15 @@ assert.ok(
     discoveryWorkflow.indexOf("- name: Summarise"),
   "aggregate publication must complete before the governed workflow succeeds"
 );
+assert.match(
+  pagesWorkflow,
+  /workflow_run:[\s\S]*workflows: \["Refresh social preview"\]/
+);
+assert.match(
+  pagesWorkflow,
+  /github\.event\.workflow_run\.conclusion == 'success'/
+);
 
 console.log(
-  "social preview checks passed (metadata, 1200x630 PNG, aggregate hook, fail-closed refresh)"
+  "social preview checks passed (metadata, 1200x630 PNG, aggregate and Pages hooks, fail-closed refresh)"
 );
