@@ -1,0 +1,57 @@
+name: Production control-plane schema upgrade
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Apply reviewed idempotent schema upgrade
+        env:
+          LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_ADMIN_TOKEN:-}" ]; then
+            echo "Required control-plane credentials are not configured."
+            exit 1
+          fi
+          BODY_FILE="$(mktemp)"
+          HTTP_CODE=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+            --data '{}' \
+            "${LEAKY_API_BASE%/}/v1/admin/control/schema")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Schema upgrade failed (HTTP $HTTP_CODE)."
+            exit 1
+          fi
+          jq -e '.ok == true and .schema == 3' "$BODY_FILE" >/dev/null
+          jq '{ok, schema}' "$BODY_FILE"
+
+      - name: Verify strong health after upgrade
+        env:
+          LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BODY_FILE="$(mktemp)"
+          HTTP_CODE=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' \
+            -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+            "${LEAKY_API_BASE%/}/v1/admin/control/health")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Strong health failed after schema upgrade (HTTP $HTTP_CODE)."
+            exit 1
+          fi
+          jq -e '
+            .ok == true and .ready == true and (.schema >= 3) and
+            .migration_complete == true and .pending_purges == 0 and
+            (.aggregate_generation | type == "string" and length > 0)
+          ' "$BODY_FILE" >/dev/null
+          jq '{ok, ready, schema, migration_complete, pending_purges}' "$BODY_FILE"
