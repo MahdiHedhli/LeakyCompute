@@ -9,6 +9,10 @@ const workflow = await readFile(
   new URL(".github/workflows/update-social-preview.yml", root),
   "utf8"
 );
+const discoveryWorkflow = await readFile(
+  new URL(".github/workflows/scheduled-discovery.yml", root),
+  "utf8"
+);
 const renderer = await readFile(
   new URL("scripts/update_social_preview.mjs", root),
   "utf8"
@@ -46,10 +50,23 @@ assert.equal(metadata.height, 630);
 
 assert.match(workflow, /workflow_run:[\s\S]*workflows: \["Governed discovery"\]/);
 assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+assert.match(workflow, /cron: "29 4 \* \* \*"/);
+assert.match(workflow, /cron: "17 7 \* \* \*"/);
 assert.match(workflow, /permissions:\s*\n\s*contents: write/);
 assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./, "preview refresh must use no repository secrets");
 assert.match(workflow, /run: npm ci/);
 assert.match(renderer, /control_plane_degraded === true/);
 assert.match(renderer, /preserving the last good social card/);
+assert.match(
+  discoveryWorkflow,
+  /Publish current aggregate generation[\s\S]*\/v1\/admin\/control\/reconcile/
+);
+assert.ok(
+  discoveryWorkflow.indexOf("Publish current aggregate generation") <
+    discoveryWorkflow.indexOf("- name: Summarise"),
+  "aggregate publication must complete before the governed workflow succeeds"
+);
 
-console.log("social preview checks passed (metadata, 1200x630 PNG, fail-closed refresh)");
+console.log(
+  "social preview checks passed (metadata, 1200x630 PNG, aggregate hook, fail-closed refresh)"
+);

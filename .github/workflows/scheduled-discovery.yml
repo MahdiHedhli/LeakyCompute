@@ -136,6 +136,35 @@ jobs:
             --manifest nomination-manifest.json --rate 0.2 --ingest \
             --output discovery-run.json 2>&1 | tee discovery-run.log
 
+      # The public counter reads only a completed authoritative generation.
+      # Publish that generation before this workflow succeeds so workflow_run
+      # consumers (notably the OG renderer) cannot race the nightly rebuild.
+      - name: Publish current aggregate generation
+        env:
+          LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          RESPONSE_FILE="$(mktemp)"
+          trap 'rm -f "$RESPONSE_FILE"' EXIT
+          for attempt in $(seq 1 20); do
+            HTTP_CODE=$(curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' \
+              -X POST "${LEAKY_API_BASE%/}/v1/admin/control/reconcile" \
+              -H "Content-Type: application/json" \
+              -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+              -d '{"limit":500}')
+            if [ "$HTTP_CODE" != "200" ] || ! jq -e '.ok == true' "$RESPONSE_FILE" >/dev/null; then
+              echo "Authoritative aggregate publication failed; social preview will preserve its last good card."
+              exit 1
+            fi
+            if jq -e '.complete == true' "$RESPONSE_FILE" >/dev/null; then
+              echo "Authoritative aggregate generation published."
+              exit 0
+            fi
+          done
+          echo "Authoritative aggregate publication did not complete within the bounded pass limit."
+          exit 1
+
       - name: Summarise
         if: always()
         run: |

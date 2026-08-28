@@ -93,6 +93,10 @@ if (!/Verify strong control plane/.test(discoveryWorkflow) ||
     !/\.ready == true/.test(discoveryWorkflow)) {
   fail("scheduled discovery must fail before index access unless strong storage is ready");
 }
+if (!/Publish current aggregate generation/.test(discoveryWorkflow) ||
+    !/\/v1\/admin\/control\/reconcile/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must publish authoritative aggregates before downstream hooks run");
+}
 if (!/max_total[^\n]*\n\s+description:[^\n]*\n\s+default:\s*["']120["']/.test(discoveryWorkflow)) {
   fail("scheduled discovery must retain the reviewed 120-candidate default");
 }

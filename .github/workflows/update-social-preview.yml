@@ -5,8 +5,10 @@ on:
     workflows: ["Governed discovery"]
     types: [completed]
   schedule:
-    # Daily fallback catches operator-driven ingest that did not originate in
-    # the governed discovery workflow. A degraded API preserves the last card.
+    # The Worker publishes its daily retention/reconciliation generation at
+    # 04:17 UTC. This aligned refresh catches non-discovery counter changes;
+    # the later pass is recovery for a delayed or dropped scheduled event.
+    - cron: "29 4 * * *"
     - cron: "17 7 * * *"
   workflow_dispatch:
 
