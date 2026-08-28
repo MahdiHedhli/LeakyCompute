@@ -1,0 +1,55 @@
+name: Production owned canary
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify the fixed operator-owned canary
+        env:
+          LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_ADMIN_TOKEN:-}" ]; then
+            echo "Required canary credentials are not configured."
+            exit 1
+          fi
+
+          health_file="$(mktemp)"
+          canary_file="$(mktemp)"
+          trap 'unlink "$health_file" "$canary_file"' EXIT
+
+          health_code="$(curl -sS -o "$health_file" -w '%{http_code}' \
+            -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+            "${LEAKY_API_BASE%/}/v1/admin/control/health")"
+          test "$health_code" = "200"
+          jq -e '
+            .ok == true and .ready == true and (.schema >= 2) and
+            .migration_complete == true and .pending_purges == 0 and
+            (.aggregate_generation | type == "string" and length > 0)
+          ' "$health_file" >/dev/null
+
+          canary_code="$(curl -sS -o "$canary_file" -w '%{http_code}' \
+            -X POST -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+            -H "Content-Type: application/json" -d '{}' \
+            "${LEAKY_API_BASE%/}/v1/admin/control/canary")"
+          test "$canary_code" = "200"
+          jq -e '
+            .ok == true and .canary == "operator_owned" and
+            .target_matched_configuration == true and
+            .result.status == 200 and .result.canary_marker == "owned"
+          ' "$canary_file" >/dev/null
+
+          jq '{
+            ok,
+            operator_owned: (.canary == "operator_owned"),
+            target_matched_configuration,
+            response_status: .result.status,
+            marker_verified: (.result.canary_marker == "owned")
+          }' "$canary_file"
