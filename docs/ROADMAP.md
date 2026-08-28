@@ -15,7 +15,7 @@ authorization to run active traffic.
 | Local defensive CLI | Available for infrastructure the operator controls |
 | Passive discovery reports and dry-run plans | Available; send no target traffic |
 | Hosted `/v1/check` | Available for the requester's own public address behind a dedicated Turnstile widget and strong control-plane permits |
-| Active discovery and ingest | Governed weekend schedule committed; production workflow paused while schema 3 and split-role re-certification complete |
+| Active discovery and ingest | Governed weekend schedule active; every run fails closed before index access or traffic if schema-3 strong health is unavailable |
 | 2026-08 discovery incident | Contained; 13 artifacts and 13 log sets deleted and verified |
 
 Nothing on this roadmap silently widens what the project touches. Passive source
@@ -48,9 +48,9 @@ recorded in
 The maintainer explicitly activated the completed design on 2026-08-27 after
 the migration, owned canary, and re-enable suite passed. A later free-tier
 control-store quota event correctly stopped new permits. After the allowance
-reset, the address-pinned canary passed; the weekend schedule remains paused
-until schema 3, a capped split-role Ollama-only run, and a fresh adversarial pass
-complete.
+reset, authenticated schema-3 health, an address-pinned canary, a capped
+split-role Ollama-only run, and a fresh adversarial pass all completed before
+the weekend schedule resumed.
 
 **What would make this step wrong:** allowing the existing dormant runner to
 become the de facto decision. It remains fail-closed until the choice and its

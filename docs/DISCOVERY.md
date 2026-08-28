@@ -2,11 +2,12 @@
 
 **Current status:** passive reports, index comparisons, local-container
 validation, and dry-run governance plans are available. Governed verification
-is configured for Saturday and Sunday, but production scheduling remains paused
-while schema 3 and the split nomination/probe roles complete production
-re-certification. The runner cannot open a target socket: only the API Worker's
-pinned runtime can do so after the Durable Object commits and consumes a
-one-time permit. The authoritative order is [`ROADMAP.md`](ROADMAP.md).
+runs on Saturday and Sunday after its packet-free health preflight. Schema 3,
+the split nomination/probe roles, an address-pinned operator-owned canary, and a
+capped production run passed re-certification on 2026-08-27. The runner cannot
+open a target socket: only the API Worker's pinned runtime can do so after the
+Durable Object commits and consumes a one-time permit. The authoritative order
+is [`ROADMAP.md`](ROADMAP.md).
 
 Every scheduled run checks the authenticated strong-store health endpoint
 before it queries Shodan. A degraded store, incomplete migration, unavailable

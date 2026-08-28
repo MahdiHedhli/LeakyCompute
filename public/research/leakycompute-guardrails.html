@@ -44,7 +44,7 @@
       </aside>
 
       <aside class="article-callout">
-        <strong>Operational note — 27 August 2026:</strong> Governed discovery is paused during a follow-up production re-certification. A fresh Daybreak Blue pass found authorization-boundary gaps after the first capped run; the reviewed runner behaved correctly, but the strong authority still needed to contain a faulty or compromised credentialed caller. The patches are under test, and the schedule will remain disabled until authenticated health, an address-pinned operator-owned canary, and another capped run all pass. Hosted self-checks remain separately governed and available.
+        <strong>Operational note — 27 August 2026:</strong> Production re-certification is complete. Authenticated schema-3 health, an address-pinned operator-owned canary, and a capped split-role Ollama-only run all passed, followed by a Daybreak Blue review with no Critical or High findings. The run committed 10 immutable public-index nominations: the 14-day cooldown blocked four, authoritative rate limits blocked four, and two received bounded read-only checks; both confirmed exposures were ingested. Governed discovery is scheduled for weekends and fails closed before target traffic if authoritative exclusions, cooldowns, rate gates, durable nominations or leases, aggregate state, purge status, or independent ASN eligibility are unavailable. Hosted self-checks remain separately governed and available.
       </aside>
 
       <section>

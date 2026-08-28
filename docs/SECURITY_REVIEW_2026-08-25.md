@@ -254,7 +254,11 @@ HTTP `Host` header. A successful canary must return both the fixed marker and a
 private boolean proving the destination remained pinned; no address or hostname
 appears in its log.
 
-At the time this remediation was committed, Governed discovery remained
-manually disabled pending the schema-3 production migration, a capped
-split-role Ollama-only run, and a fresh Daybreak Blue review of the deployed
-state.
+Production schema 3, the address-pinned canary, and a capped split-role
+Ollama-only run then passed. Of 10 immutable nominations, four were blocked by
+the 14-day cooldown, four by authoritative rate limits, and two received
+bounded read-only checks; both confirmed exposures were ingested. The public
+workflow log and one-day opaque-ID artifact contained no address, hostname,
+identity, private control-plane identifier, or local path. A final Daybreak
+Blue review found no remaining Critical or High issue, after which the
+weekend-only schedule resumed.
