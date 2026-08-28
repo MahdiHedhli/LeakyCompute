@@ -23,7 +23,7 @@ jobs:
 
           health_file="$(mktemp)"
           canary_file="$(mktemp)"
-          trap 'unlink "$health_file" "$canary_file"' EXIT
+          trap 'unlink "$health_file"; unlink "$canary_file"' EXIT
 
           health_code="$(curl -sS -o "$health_file" -w '%{http_code}' \
             -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
@@ -39,7 +39,16 @@ jobs:
             -X POST -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
             -H "Content-Type: application/json" -d '{}' \
             "${LEAKY_API_BASE%/}/v1/admin/control/canary")"
-          test "$canary_code" = "200"
+          if [ "$canary_code" != "200" ]; then
+            jq '{
+              error,
+              ok,
+              result_status: (.result.status // null),
+              result_error: (.result.error // null),
+              result_error_class: (.result.error_class // null)
+            }' "$canary_file"
+            exit 1
+          fi
           jq -e '
             .ok == true and .canary == "operator_owned" and
             .target_matched_configuration == true and
