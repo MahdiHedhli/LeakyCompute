@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { authoritativeNow } from "../src/control_plane.js";
 
 const ADMIN = "control-plane-test-admin";
+const NOMINATOR = "control-plane-test-nominator";
 const port = 24_000 + Math.floor(Math.random() * 10_000);
 const base = `http://127.0.0.1:${port}`;
 const persist = await mkdtemp(path.join(tmpdir(), "leaky-control-test-"));
@@ -33,6 +34,8 @@ const child = spawn(
     "CONTROL_PLANE_READY:true",
     "--var",
     "CONTROL_PLANE_TEST_TIME_ENABLED:true",
+    "--var",
+    `DISCOVERY_NOMINATOR_TOKEN:${NOMINATOR}`,
     "--var",
     "CANARY_PROBE_ENABLED:true",
     "--var",
@@ -81,6 +84,18 @@ async function get(pathname) {
   return { status: response.status, body: await response.json() };
 }
 
+async function postNominator(body, token = NOMINATOR) {
+  const response = await fetch(`${base}/v1/nominator/discovery/nominations`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Nominator-Token": token,
+    },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
 const now = Date.parse("2026-08-27T16:30:00Z");
 const provenance = {
   kind: "public_index",
@@ -115,6 +130,35 @@ function candidate(overrides = {}) {
   return value;
 }
 
+async function nominate(overrides = {}) {
+  const value = candidate(overrides);
+  const response = await postNominator({
+    nominations: [{
+      ip: value.provenance?.ip ?? value.ip,
+      asn: value.provenance?.asn ?? value.asn,
+      service: value.provenance?.lane ?? value.service,
+      port: value.provenance?.port ?? value.port,
+      source: value.provenance?.source,
+      observed_at: value.provenance?.observed_at,
+      country_code: "US",
+    }],
+    now: value.now,
+  });
+  return response;
+}
+
+async function leaseCandidate(overrides = {}) {
+  const nomination = await nominate(overrides);
+  if (nomination.status !== 200 || nomination.body.created?.length !== 1) {
+    return { nomination, lease: null };
+  }
+  const lease = await post("/v1/admin/discovery/lease", {
+    nomination_id: nomination.body.created[0],
+    now: candidate(overrides).now,
+  });
+  return { nomination, lease };
+}
+
 let failures = 0;
 async function check(name, fn) {
   try {
@@ -146,16 +190,29 @@ try {
   await check("SQLite control plane starts empty", () => {
     assert.deepEqual(
       { ok: health.ok, schema: health.schema, hosts: health.hosts, attempts: health.attempts },
-      { ok: true, schema: 2, hosts: 0, attempts: 0 }
+      { ok: true, schema: 3, hosts: 0, attempts: 0 }
     );
   });
 
-  const lease = await post("/v1/admin/discovery/lease", candidate());
+  const unauthorizedNomination = await postNominator({ nominations: [{}] }, "wrong-token");
+  await check("the discovery-admin role cannot create passive nominations", () => {
+    assert.equal(unauthorizedNomination.status, 401);
+  });
+
+  const { nomination: firstNomination, lease } = await leaseCandidate();
   await check("fresh public-index provenance acquires a persisted 14-day lease", () => {
     assert.equal(lease.status, 200);
     assert.equal(lease.body.ok, true);
     assert.equal(lease.body.ip, "8.8.8.8");
     assert.equal(Date.parse(lease.body.next_eligible_at), now + 14 * 86_400_000);
+  });
+  const reusedNomination = await post("/v1/admin/discovery/lease", {
+    nomination_id: firstNomination.body.created[0],
+    now,
+  });
+  await check("an opaque nomination can authorize only one lease", () => {
+    assert.equal(reusedNomination.status, 404);
+    assert.equal(reusedNomination.body.error, "nomination_not_available");
   });
 
   const consumed = await post("/v1/admin/discovery/permit", {
@@ -190,16 +247,15 @@ try {
     assert.equal(duplicateCompletion.body.error, "lease_not_emitted");
   });
 
-  const repeated = await post("/v1/admin/discovery/lease", candidate());
+  const { lease: repeated } = await leaseCandidate();
   await check("a crash or completion cannot erase the 14-day interval", () => {
     assert.equal(repeated.status, 409);
     assert.equal(repeated.body.error, "probe_interval_active");
   });
 
-  const raceLease = await post(
-    "/v1/admin/discovery/lease",
-    candidate({ ip: "1.1.1.1", asn: "AS13335", service: "ray", port: 8265 })
-  );
+  const { lease: raceLease } = await leaseCandidate({
+    ip: "1.1.1.1", asn: "AS13335", service: "ray", port: 8265,
+  });
   const exclusion = await post("/v1/admin/exclusions", {
     entries: ["1.1.1.1"],
     issue_number: 999,
@@ -215,44 +271,42 @@ try {
     assert.equal(raceConsume.body.error, "target_excluded");
   });
 
-  const stale = await post(
-    "/v1/admin/discovery/lease",
-    candidate({
+  const stale = await nominate({
       ip: "9.9.9.9",
       asn: "AS19281",
       provenance: { ...provenance, observed_at: "2026-08-01T00:00:00Z" },
-    })
-  );
+    });
   await check("stale provenance cannot become standing permission", () => {
-    assert.equal(stale.status, 403);
-    assert.equal(stale.body.error, "fresh_public_index_provenance_required");
+    assert.equal(stale.status, 200);
+    assert.equal(stale.body.created.length, 0);
+    assert.equal(stale.body.rejected[0].error, "invalid_public_index_nomination");
   });
 
-  const badPort = await post(
-    "/v1/admin/discovery/lease",
-    candidate({ ip: "208.67.222.222", asn: "AS36692", port: 22 })
-  );
+  const badPort = await nominate({ ip: "208.67.222.222", asn: "AS36692", port: 22 });
   await check("the control plane cannot authorize a general-purpose port", () => {
-    assert.equal(badPort.status, 400);
-    assert.equal(badPort.body.error, "port_not_allowed");
+    assert.equal(badPort.body.created.length, 0);
+    assert.equal(badPort.body.rejected[0].error, "invalid_public_index_nomination");
   });
 
-  const unknown1 = await post(
-    "/v1/admin/discovery/lease",
-    candidate({ ip: "64.6.64.6", asn: null, service: "jupyter", port: 8888 })
-  );
+  const unknown1 = await nominate({
+    ip: "64.6.64.6", asn: null, service: "jupyter", port: 8888,
+  });
   await check("active discovery without a usable ASN fails closed", () => {
-    assert.equal(unknown1.status, 403);
-    assert.equal(unknown1.body.error, "target_asn_required");
+    assert.equal(unknown1.body.created.length, 0);
+    assert.equal(unknown1.body.rejected[0].error, "invalid_public_index_nomination");
   });
 
-  const swapped = await post(
-    "/v1/admin/discovery/lease",
-    candidate({ ip: "64.6.65.6", asn: "AS15169", provenance })
-  );
-  await check("provenance cannot be moved to another target", () => {
-    assert.equal(swapped.status, 403);
-    assert.equal(swapped.body.error, "fresh_public_index_provenance_required");
+  const exactNomination = await nominate({ ip: "64.6.65.6", asn: "AS15169" });
+  const swapped = await post("/v1/admin/discovery/lease", {
+    nomination_id: exactNomination.body.created[0],
+    ip: "64.6.65.7",
+    service: "ray",
+    port: 8265,
+    now,
+  });
+  await check("an opaque nomination cannot be moved to another target or service", () => {
+    assert.equal(swapped.status, 400);
+    assert.equal(swapped.body.error, "immutable_nomination_required");
   });
 
   const hostedA = await post("/v1/admin/discovery/lease", {
@@ -263,31 +317,15 @@ try {
     assert.equal(hostedA.body.error, "purpose_not_authorized_for_route");
   });
 
-  const mismatchedEntitlement = await post(
-    "/v1/admin/discovery/lease",
-    candidate({
-      ip: "64.6.65.7",
-      asn: "AS19281",
-      service: "ray",
-      port: 8265,
-      provenance: {
-        ...provenance,
-        ip: "64.6.65.7",
-        asn: "AS19281",
-        lane: "ollama",
-        port: 11434,
-      },
-    })
-  );
-  await check("provenance is bound to the nominated service and port", () => {
-    assert.equal(mismatchedEntitlement.status, 403);
-    assert.equal(mismatchedEntitlement.body.error, "fresh_public_index_provenance_required");
+  const directLegacyLease = await post("/v1/admin/discovery/lease", candidate({
+    ip: "64.6.65.7", asn: "AS19281", service: "ray", port: 8265,
+  }));
+  await check("caller-supplied target and provenance copies cannot authorize a lease", () => {
+    assert.equal(directLegacyLease.status, 400);
+    assert.equal(directLegacyLease.body.error, "immutable_nomination_required");
   });
 
-  const discoveryCanary = await post(
-    "/v1/admin/discovery/lease",
-    candidate({ service: "owned_canary", port: 80 })
-  );
+  const discoveryCanary = await nominate({ service: "owned_canary", port: 80 });
   const wrongCanary = await post("/v1/admin/discovery/lease", {
     purpose: "owned_canary",
     ip: "93.184.216.98",
@@ -303,8 +341,8 @@ try {
     now,
   });
   await check("the canary profile is isolated to the exact configured owned target", () => {
-    assert.equal(discoveryCanary.status, 403);
-    assert.equal(discoveryCanary.body.error, "owned_canary_profile_reserved");
+    assert.equal(discoveryCanary.body.created.length, 0);
+    assert.equal(discoveryCanary.body.rejected[0].error, "invalid_public_index_nomination");
     assert.equal(wrongCanary.status, 403);
     assert.equal(wrongCanary.body.error, "purpose_not_authorized_for_route");
     assert.equal(ownedCanary.status, 403);
@@ -419,10 +457,7 @@ try {
       "verified_retirement_evidence_required"
     );
   });
-  const retiringLease = await post(
-    "/v1/admin/discovery/lease",
-    candidate({ ip: retiringIp, asn: "AS64501" })
-  );
+  const { lease: retiringLease } = await leaseCandidate({ ip: retiringIp, asn: "AS64501" });
   assert.equal(retiringLease.status, 200);
   const retiringPermit = await post("/v1/admin/discovery/permit", {
     permit_id: retiringLease.body.permit_id,
@@ -478,10 +513,9 @@ try {
   });
 
   const asnOptOut = await post("/v1/admin/control/exclusions", { entries: ["AS64555"] });
-  const unverifiedAsnLease = await post(
-    "/v1/admin/discovery/lease",
-    candidate({ ip: "64.6.65.8", asn: "AS64556" })
-  );
+  const { lease: unverifiedAsnLease } = await leaseCandidate({
+    ip: "64.6.65.8", asn: "AS64556",
+  });
   await check("an ASN-wide opt-out pauses discovery without independent BGP mapping", () => {
     assert.equal(asnOptOut.status, 200);
     assert.equal(unverifiedAsnLease.status, 503);

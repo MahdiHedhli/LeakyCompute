@@ -174,6 +174,21 @@ export default {
         return handleSetCursor(request, env);
       }
 
+      // Passive nomination is deliberately authenticated with a credential
+      // that cannot lease or emit a target request. The probe step receives
+      // only opaque nomination IDs and the discovery-admin credential.
+      if (path === "/v1/nominator/discovery/nominations" && request.method === "POST") {
+        return handleCreateNominations(request, env);
+      }
+
+      if (path === "/v1/nominator/discovery/cursors" && request.method === "GET") {
+        return handleGetNominatorCursors(request, env);
+      }
+
+      if (path === "/v1/nominator/discovery/cursors" && request.method === "POST") {
+        return handleSetNominatorCursor(request, env);
+      }
+
       // Dark control-plane routes. They can persist/consume permission state,
       // but neither route sends a target request and both production traffic
       // kill switches remain off.
@@ -183,6 +198,10 @@ export default {
 
       if (path === "/v1/admin/control/migrate" && request.method === "POST") {
         return handleControlMigration(request, env);
+      }
+
+      if (path === "/v1/admin/control/schema" && request.method === "POST") {
+        return handleControlPost(request, env, "/schema/upgrade");
       }
 
       if (path === "/v1/admin/control/reconcile" && request.method === "POST") {
@@ -909,6 +928,24 @@ function requireAdmin(request, env, secretName = "DISCOVERY_ADMIN_TOKEN") {
   return !!(expected && token && token === expected);
 }
 
+function requireNominator(request, env) {
+  const token = request.headers.get("X-Nominator-Token") || "";
+  const expected = env.DISCOVERY_NOMINATOR_TOKEN || "";
+  return !!(expected && token && token === expected);
+}
+
+async function handleCreateNominations(request, env) {
+  if (!requireNominator(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  if (env.CONTROL_PLANE_READY !== "true") {
+    return json({ error: "control_plane_not_ready" }, 503, request, env);
+  }
+  const body = await readJsonBody(request);
+  const result = await controlCall(env, "/nominations/create", { body });
+  return json(result.body, result.status, request, env);
+}
+
 function controlStub(env) {
   if (!env.DISCOVERY_CONTROL) return null;
   const id = env.DISCOVERY_CONTROL.idFromName("global");
@@ -1245,6 +1282,15 @@ async function handleDiscoveryProbe(request, env) {
     lease_id: consumed.body.lease_id,
     outcome,
     result,
+    nomination: {
+      ip: consumed.body.ip,
+      port: consumed.body.port,
+      stack: consumed.body.service,
+      source: `public_index:${consumed.body.provenance?.source || "unknown"}`,
+      index_observed_at: consumed.body.provenance?.observed_at || null,
+      asn: consumed.body.asn,
+      country_code: consumed.body.provenance?.country_code || null,
+    },
   }, 200, request, env);
 }
 
@@ -1529,6 +1575,36 @@ async function handleGetCursors(request, env) {
 
 async function handleSetCursor(request, env) {
   if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400, request, env);
+  }
+  const updates = Array.isArray(body.cursors) ? body.cursors : [body];
+  const out = [];
+  for (const u of updates.slice(0, 100)) {
+    if (!u || !u.lane) continue;
+    out.push(await setLaneCursor(env, String(u.lane), {
+      page: u.page,
+      exhausted: u.exhausted,
+      observed: u.observed,
+    }));
+  }
+  return json({ ok: true, updated: out.filter(Boolean).length, cursors: out }, 200, request, env);
+}
+
+async function handleGetNominatorCursors(request, env) {
+  if (!requireNominator(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  return json({ ok: true, cursors: await getLaneCursors(env) }, 200, request, env);
+}
+
+async function handleSetNominatorCursor(request, env) {
+  if (!requireNominator(request, env)) {
     return json({ error: "unauthorized" }, 401, request, env);
   }
   let body;

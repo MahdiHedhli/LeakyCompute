@@ -30,7 +30,7 @@ jobs:
             "${LEAKY_API_BASE%/}/v1/admin/control/health")"
           test "$health_code" = "200"
           jq -e '
-            .ok == true and .ready == true and (.schema >= 2) and
+            .ok == true and .ready == true and (.schema >= 3) and
             .migration_complete == true and .pending_purges == 0 and
             (.aggregate_generation | type == "string" and length > 0)
           ' "$health_file" >/dev/null

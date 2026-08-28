@@ -3,15 +3,22 @@
 **Current status:** passive reports, index comparisons, local-container
 validation, and dry-run governance plans are available. Governed verification
 is configured for Saturday and Sunday, but production scheduling remains paused
-until the strong control plane passes its recovery check and capped canary. The
-runner cannot open a target socket: only the API Worker's pinned runtime can do
-so after the Durable Object commits and consumes a one-time permit. The
-authoritative order is [`ROADMAP.md`](ROADMAP.md).
+while schema 3 and the split nomination/probe roles complete production
+re-certification. The runner cannot open a target socket: only the API Worker's
+pinned runtime can do so after the Durable Object commits and consumes a
+one-time permit. The authoritative order is [`ROADMAP.md`](ROADMAP.md).
 
 Every scheduled run checks the authenticated strong-store health endpoint
 before it queries Shodan. A degraded store, incomplete migration, unavailable
 aggregate generation, or pending purge stops the job before candidate discovery
 or target traffic.
+
+Passive collection and active probing are separate jobs with separate bearer
+credentials. The collector commits the exact index-observed IP, ASN, lane,
+port, source, and timestamp as an immutable Durable Object nomination. The
+only handoff is an opaque one-day artifact of nomination IDs; it contains no
+address-level data. The probe job can lease those IDs but cannot create or
+alter a nomination.
 
 ## Critical fact about the archive seed
 
@@ -311,7 +318,9 @@ Public indexes ──► source-specific passive counts/facets
        │
        ├─► compare overlap, disagreement, freshness, and bias
        │
-       └─► fresh candidate nomination
+       └─► immutable fresh nomination (nominator role)
+                         │
+                  opaque nomination ID
                          │
                          ▼
               exclusions + cooldown + rate gates

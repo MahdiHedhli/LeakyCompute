@@ -98,6 +98,7 @@ npx --yes wrangler@4.126.0 login \
   --use-keyring
 # wrangler.toml already has KV ids
 npx --yes wrangler@4.126.0 secret put DISCOVERY_ADMIN_TOKEN
+npx --yes wrangler@4.126.0 secret put DISCOVERY_NOMINATOR_TOKEN
 npx --yes wrangler@4.126.0 secret put EXCLUSION_ADMIN_TOKEN
 npx --yes wrangler@4.126.0 secret put RESEARCH_ADMIN_TOKEN
 npx --yes wrangler@4.126.0 secret put ABUSE_LOG_SALT  # high-entropy HMAC key; required for abuse logs
@@ -137,6 +138,15 @@ npx --yes wrangler@4.126.0 secret delete CONTROL_MIGRATION_TOKEN
 Do not recreate the migration credential. Any future migration is an explicit
 architecture change and must introduce a newly reviewed, narrowly scoped path.
 
+Schema 3 adds the immutable nomination ledger used to separate passive index
+collection from active packet authorization. While Governed discovery is
+disabled, deploy the reviewed Worker, then run the one-way idempotent upgrade
+through `POST /v1/admin/control/schema` with `DISCOVERY_ADMIN_TOKEN`. Do not
+enable or dispatch discovery until authenticated control health reports
+`schema >= 3`, `ready: true`, no pending purge, and a current aggregate
+generation. The nominator token cannot call health, lease, permit, probe,
+completion, ingest, or any research/admin route.
+
 `wrangler.toml` also enables Workers Caching and the `STATS_RATE_LIMITER`
 binding. These are part of the Worker version and require no additional secret
 or dashboard-created resource. Do not remove either independently:
@@ -148,6 +158,7 @@ URLs are set in:
 - `public/js/config.js` → `API_BASE`
 - `lab/js/config.js` → `API_BASE`
 - GitHub secrets: `LEAKY_API_BASE`, `LEAKY_DISCOVERY_ADMIN_TOKEN`,
+  `LEAKY_DISCOVERY_NOMINATOR_TOKEN`,
   `LEAKY_EXCLUSION_ADMIN_TOKEN`, `LEAKY_RESEARCH_ADMIN_TOKEN`, `LEAKY_LAB_URL`
 
 Update `ALLOWED_ORIGINS` in `wrangler.toml` / dashboard vars to include:
@@ -192,6 +203,7 @@ Allowlist enforcement is **application-level** (Worker KV) after issue approval 
 |--------|---------|
 | `LEAKY_API_BASE` | Worker URL |
 | `LEAKY_DISCOVERY_ADMIN_TOKEN` | Same as Worker `DISCOVERY_ADMIN_TOKEN` |
+| `LEAKY_DISCOVERY_NOMINATOR_TOKEN` | Same as Worker `DISCOVERY_NOMINATOR_TOKEN`; passive nomination job only |
 | `LEAKY_EXCLUSION_ADMIN_TOKEN` | Same as Worker `EXCLUSION_ADMIN_TOKEN` |
 | `LEAKY_RESEARCH_ADMIN_TOKEN` | Same as Worker `RESEARCH_ADMIN_TOKEN` |
 | `LEAKY_LAB_URL` | Lab URL used in approval comments |

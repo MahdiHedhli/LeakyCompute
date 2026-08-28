@@ -241,6 +241,24 @@ export class DiscoveryControlPlane {
       );
       CREATE INDEX IF NOT EXISTS permits_expiry ON permits(expires_at);
 
+      CREATE TABLE IF NOT EXISTS nominations (
+        id TEXT PRIMARY KEY,
+        ip TEXT NOT NULL,
+        asn TEXT NOT NULL,
+        service TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        observed_at INTEGER NOT NULL,
+        country_code TEXT,
+        provenance_json TEXT NOT NULL,
+        state TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        leased_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS nominations_state_expiry
+        ON nominations(state, expires_at, id);
+
       CREATE TABLE IF NOT EXISTS rate_events (
         scope TEXT NOT NULL,
         bucket_key TEXT NOT NULL,
@@ -299,6 +317,9 @@ export class DiscoveryControlPlane {
       this.sql.exec(
         "INSERT OR IGNORE INTO control_meta(key, value) VALUES ('corpus_epoch', '0')"
       );
+      this.sql.exec(
+        "INSERT OR IGNORE INTO control_meta(key, value) VALUES ('schema_version', '3')"
+      );
     }
   }
 
@@ -329,6 +350,8 @@ export class DiscoveryControlPlane {
     }
 
     if (path === "/exclusions/add") return this.addExclusions(body);
+    if (path === "/schema/upgrade") return this.upgradeSchema(body);
+    if (path === "/nominations/create") return this.createNominations(body);
     if (path === "/lease/acquire") return this.acquireLease(body);
     if (path === "/permit/consume") return this.consumePermit(body);
     if (path === "/lease/complete") return this.completeLease(body);
@@ -354,17 +377,107 @@ export class DiscoveryControlPlane {
     ))?.n || 0;
     const migration = this.meta("migration_complete") === "true";
     const generation = this.meta("current_aggregate_generation");
+    const schema = Number(this.meta("schema_version") || 2);
     return json({
       ok: true,
-      schema: 2,
+      schema,
       hosts,
       attempts,
       exclusions,
       pending_purges: pendingPurges,
       migration_complete: migration,
       aggregate_generation: generation || null,
-      ready: migration && !!generation && Number(pendingPurges) === 0,
+      ready: schema >= 3 && migration && !!generation && Number(pendingPurges) === 0,
     });
+  }
+
+  upgradeSchema() {
+    const current = Number(this.meta("schema_version") || 2);
+    if (current > 3) return json({ ok: false, error: "unsupported_schema_version" }, 409);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`
+        CREATE TABLE IF NOT EXISTS nominations (
+          id TEXT PRIMARY KEY,
+          ip TEXT NOT NULL,
+          asn TEXT NOT NULL,
+          service TEXT NOT NULL,
+          port INTEGER NOT NULL,
+          source TEXT NOT NULL,
+          observed_at INTEGER NOT NULL,
+          country_code TEXT,
+          provenance_json TEXT NOT NULL,
+          state TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          leased_at INTEGER
+        )
+      `);
+      this.sql.exec(
+        "CREATE INDEX IF NOT EXISTS nominations_state_expiry ON nominations(state, expires_at, id)"
+      );
+      this.setMeta("schema_version", "3");
+    });
+    return json({ ok: true, schema: 3 });
+  }
+
+  createNominations(body) {
+    if (Number(this.meta("schema_version") || 2) < 3) {
+      return json({ ok: false, error: "schema_upgrade_required" }, 503);
+    }
+    const requested = Array.isArray(body.nominations) ? body.nominations.slice(0, 128) : [];
+    if (!requested.length) return json({ ok: false, error: "nominations_required" }, 400);
+    const now = authoritativeNow(this.env, body);
+    const created = [];
+    const rejected = [];
+    this.ctx.storage.transactionSync(() => {
+      for (const input of requested) {
+        const ip = canonicalizeIp(input?.ip);
+        const asn = normalizeAsn(input?.asn);
+        const service = String(input?.service || "").trim().toLowerCase();
+        const resolvedPort = resolvePort(service, input?.port);
+        const source = String(input?.source || "").trim().toLowerCase();
+        const observedAt = Date.parse(input?.observed_at || "");
+        const countryCode = boundedText(input?.country_code, 2, /^[A-Z]{2}$/i)?.toUpperCase() || null;
+        if (
+          !ip || isPrivateOrLocal(ip) || asn === UNKNOWN_ASN || !resolvedPort.ok ||
+          service === "owned_canary" ||
+          !new Set(["shodan", "censys"]).has(source) ||
+          !Number.isFinite(observedAt) || observedAt > now || now - observedAt > PROVENANCE_MAX_AGE_MS
+        ) {
+          rejected.push({ error: "invalid_public_index_nomination" });
+          continue;
+        }
+        const id = crypto.randomUUID();
+        const provenance = {
+          kind: "public_index",
+          source,
+          observed_at: new Date(observedAt).toISOString(),
+          lane: service,
+          port: resolvedPort.port,
+          ip,
+          asn,
+          country_code: countryCode,
+        };
+        this.sql.exec(
+          `INSERT INTO nominations(id, ip, asn, service, port, source, observed_at,
+             country_code, provenance_json, state, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', ?, ?)`,
+          id,
+          ip,
+          asn,
+          service,
+          resolvedPort.port,
+          source,
+          observedAt,
+          countryCode,
+          JSON.stringify(provenance),
+          now,
+          observedAt + PROVENANCE_MAX_AGE_MS
+        );
+        created.push(id);
+      }
+    });
+    return json({ ok: rejected.length === 0, created, rejected });
   }
 
   meta(key) {
@@ -1056,14 +1169,36 @@ export class DiscoveryControlPlane {
       return json({ ok: false, error: "invalid_purpose" }, 400);
     }
 
-    const ip = canonicalizeIp(body.ip);
+    let nomination = null;
+    if (purpose === "active_discovery") {
+      if (Number(this.meta("schema_version") || 2) < 3) {
+        return json({ ok: false, error: "schema_upgrade_required" }, 503);
+      }
+      if (
+        !body.nomination_id || body.ip != null || body.asn != null ||
+        body.service != null || body.port != null || body.provenance != null
+      ) {
+        return json({ ok: false, error: "immutable_nomination_required" }, 400);
+      }
+      nomination = one(this.sql.exec(
+        `SELECT * FROM nominations
+         WHERE id = ? AND state = 'available'`,
+        String(body.nomination_id)
+      ));
+      if (!nomination) return json({ ok: false, error: "nomination_not_available" }, 404);
+      if (Number(nomination.expires_at) < now) {
+        return json({ ok: false, error: "nomination_expired" }, 410);
+      }
+    }
+
+    const ip = canonicalizeIp(nomination?.ip ?? body.ip);
     if (!ip || isPrivateOrLocal(ip)) {
       return json({ ok: false, error: "target_not_public_unicast" }, 400);
     }
-    const asn = normalizeAsn(body.asn);
+    const asn = normalizeAsn(nomination?.asn ?? body.asn);
     const netBucket = addressBucket(ip);
-    const service = String(body.service || "").toLowerCase();
-    const resolvedPort = resolvePort(service, body.port);
+    const service = String(nomination?.service ?? body.service ?? "").toLowerCase();
+    const resolvedPort = resolvePort(service, nomination?.port ?? body.port);
     if (!resolvedPort.ok) {
       return json({
         ok: false,
@@ -1099,9 +1234,12 @@ export class DiscoveryControlPlane {
       // determine whether its own candidate is excluded.
       return json({ ok: false, error: "independent_asn_verification_required" }, 503);
     }
+    const provenance = nomination?.provenance_json
+      ? JSON.parse(nomination.provenance_json)
+      : body.provenance;
     if (
       purpose === "active_discovery" &&
-      !validProvenance(body.provenance, now, ip, asn, service, port)
+      !validProvenance(provenance, now, ip, asn, service, port)
     ) {
       return json({ ok: false, error: "fresh_public_index_provenance_required" }, 403);
     }
@@ -1156,6 +1294,13 @@ export class DiscoveryControlPlane {
     const permitId = crypto.randomUUID();
     const nextEligible = purpose === "active_discovery" ? now + ACTIVE_COOLDOWN_MS : now;
     this.ctx.storage.transactionSync(() => {
+      if (nomination) {
+        this.sql.exec(
+          "UPDATE nominations SET state = 'leased', leased_at = ? WHERE id = ? AND state = 'available'",
+          now,
+          nomination.id
+        );
+      }
       for (const [scope] of policy) {
         this.sql.exec(
           "INSERT INTO rate_events(scope, bucket_key, at) VALUES (?, ?, ?)",
@@ -1182,7 +1327,7 @@ export class DiscoveryControlPlane {
         leaseId,
         now,
         nextEligible,
-        JSON.stringify(body.provenance || null),
+        JSON.stringify(provenance || null),
         now
       );
       this.sql.exec(

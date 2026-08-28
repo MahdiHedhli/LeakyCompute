@@ -31,18 +31,10 @@ permissions:
   contents: read
 
 jobs:
-  discover:
+  preflight:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12.14"
-
       - name: Verify strong control plane
         env:
           LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
@@ -61,21 +53,34 @@ jobs:
             echo "Strong control plane is unavailable (HTTP $HTTP_CODE); no index query or target traffic was attempted."
             exit 1
           fi
-          jq -e '.ok == true and .ready == true and (.schema >= 2) and (.pending_purges == 0)' \
+          jq -e '.ok == true and .ready == true and (.schema >= 3) and (.pending_purges == 0)' \
             "$HEALTH_FILE" >/dev/null
           jq '{ok, ready, schema, pending_purges}' "$HEALTH_FILE"
 
-      - name: Run discovery
+  nominate:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+
+      - name: Nominate fresh public-index records
         env:
           SHODAN_API_KEY: ${{ secrets.SHODAN_API_KEY }}
           LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
-          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+          LEAKY_NOMINATOR_TOKEN: ${{ secrets.LEAKY_DISCOVERY_NOMINATOR_TOKEN }}
           MAX_TOTAL: ${{ github.event.inputs.max_total || '120' }}
           LANES: ${{ github.event.inputs.lanes || 'ollama,jupyter,ray,open_webui,litellm,vllm,comfyui' }}
         run: |
           set -euo pipefail
-          if [ -z "${SHODAN_API_KEY:-}" ] || [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_ADMIN_TOKEN:-}" ]; then
-            echo "Required discovery credentials are not configured."
+          if [ -z "${SHODAN_API_KEY:-}" ] || [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_NOMINATOR_TOKEN:-}" ]; then
+            echo "Required nomination credentials are not configured."
             exit 1
           fi
           case "$MAX_TOTAL" in (*[!0-9]*|'') echo "max_total must be an integer"; exit 1;; esac
@@ -83,9 +88,53 @@ jobs:
             echo "max_total must be between 1 and 128"
             exit 1
           fi
-          python3 -u scripts/discovery/run_multilane.py \
-            --lanes "$LANES" --rate 0.2 --max-total "$MAX_TOTAL" \
-            --ingest --output "discovery-run.json" 2>&1 | tee discovery-run.log
+          python3 -u scripts/discovery/nominate_public_index.py \
+            --lanes "$LANES" --max-total "$MAX_TOTAL" \
+            --output "nomination-manifest.json" 2>&1 | tee nomination.log
+          jq -e '
+            (keys | sort) == ["meta", "nomination_ids"] and
+            (.nomination_ids | type == "array") and
+            (.meta | type == "object") and
+            ([.nomination_ids[] | type == "string"] | all)
+          ' nomination-manifest.json >/dev/null
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: opaque-discovery-nominations
+          path: nomination-manifest.json
+          retention-days: 1
+          if-no-files-found: error
+
+  probe:
+    needs: nominate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: opaque-discovery-nominations
+
+      - name: Lease and probe immutable nominations
+        env:
+          LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
+          LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_ADMIN_TOKEN:-}" ]; then
+            echo "Required probe credentials are not configured."
+            exit 1
+          fi
+          python3 -u scripts/discovery/probe_nominations.py \
+            --manifest nomination-manifest.json --rate 0.2 --ingest \
+            --output discovery-run.json 2>&1 | tee discovery-run.log
 
       - name: Summarise
         if: always()
@@ -95,7 +144,7 @@ jobs:
           {
             echo "### Discovery run"
             echo '```'
-            grep -E 'I-5:|provenance:|exclusions:|interval \(14d\)|Probing|exposed=|kv_puts|final verification' \
+            grep -E 'Probing up to|SKIP:|governed results:|ingest batch ok' \
               discovery-run.log 2>/dev/null || echo "(no log captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

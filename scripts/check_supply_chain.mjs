@@ -72,8 +72,21 @@ for (const file of workflowFiles) {
 if (!/cron:\s*["']43 5 \* \* 0,6["']/.test(discoveryWorkflow)) {
   fail("scheduled discovery must remain weekend-only and off the hour");
 }
-if (/upload-artifact/i.test(discoveryWorkflow)) {
-  fail("scheduled discovery must never publish an address-level artifact");
+const uploadedArtifacts = [...discoveryWorkflow.matchAll(/uses:\s*actions\/upload-artifact@/g)];
+if (
+  uploadedArtifacts.length !== 1 ||
+  !/name:\s*opaque-discovery-nominations/.test(discoveryWorkflow) ||
+  !/path:\s*nomination-manifest\.json/.test(discoveryWorkflow) ||
+  !/retention-days:\s*1/.test(discoveryWorkflow) ||
+  /path:\s*discovery-run\.json/.test(discoveryWorkflow)
+) {
+  fail("scheduled discovery may upload only the one-day opaque nomination manifest");
+}
+if (
+  !/jobs:\s*[\s\S]*preflight:[\s\S]*nominate:[\s\S]*probe:/.test(discoveryWorkflow) ||
+  !/nominate:[\s\S]*LEAKY_NOMINATOR_TOKEN:[\s\S]*probe:[\s\S]*LEAKY_ADMIN_TOKEN:/.test(discoveryWorkflow)
+) {
+  fail("scheduled discovery must split nomination and probe credentials across jobs");
 }
 if (!/Verify strong control plane/.test(discoveryWorkflow) ||
     !/\/v1\/admin\/control\/health/.test(discoveryWorkflow) ||

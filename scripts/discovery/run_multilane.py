@@ -601,9 +601,10 @@ def extract_geo(match: dict) -> dict:
 
 def match_to_candidate(m: dict, lane: dict) -> dict:
     geo = extract_geo(m)
+    observed_port = int(m.get("port") or lane["port_default"])
     return {
         "ip": m.get("ip_str") or m.get("ip"),
-        "port": int(m.get("port") or lane["port_default"]),
+        "port": observed_port,
         "stack": lane["id"],
         "probe_path": lane["probe_path"],
         "source": f"shodan:{lane['id']}",
@@ -617,6 +618,7 @@ def match_to_candidate(m: dict, lane: dict) -> dict:
             m.get("timestamp"),
             ip=m.get("ip_str") or m.get("ip"),
             asn=geo.get("asn"),
+            port=observed_port,
             country_code=geo.get("country_code"),
         ),
         **geo,
@@ -757,9 +759,10 @@ def collect_lane(
             for h in hosts:
                 # hosts_for_asn returns simplified dicts without full location
                 # re-fetch is expensive; use what we have + later geo from search matches when present
+                observed_port = int(h.get("port") or lane["port_default"])
                 c = {
                     "ip": h["ip"],
-                    "port": int(h.get("port") or lane["port_default"]),
+                    "port": observed_port,
                     "stack": lane["id"],
                     "probe_path": lane["probe_path"],
                     "source": h.get("source") or f"shodan_asn:{asn}",
@@ -771,6 +774,7 @@ def collect_lane(
                         h.get("timestamp"),
                         ip=h.get("ip"),
                         asn=asn,
+                        port=observed_port,
                         country_code=h.get("country_code"),
                     ),
                     "asn": asn,
@@ -1115,7 +1119,7 @@ def self_test_candidates() -> list[dict]:
             "country_code": "ZZ",
             "provenance": index_provenance(
                 "shodan", "product:Ollama", "ollama", "lane_search",
-                datetime.now(timezone.utc).isoformat(), ip="8.8.8.10", asn="AS64496"
+                datetime.now(timezone.utc).isoformat(), ip="8.8.8.10", asn="AS64496", port=11434
             ),
         },
         {
@@ -1137,7 +1141,7 @@ def self_test_candidates() -> list[dict]:
             "country_code": "ZZ",
             "provenance": index_provenance(
                 "hearsay", "?", "jupyter", "lane_search",
-                datetime.now(timezone.utc).isoformat(), ip="8.8.8.12", asn="AS64496"
+                datetime.now(timezone.utc).isoformat(), ip="8.8.8.12", asn="AS64496", port=8888
             ),
         },
         {
@@ -1161,7 +1165,7 @@ def self_test_candidates() -> list[dict]:
             "asn": "AS64497",
             "country_code": "ZZ",
             "provenance": provenance_from_corpus_source(
-                "shodan_asn:AS64497", datetime.now(timezone.utc).isoformat()
+                "shodan_asn:AS64497", datetime.now(timezone.utc).isoformat(), 11434
             ),
         },
         {
@@ -1432,7 +1436,7 @@ def main() -> int:
                     "probe_path": "/api/ps" if not stack or stack == "ollama" else "/",
                     "source": "prior",
                     "provenance": provenance_from_corpus_source(
-                        h.get("source"), h.get("index_observed_at")
+                        h.get("source"), h.get("index_observed_at"), h.get("port") or 11434
                     ),
                     "country": h.get("country"),
                     "country_code": h.get("country_code"),
@@ -1480,7 +1484,7 @@ def main() -> int:
             if not ip:
                 continue
             prov = provenance_from_corpus_source(
-                row.get("source"), row.get("index_observed_at")
+                row.get("source"), row.get("index_observed_at"), row.get("port") or 11434
             )
             if not prov:
                 continue

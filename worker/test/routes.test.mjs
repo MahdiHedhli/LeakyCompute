@@ -22,6 +22,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, "..", "src");
 
 const ADMIN = "test-admin-token";
+const NOMINATOR = "test-nominator-token";
 const RESEARCHER = "trusted-researcher";
 
 /** Distinctive documentation-range addresses; any appearance is unambiguous. */
@@ -40,6 +41,7 @@ async function seededEnv(overrides = {}) {
     LEGACY_TEST_TRANSPORT: "true",
     ALLOWED_ORIGINS: "https://mahdihedhli.github.io",
     ADMIN_SYNC_TOKEN: ADMIN,
+    DISCOVERY_NOMINATOR_TOKEN: NOMINATOR,
     CHECK_TIMEOUT_MS: "200",
     // The lab's corpus cache is module-level, so a suite that builds a fresh
     // env per case would otherwise assert against the previous case's corpus.
@@ -132,6 +134,7 @@ const ADMIN_ROUTES = [
   // target request; they are still admin-only because they carry raw addresses.
   { method: "GET", path: "/v1/admin/control/health" },
   { method: "POST", path: "/v1/admin/control/migrate", body: {} },
+  { method: "POST", path: "/v1/admin/control/schema", body: {} },
   { method: "POST", path: "/v1/admin/control/reconcile", body: {} },
   { method: "POST", path: "/v1/admin/control/retention", body: {} },
   { method: "POST", path: "/v1/admin/control/purge", body: {} },
@@ -150,6 +153,12 @@ const ADMIN_ROUTES = [
   { method: "POST", path: "/v1/admin/discovery/probe", body: {} },
 ];
 
+const NOMINATOR_ROUTES = [
+  { method: "POST", path: "/v1/nominator/discovery/nominations", body: { nominations: [] } },
+  { method: "GET", path: "/v1/nominator/discovery/cursors" },
+  { method: "POST", path: "/v1/nominator/discovery/cursors", body: { lane: "ollama", page: 2 } },
+];
+
 /* ------------------------------------------------------------------ */
 section("[N1] the inventory matches the router (a new route cannot slip past)");
 
@@ -160,7 +169,8 @@ section("[N1] the inventory matches the router (a new route cannot slip past)");
   for (const r of LAB_ROUTES) routed.add(r.path);
 
   const covered = new Set(
-    [...PUBLIC_ROUTES, ...RESEARCHER_ROUTES, ...ADMIN_ROUTES].map((r) => r.path.split("?")[0])
+    [...PUBLIC_ROUTES, ...RESEARCHER_ROUTES, ...ADMIN_ROUTES, ...NOMINATOR_ROUTES]
+      .map((r) => r.path.split("?")[0])
   );
 
   await check("every path the router matches has a declared gate in this suite", () => {
@@ -170,6 +180,27 @@ section("[N1] the inventory matches the router (a new route cannot slip past)");
       [],
       `route(s) with no I-14 gating assertion: ${missing.join(", ")}`
     );
+  });
+}
+
+section("[N4a] every nominator route refuses a caller without its separate token");
+
+for (const route of NOMINATOR_ROUTES) {
+  const env = await seededEnv();
+  const noToken = await worker.fetch(req(route.method, route.path, { body: route.body }), env, ctx);
+  const wrongRole = await worker.fetch(
+    req(route.method, route.path, {
+      body: route.body,
+      headers: { "X-Admin-Token": ADMIN, "X-Nominator-Token": "nope" },
+    }),
+    env,
+    ctx
+  );
+  await check(`${route.method} ${route.path} without nominator token -> 401`, () => {
+    assert.equal(noToken.status, 401);
+  });
+  await check(`${route.method} ${route.path} rejects discovery-admin role -> 401`, () => {
+    assert.equal(wrongRole.status, 401);
   });
 }
 

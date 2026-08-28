@@ -38,7 +38,10 @@ counts.
 > I maintain LeakyCompute, a non-commercial defensive research project studying
 > publicly indexed, internet-exposed AI services such as Ollama, Ray, and
 > Jupyter. The project publishes aggregate measurements and local defensive
-> tooling; active third-party probing and hosted checks are disabled.
+> tooling. Fresh public-index nominations may receive bounded, read-only
+> weekend verification under durable exclusions, cooldowns, rate limits, and
+> one-time address-pinned permits. A separate Turnstile-gated hosted check lets
+> an operator assess only the public address making the request.
 >
 > We are looking for a responsible way to help network owners and national
 > CSIRTs remediate these exposures without publishing host-identifying data or

@@ -80,6 +80,7 @@ def index_provenance(
     *,
     ip=None,
     asn=None,
+    port=None,
     country_code=None,
 ) -> dict:
     """Record for I-22(a): this host was read out of a public index listing."""
@@ -100,6 +101,7 @@ def index_provenance(
         "observed_at": ts,
         "ip": str(ip).strip() if ip else None,
         "asn": str(asn).strip().upper() if asn else None,
+        "port": int(port) if port is not None else None,
         "country_code": str(country_code).strip().upper() if country_code else None,
     }
 
@@ -115,7 +117,7 @@ def request_provenance(request_id: str, scope: str, approved_by: str, approved_a
     }
 
 
-def provenance_from_corpus_source(source, observed_at=None) -> dict | None:
+def provenance_from_corpus_source(source, observed_at=None, port=None) -> dict | None:
     """
     Recover provenance for a host replayed out of our own hit store.
 
@@ -144,7 +146,7 @@ def provenance_from_corpus_source(source, observed_at=None) -> dict | None:
         head = s.split(":", 1)[0].split("_", 1)[0]
     if head not in PUBLIC_INDEXES:
         return None
-    return index_provenance(head, None, None, "corpus_record", observed)
+    return index_provenance(head, None, None, "corpus_record", observed, port=port)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +295,13 @@ def verify_candidate(cand: dict, approved: dict[str, dict]) -> tuple[bool, str]:
             return False, f"index_not_recognised:{index or '?'}"
         if not prov.get("via"):
             return False, "index_record_incomplete"
+        try:
+            observed_port = int(prov.get("port"))
+            candidate_port = int(cand.get("port"))
+        except (TypeError, ValueError):
+            return False, "index_record_port_missing"
+        if observed_port != candidate_port:
+            return False, "index_record_port_mismatch"
         observed = parse_ts(prov.get("observed_at"))
         if observed is None:
             return False, "index_record_undated"

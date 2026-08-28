@@ -221,3 +221,40 @@ re-enablement because the production Durable Object had exhausted its daily
 free-tier row-write budget; that medium-severity migration remains open. No
 approval or revocation workflow runs existed in the repository history, so no
 email-bearing Action logs required deletion.
+
+## 2026-08-27 production re-certification pass
+
+A fresh Daybreak Blue review after the first capped production run found four
+additional high-severity boundary errors. Governed discovery was disabled again
+before remediation; the reviewed runner had behaved correctly, but the strong
+authority must also contain a faulty or compromised credentialed caller.
+
+- Discovery-admin routes are now bound to `active_discovery` at lease, permit,
+  completion, and probe boundaries. They cannot mint or consume a
+  `hosted_self` or `owned_canary` capability.
+- Permission timestamps now come from the Durable Object's clock. A request
+  body can inject time only in the explicit local test environment, so callers
+  cannot advance cooldown, rate, provenance, or permit-expiry windows.
+- A follow-up review showed that comparing two caller-supplied copies of the
+  service and port did not contain a compromised discovery-admin caller. The
+  final design captures the exact index-observed IP, ASN, service, port,
+  source, and time under a separate nominator role, stores the tuple immutably,
+  and lets the probe role submit only an opaque nomination ID. Nomination and
+  probe credentials run in separate jobs with a minimized one-day artifact
+  handoff containing no addresses. A listing for one stack cannot authorize
+  another reviewed port on the same host, even if the probe role is compromised.
+- Public opt-out and access forms now describe the governed weekend schedule
+  and hosted self-check accurately. An invariant test compares those claims to
+  the production traffic switches.
+
+The same pass found that the earlier canary authorized an IP but connected by
+hostname for TLS. The canary now connects over HTTP to the configured canonical
+IP at an operator-owned origin and uses the separate hostname only as the fixed
+HTTP `Host` header. A successful canary must return both the fixed marker and a
+private boolean proving the destination remained pinned; no address or hostname
+appears in its log.
+
+At the time this remediation was committed, Governed discovery remained
+manually disabled pending the schema-3 production migration, a capped
+split-role Ollama-only run, and a fresh Daybreak Blue review of the deployed
+state.

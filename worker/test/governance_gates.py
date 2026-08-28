@@ -71,7 +71,7 @@ section("[G1] I-22: no provenance record, no probe")
 
 GOOD_INDEX = P.index_provenance(
     "shodan", "product:Ollama", "ollama", "lane_search", iso(0),
-    ip="8.8.8.14", asn="AS64496"
+    ip="8.8.8.14", asn="AS64496", port=11434
 )
 
 
@@ -142,9 +142,9 @@ check("'we probed it before' is not provenance", _circular)
 
 
 def _corpus_index_source():
-    prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(1))
+    prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(1), 11434)
     assert prov and prov["index"] == "shodan", prov
-    current = P.provenance_from_corpus_source("public_index:shodan", iso(1))
+    current = P.provenance_from_corpus_source("public_index:shodan", iso(1), 11434)
     assert current and current["index"] == "shodan", current
     ok, _ = eligible([cand("1.1.1.8", provenance=prov)])
     assert ok == ["1.1.1.8"], "a corpus row that names an index keeps its entitlement"
@@ -196,7 +196,7 @@ check("only a complete all-lane run can publish the global index metric", _publi
 
 
 def _stale_index_source():
-    prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(30))
+    prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(30), 11434)
     ok, why = eligible([cand("1.1.1.8", provenance=prov)])
     assert ok == [], "a stale stored source label became standing probe permission"
     assert why["1.1.1.8"] == "index_record_stale", why
