@@ -138,4 +138,4 @@ preview_id = "32c933f498d646afae8eb1e617063f8b"
 #   ACCESS_TEAM_DOMAIN_SECRET  Cloudflare Access team domain
 #   ACCESS_APP_AUD             Cloudflare Access application audience
 #   OWNED_CANARY_TARGET_IP     temporary exact canary address; remove after use
-#   OWNED_CANARY_TARGET_HOST   temporary exact canary TLS hostname; remove after use
+#   OWNED_CANARY_TARGET_HOST   temporary HTTP Host for the exact-IP canary; remove after use

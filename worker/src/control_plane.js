@@ -18,6 +18,17 @@ const ATTEMPT_RETENTION_MS = 90 * DAY_MS;
 const MAX_PAGE = 500;
 const UNKNOWN_ASN = "AS-UNKNOWN";
 
+export function authoritativeNow(env, body = {}) {
+  if (
+    env?.ENVIRONMENT === "test" &&
+    env?.CONTROL_PLANE_TEST_TIME_ENABLED === "true" &&
+    Number.isFinite(body?.now)
+  ) {
+    return Math.floor(body.now);
+  }
+  return Date.now();
+}
+
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -132,11 +143,13 @@ function ruleMatches(ruleType, ruleValue, row) {
   );
 }
 
-function validProvenance(provenance, now, ip, asn) {
+function validProvenance(provenance, now, ip, asn, service, port) {
   if (!provenance || provenance.kind !== "public_index") return false;
   if (!new Set(["shodan", "censys"]).has(provenance.source)) return false;
   if (canonicalizeIp(provenance.ip) !== ip) return false;
   if (normalizeAsn(provenance.asn) !== asn || asn === UNKNOWN_ASN) return false;
+  if (String(provenance.lane || "").trim().toLowerCase() !== service) return false;
+  if (Number(provenance.port) !== port) return false;
   const observed = Date.parse(provenance.observed_at || "");
   return Number.isFinite(observed) && observed <= now && now - observed <= PROVENANCE_MAX_AGE_MS;
 }
@@ -516,7 +529,7 @@ export class DiscoveryControlPlane {
   upsertHosts(body) {
     const records = Array.isArray(body.records) ? body.records.slice(0, MAX_PAGE) : [];
     if (!records.length) return json({ ok: false, error: "records_required" }, 400);
-    const now = Number.isFinite(body.now) ? Math.floor(body.now) : Date.now();
+    const now = authoritativeNow(this.env, body);
     const accepted = [];
     const rejected = [];
     this.ctx.storage.transactionSync(() => {
@@ -603,7 +616,7 @@ export class DiscoveryControlPlane {
       .map(canonicalizeIp)
       .filter(Boolean))].slice(0, 200);
     if (!ips.length) return json({ ok: false, error: "ips_required" }, 400);
-    const now = Number.isFinite(body.now) ? Math.floor(body.now) : Date.now();
+    const now = authoritativeNow(this.env, body);
     const reason = boundedText(body.reason, 64, /^[a-z0-9_-]+$/i) || "final_probe_no_answer";
     const results = [];
     let changed = false;
@@ -881,7 +894,7 @@ export class DiscoveryControlPlane {
   }
 
   runRetention(body = {}) {
-    const now = Number.isFinite(body.now) ? Math.floor(body.now) : Date.now();
+    const now = authoritativeNow(this.env, body);
     const limit = Math.max(1, Math.min(Number(body.limit) || 200, MAX_PAGE));
     const due = rows(this.sql.exec(
       "SELECT ip FROM hosts WHERE expires_at <= ? ORDER BY expires_at, ip LIMIT ?",
@@ -1037,7 +1050,7 @@ export class DiscoveryControlPlane {
   }
 
   acquireLease(body) {
-    const now = Number.isFinite(body.now) ? Math.floor(body.now) : Date.now();
+    const now = authoritativeNow(this.env, body);
     const purpose = body.purpose;
     if (!new Set(["active_discovery", "hosted_self", "owned_canary"]).has(purpose)) {
       return json({ ok: false, error: "invalid_purpose" }, 400);
@@ -1049,6 +1062,16 @@ export class DiscoveryControlPlane {
     }
     const asn = normalizeAsn(body.asn);
     const netBucket = addressBucket(ip);
+    const service = String(body.service || "").toLowerCase();
+    const resolvedPort = resolvePort(service, body.port);
+    if (!resolvedPort.ok) {
+      return json({
+        ok: false,
+        error: resolvedPort.error,
+        allowed_ports: resolvedPort.allowed,
+      }, 400);
+    }
+    const port = resolvedPort.port;
     if (purpose === "owned_canary") {
       const configured = canonicalizeIp(this.env.OWNED_CANARY_TARGET_IP);
       const canaryHost = String(this.env.OWNED_CANARY_TARGET_HOST || "").trim().toLowerCase();
@@ -1076,7 +1099,10 @@ export class DiscoveryControlPlane {
       // determine whether its own candidate is excluded.
       return json({ ok: false, error: "independent_asn_verification_required" }, 503);
     }
-    if (purpose === "active_discovery" && !validProvenance(body.provenance, now, ip, asn)) {
+    if (
+      purpose === "active_discovery" &&
+      !validProvenance(body.provenance, now, ip, asn, service, port)
+    ) {
       return json({ ok: false, error: "fresh_public_index_provenance_required" }, 403);
     }
     if (isExcluded(this.activeExclusions(), { ip, asn })) {
@@ -1125,17 +1151,6 @@ export class DiscoveryControlPlane {
         return json({ ok: false, error: "rate_limited", scope }, 429);
       }
     }
-
-    const service = String(body.service || "").toLowerCase();
-    const resolvedPort = resolvePort(service, body.port);
-    if (!resolvedPort.ok) {
-      return json({
-        ok: false,
-        error: resolvedPort.error,
-        allowed_ports: resolvedPort.allowed,
-      }, 400);
-    }
-    const port = resolvedPort.port;
 
     const leaseId = crypto.randomUUID();
     const permitId = crypto.randomUUID();
@@ -1199,13 +1214,20 @@ export class DiscoveryControlPlane {
   }
 
   consumePermit(body) {
-    const now = Number.isFinite(body.now) ? Math.floor(body.now) : Date.now();
+    const now = authoritativeNow(this.env, body);
+    const expectedPurpose = String(body.expected_purpose || "");
+    if (!new Set(["active_discovery", "hosted_self", "owned_canary"]).has(expectedPurpose)) {
+      return json({ ok: false, error: "expected_purpose_required" }, 400);
+    }
     const permit = one(this.sql.exec(
       `SELECT p.*, a.provenance_json, a.lease_state FROM permits p
        LEFT JOIN attempts a ON a.lease_id = p.lease_id WHERE p.id = ?`,
       String(body.permit_id || "")
     ));
     if (!permit) return json({ ok: false, error: "permit_not_found" }, 404);
+    if (permit.purpose !== expectedPurpose) {
+      return json({ ok: false, error: "permit_purpose_mismatch" }, 403);
+    }
     if (Number(permit.expires_at) < now) {
       return json({ ok: false, error: "permit_expired" }, 410);
     }
@@ -1247,15 +1269,23 @@ export class DiscoveryControlPlane {
 
   completeLease(body) {
     const leaseId = String(body.lease_id || "");
+    const expectedPurpose = String(body.expected_purpose || "");
     const allowed = new Set(["exposed", "not_observed", "target_error", "platform_error"]);
-    if (!leaseId || !allowed.has(body.outcome)) {
+    if (
+      !leaseId ||
+      !allowed.has(body.outcome) ||
+      !new Set(["active_discovery", "hosted_self", "owned_canary"]).has(expectedPurpose)
+    ) {
       return json({ ok: false, error: "invalid_completion" }, 400);
     }
     const row = one(this.sql.exec(
-      "SELECT lease_state FROM attempts WHERE lease_id = ?",
+      "SELECT lease_state, purpose FROM attempts WHERE lease_id = ?",
       leaseId
     ));
     if (!row) return json({ ok: false, error: "lease_not_found" }, 404);
+    if (row.purpose !== expectedPurpose) {
+      return json({ ok: false, error: "lease_purpose_mismatch" }, 403);
+    }
     if (row.lease_state !== "emitted") {
       return json({ ok: false, error: "lease_not_emitted" }, 409);
     }

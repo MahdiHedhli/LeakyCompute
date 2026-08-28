@@ -166,13 +166,14 @@ await check("the owned canary requires its exact fixed path and response marker"
   const run = await runDiscoveryPermit(
     {
       ip: "93.184.216.99",
-      port: 8443,
+      port: 80,
       service: "owned_canary",
       canary_hostname: "canary.example.test",
     },
     {
-      connectImpl: (address) => {
+      connectImpl: (address, options) => {
         capture.address = address;
+        capture.options = options;
         return fakeSocket(
           "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n" +
           '{"leakycompute_canary":"owned"}',
@@ -183,8 +184,12 @@ await check("the owned canary requires its exact fixed path and response marker"
   );
   assert.equal(run.result.exposed, true);
   assert.equal(run.result.canary_marker, "owned");
-  assert.deepEqual(capture.address, { hostname: "canary.example.test", port: 8443 });
+  assert.equal(run.result.destination_pinned, true);
+  assert.deepEqual(capture.address, { hostname: "93.184.216.99", port: 80 });
+  assert.deepEqual(capture.options, { secureTransport: "off", allowHalfOpen: false });
   assert.match(capture.request, /^GET \/leakycompute-owned-canary HTTP\/1\.0\r\n/);
+  assert.match(capture.request, /Host: canary\.example\.test:80\r\n/);
+  assert.equal(capture.closed, true);
 });
 
 if (failures) {

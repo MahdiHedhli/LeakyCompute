@@ -1,5 +1,5 @@
 # LeakyCompute discovery query profiles
-# Passive Shodan planning only; active probing is suspended (see SECURITY review).
+# Public-index nominations for the governed path; this file cannot open a socket.
 #
 # Severity context (for the post — cite primary sources, not this file):
 # - NadMesh (mid-2026): bot harvests Shodan for ComfyUI/Ollama/n8n/Open WebUI/Langflow/Gradio → exploit queue

@@ -36,8 +36,8 @@ PUBLIC_INDEXES = frozenset({"shodan", "censys"})
 # for anything.
 APPROVAL_MAX_AGE_DAYS = 90
 # A stored source label is not standing proof that the index still lists the
-# host. Active probing is currently suspended, but this gate must already be
-# correct before it can be re-enabled.
+# host. Governed probing may run only after this gate and the strong controls
+# have all approved the candidate.
 MAX_INDEX_PROVENANCE_AGE_DAYS = 7
 
 # I-22a: a requester may only attest for space they control. Nobody controls a

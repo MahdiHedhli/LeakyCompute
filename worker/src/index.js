@@ -236,15 +236,21 @@ export default {
       }
 
       if (path === "/v1/admin/discovery/lease" && request.method === "POST") {
-        return handleControlPost(request, env, "/lease/acquire");
+        return handleControlPost(request, env, "/lease/acquire", {
+          forcePurpose: "active_discovery",
+        });
       }
 
       if (path === "/v1/admin/discovery/permit" && request.method === "POST") {
-        return handleControlPost(request, env, "/permit/consume");
+        return handleControlPost(request, env, "/permit/consume", {
+          expectedPurpose: "active_discovery",
+        });
       }
 
       if (path === "/v1/admin/discovery/complete" && request.method === "POST") {
-        return handleControlPost(request, env, "/lease/complete");
+        return handleControlPost(request, env, "/lease/complete", {
+          expectedPurpose: "active_discovery",
+        });
       }
 
       if (path === "/v1/admin/discovery/probe" && request.method === "POST") {
@@ -638,7 +644,7 @@ async function handleCheck(request, env, ctx) {
     });
     if (lease.status !== 200) return { gate: lease };
     const consumed = await controlCall(env, "/permit/consume", {
-      body: { permit_id: lease.body.permit_id },
+      body: { permit_id: lease.body.permit_id, expected_purpose: "hosted_self" },
     });
     if (consumed.status !== 200) return { gate: consumed };
     const run = await runHostedPermit(consumed.body, { timeoutMs });
@@ -654,7 +660,11 @@ async function handleCheck(request, env, ctx) {
     };
     const outcome = completionOutcome(result);
     await controlCall(env, "/lease/complete", {
-      body: { lease_id: consumed.body.lease_id, outcome },
+      body: {
+        lease_id: consumed.body.lease_id,
+        outcome,
+        expected_purpose: "hosted_self",
+      },
     });
     return { result, outcome };
   };
@@ -1080,12 +1090,12 @@ async function handleOwnedCanary(request, env) {
       ip,
       asn: "AS-UNKNOWN",
       service: "owned_canary",
-      port: 8443,
+      port: 80,
     },
   });
   if (lease.status !== 200) return json(lease.body, lease.status, request, env);
   const consumed = await controlCall(env, "/permit/consume", {
-    body: { permit_id: lease.body.permit_id },
+    body: { permit_id: lease.body.permit_id, expected_purpose: "owned_canary" },
   });
   if (consumed.status !== 200) return json(consumed.body, consumed.status, request, env);
   const run = await runDiscoveryPermit(consumed.body, {
@@ -1097,21 +1107,31 @@ async function handleOwnedCanary(request, env) {
     error: run.error || "probe_runtime_failed",
     error_class: run.error_class || "platform_error",
   };
-  const markerOk = result.status === 200 && result.canary_marker === "owned";
+  const destinationPinned = result.destination_pinned === true;
+  const markerOk = destinationPinned && result.status === 200 && result.canary_marker === "owned";
   const outcome = markerOk ? "exposed" : completionOutcome(result);
   await controlCall(env, "/lease/complete", {
-    body: { lease_id: consumed.body.lease_id, outcome },
+    body: {
+      lease_id: consumed.body.lease_id,
+      outcome,
+      expected_purpose: "owned_canary",
+    },
   });
   return json({
     ok: markerOk,
     canary: "operator_owned",
-    target_matched_configuration: consumed.body.ip === ip,
+    target_matched_configuration: consumed.body.ip === ip && destinationPinned,
     destination: { port: consumed.body.port, path: "/leakycompute-owned-canary" },
     result,
   }, markerOk ? 200 : 503, request, env);
 }
 
-async function handleControlPost(request, env, path) {
+async function handleControlPost(
+  request,
+  env,
+  path,
+  { forcePurpose = null, expectedPurpose = null } = {}
+) {
   if (!requireAdmin(request, env)) {
     return json({ error: "unauthorized" }, 401, request, env);
   }
@@ -1132,6 +1152,18 @@ async function handleControlPost(request, env, path) {
   } catch {
     return json({ error: "invalid_json" }, 400, request, env);
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return json({ error: "invalid_json" }, 400, request, env);
+  }
+  if (forcePurpose) {
+    if (Object.hasOwn(body, "purpose") && body.purpose !== forcePurpose) {
+      return json({ error: "purpose_not_authorized_for_route" }, 403, request, env);
+    }
+    body = { ...body, purpose: forcePurpose };
+  }
+  if (expectedPurpose) {
+    body = { ...body, expected_purpose: expectedPurpose };
+  }
   const result = await controlCall(env, path, { body });
   return json(result.body, result.status, request, env);
 }
@@ -1148,9 +1180,12 @@ async function handleDiscoveryProbe(request, env) {
   const body = await readJsonBody(request);
   if (!body.permit_id) return json({ error: "permit_id_required" }, 400, request, env);
   const consumed = await controlCall(env, "/permit/consume", {
-    body: { permit_id: body.permit_id },
+    body: { permit_id: body.permit_id, expected_purpose: "active_discovery" },
   });
   if (consumed.status !== 200) return json(consumed.body, consumed.status, request, env);
+  if (consumed.body.purpose !== "active_discovery") {
+    return json({ error: "permit_purpose_mismatch" }, 403, request, env);
+  }
 
   const run = await runDiscoveryPermit(consumed.body, {
     timeoutMs: intEnv(env, "CHECK_TIMEOUT_MS", 2500),
@@ -1163,7 +1198,11 @@ async function handleDiscoveryProbe(request, env) {
   };
   const outcome = completionOutcome(result);
   const completed = await controlCall(env, "/lease/complete", {
-    body: { lease_id: consumed.body.lease_id, outcome },
+    body: {
+      lease_id: consumed.body.lease_id,
+      outcome,
+      expected_purpose: "active_discovery",
+    },
   });
   if (completed.status !== 200 || completed.body.ok === false) {
     return json({

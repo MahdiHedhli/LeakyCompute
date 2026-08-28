@@ -1041,6 +1041,7 @@ def run_governed_probes(
                     "observed_at": provenance.get("observed_at"),
                     "lane": provenance.get("lane"),
                     "query": provenance.get("query"),
+                    "port": c.get("port"),
                     "ip": provenance.get("ip"),
                     "asn": provenance.get("asn"),
                     "country_code": provenance.get("country_code"),

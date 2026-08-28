@@ -7,6 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { authoritativeNow } from "../src/control_plane.js";
 
 const ADMIN = "control-plane-test-admin";
 const port = 24_000 + Math.floor(Math.random() * 10_000);
@@ -30,6 +31,8 @@ const child = spawn(
     "ENVIRONMENT:test",
     "--var",
     "CONTROL_PLANE_READY:true",
+    "--var",
+    "CONTROL_PLANE_TEST_TIME_ENABLED:true",
     "--var",
     "CANARY_PROBE_ENABLED:true",
     "--var",
@@ -85,6 +88,8 @@ const provenance = {
   observed_at: "2026-08-27T12:00:00Z",
   ip: "8.8.8.8",
   asn: "AS15169",
+  lane: "ollama",
+  port: 11434,
 };
 
 function candidate(overrides = {}) {
@@ -99,7 +104,13 @@ function candidate(overrides = {}) {
     ...overrides,
   };
   if (!Object.hasOwn(overrides, "provenance")) {
-    value.provenance = { ...provenance, ip: value.ip, asn: value.asn };
+    value.provenance = {
+      ...provenance,
+      ip: value.ip,
+      asn: value.asn,
+      lane: value.service,
+      port: value.port,
+    };
   }
   return value;
 }
@@ -118,6 +129,20 @@ async function check(name, fn) {
 try {
   const health = await waitReady();
   console.log("\n[CP1] durable pre-probe permission state");
+  await check("production permission clocks ignore caller-supplied time", () => {
+    const supplied = Date.now() + 365 * 86_400_000;
+    const before = Date.now();
+    const actual = authoritativeNow({ ENVIRONMENT: "production" }, { now: supplied });
+    const after = Date.now();
+    assert.ok(actual >= before && actual <= after);
+    assert.equal(
+      authoritativeNow(
+        { ENVIRONMENT: "test", CONTROL_PLANE_TEST_TIME_ENABLED: "true" },
+        { now: supplied }
+      ),
+      supplied
+    );
+  });
   await check("SQLite control plane starts empty", () => {
     assert.deepEqual(
       { ok: health.ok, schema: health.schema, hosts: health.hosts, attempts: health.attempts },
@@ -233,39 +258,57 @@ try {
   const hostedA = await post("/v1/admin/discovery/lease", {
     purpose: "hosted_self", ip: "64.6.65.7", asn: "AS19281", service: "ollama", port: 11434, now,
   });
-  const hostedB = await post("/v1/admin/discovery/lease", {
-    purpose: "hosted_self", ip: "64.6.65.7", asn: "AS19281", service: "ray", port: 8265, now,
+  await check("the discovery route cannot mint a hosted-self permit", () => {
+    assert.equal(hostedA.status, 403);
+    assert.equal(hostedA.body.error, "purpose_not_authorized_for_route");
   });
-  await check("concurrent hosted checks cannot orphan an earlier permit", () => {
-    assert.equal(hostedA.status, 200);
-    assert.equal(hostedB.status, 409);
-    assert.equal(hostedB.body.error, "probe_in_progress");
+
+  const mismatchedEntitlement = await post(
+    "/v1/admin/discovery/lease",
+    candidate({
+      ip: "64.6.65.7",
+      asn: "AS19281",
+      service: "ray",
+      port: 8265,
+      provenance: {
+        ...provenance,
+        ip: "64.6.65.7",
+        asn: "AS19281",
+        lane: "ollama",
+        port: 11434,
+      },
+    })
+  );
+  await check("provenance is bound to the nominated service and port", () => {
+    assert.equal(mismatchedEntitlement.status, 403);
+    assert.equal(mismatchedEntitlement.body.error, "fresh_public_index_provenance_required");
   });
 
   const discoveryCanary = await post(
     "/v1/admin/discovery/lease",
-    candidate({ service: "owned_canary", port: 8443 })
+    candidate({ service: "owned_canary", port: 80 })
   );
   const wrongCanary = await post("/v1/admin/discovery/lease", {
     purpose: "owned_canary",
     ip: "93.184.216.98",
     service: "owned_canary",
-    port: 8443,
+    port: 80,
     now,
   });
   const ownedCanary = await post("/v1/admin/discovery/lease", {
     purpose: "owned_canary",
     ip: "93.184.216.99",
     service: "owned_canary",
-    port: 8443,
+    port: 80,
     now,
   });
   await check("the canary profile is isolated to the exact configured owned target", () => {
     assert.equal(discoveryCanary.status, 403);
     assert.equal(discoveryCanary.body.error, "owned_canary_profile_reserved");
     assert.equal(wrongCanary.status, 403);
-    assert.equal(wrongCanary.body.error, "owned_canary_not_authorized");
-    assert.equal(ownedCanary.status, 200);
+    assert.equal(wrongCanary.body.error, "purpose_not_authorized_for_route");
+    assert.equal(ownedCanary.status, 403);
+    assert.equal(ownedCanary.body.error, "purpose_not_authorized_for_route");
   });
 
   console.log("\n[CP2] authoritative corpus lifecycle");

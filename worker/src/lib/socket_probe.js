@@ -170,14 +170,8 @@ export async function socketGet(
 
   const started = Date.now();
   let socket;
+  let stage = "connect";
   try {
-    const connect = connectImpl || (await import("cloudflare:sockets")).connect;
-    socket = connect(
-      { hostname: canaryHostname || canonical, port: Number(port) },
-      { secureTransport: canaryHostname ? "on" : "off", allowHalfOpen: false }
-    );
-    await withDeadline(socket.opened, timeoutMs, "connect");
-
     const request = new TextEncoder().encode(
       `GET ${path} HTTP/1.0\r\n` +
       `Host: ${hostHeader(canaryHostname || canonical, port)}\r\n` +
@@ -185,10 +179,21 @@ export async function socketGet(
       `User-Agent: ${USER_AGENT}\r\n` +
       "Connection: close\r\n\r\n"
     );
+
+    stage = "socket_import";
+    const connect = connectImpl || (await import("cloudflare:sockets")).connect;
+    stage = "connect";
+    socket = connect(
+      { hostname: canonical, port: Number(port) },
+      { secureTransport: "off", allowHalfOpen: false }
+    );
+    await withDeadline(socket.opened, timeoutMs, "connect");
+    stage = "write";
     const writer = socket.writable.getWriter();
     await withDeadline(writer.write(request), timeoutMs, "write");
     writer.releaseLock();
 
+    stage = "read";
     const reader = socket.readable.getReader();
     const chunks = [];
     let received = 0;
@@ -209,6 +214,7 @@ export async function socketGet(
     return {
       ok: true,
       ...parsed,
+      destination_pinned: true,
       latency_ms: Date.now() - started,
       error: null,
       error_class: null,
@@ -223,7 +229,7 @@ export async function socketGet(
       text: "",
       json: null,
       latency_ms: Date.now() - started,
-      error: timedOut ? String(error.message) : "socket_error",
+      error: timedOut ? String(error.message) : `socket_${stage}_error`,
       error_class: platformSocketFailure(error) ? "platform_error" : "target_error",
     };
   } finally {
@@ -265,7 +271,10 @@ export async function runHostedPermit(permit, { timeoutMs = 2500, connectImpl } 
   return { ok: true, result };
 }
 
-export async function runDiscoveryPermit(permit, { timeoutMs = 2500, connectImpl } = {}) {
+export async function runDiscoveryPermit(
+  permit,
+  { timeoutMs = 2500, connectImpl } = {}
+) {
   const profile = DISCOVERY_PROFILES[permit.service];
   if (!profile) {
     return { ok: false, error: "unknown_service", error_class: "authorization_error" };
@@ -321,6 +330,9 @@ export async function runDiscoveryPermit(permit, { timeoutMs = 2500, connectImpl
       canary_marker: permit.service === "owned_canary" && response.json?.leakycompute_canary === "owned"
         ? "owned"
         : null,
+      destination_pinned: permit.service === "owned_canary"
+        ? response.destination_pinned === true
+        : undefined,
       error: null,
       error_class: null,
     },

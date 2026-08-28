@@ -52,13 +52,15 @@ jobs:
           jq -e '
             .ok == true and .canary == "operator_owned" and
             .target_matched_configuration == true and
-            .result.status == 200 and .result.canary_marker == "owned"
+            .result.status == 200 and .result.canary_marker == "owned" and
+            .result.destination_pinned == true
           ' "$canary_file" >/dev/null
 
           jq '{
             ok,
             operator_owned: (.canary == "operator_owned"),
             target_matched_configuration,
+            destination_pinned: (.result.destination_pinned == true),
             response_status: .result.status,
             marker_verified: (.result.canary_marker == "owned")
           }' "$canary_file"

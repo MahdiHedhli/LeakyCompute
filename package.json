@@ -4,10 +4,11 @@
   "type": "module",
   "description": "Defensive exposed-AI research instrument (Worker + static UIs)",
   "scripts": {
-    "test": "npm run test:privacy && python3 worker/test/seed_privacy.py && npm run test:supply-chain && npm run test:social-preview && node worker/test/turnstile.test.mjs && node worker/test/target.test.mjs && node worker/test/access.test.mjs && node worker/test/pages-bridge.test.mjs && node worker/test/probe.test.mjs && node worker/test/socket_probe.test.mjs && node worker/test/osv.test.mjs && node worker/test/exclusions.test.mjs && node worker/test/worker.test.mjs && node worker/test/stats_isolation.test.mjs && node worker/test/retention.test.mjs && node worker/test/routes.test.mjs && node worker/test/noproxy.test.mjs && node worker/test/provenance.test.mjs && node worker/test/control_plane.test.mjs",
+    "test": "npm run test:privacy && python3 worker/test/seed_privacy.py && npm run test:supply-chain && npm run test:social-preview && npm run test:operational-status && node worker/test/turnstile.test.mjs && node worker/test/target.test.mjs && node worker/test/access.test.mjs && node worker/test/pages-bridge.test.mjs && node worker/test/probe.test.mjs && node worker/test/socket_probe.test.mjs && node worker/test/osv.test.mjs && node worker/test/exclusions.test.mjs && node worker/test/worker.test.mjs && node worker/test/stats_isolation.test.mjs && node worker/test/retention.test.mjs && node worker/test/routes.test.mjs && node worker/test/noproxy.test.mjs && node worker/test/provenance.test.mjs && node worker/test/control_plane.test.mjs",
     "test:privacy": "node scripts/check_public_artifacts.mjs",
     "test:supply-chain": "node scripts/check_supply_chain.mjs",
     "test:social-preview": "node scripts/check_social_preview.mjs",
+    "test:operational-status": "node scripts/check_operational_status.mjs",
     "dev:worker": "wrangler dev",
     "deploy:worker": "wrangler deploy",
     "tail": "wrangler tail"

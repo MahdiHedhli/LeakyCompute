@@ -13,9 +13,11 @@ body:
         Approvals grant **Cloudflare Access + allowlist** entry for **this GitHub account**.
         You will sign in with **GitHub SSO** (same user).
 
-        Public aggregate statistics do **not** require access. The hosted
-        self-check is currently suspended; use the local defensive CLI for
-        infrastructure you control.
+        Public aggregate statistics and the Turnstile-protected hosted self-check
+        do **not** require lab access. The self-check covers the requester's own
+        public address; the local defensive CLI remains available for other
+        infrastructure you control. See the live
+        [scanning status](https://leakycompute.mahdihedhli.com/scanning.html).
 
         **Access needs the primary email on your GitHub account**, not just your
         username — that is the identity Cloudflare Access asserts when you sign

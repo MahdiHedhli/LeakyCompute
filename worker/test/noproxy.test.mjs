@@ -252,7 +252,7 @@ const FETCH_INVENTORY = {
   await check("the production TCP destination is the canonical consumed permit only", () => {
     const socket = fs.readFileSync(path.join(WORKER_SRC, "lib", "socket_probe.js"), "utf8");
     assert.match(socket, /import\("cloudflare:sockets"\)/);
-    assert.match(socket, /hostname: canaryHostname \|\| canonical/);
+    assert.match(socket, /hostname: canonical/);
     assert.match(socket, /canonical !== ip \|\| isPrivateOrLocal\(canonical\)/);
     assert.match(socket, /resolvePort\(service, port\)/);
     assert.match(socket, /reviewedPaths\(service\)\.has\(path\)/);

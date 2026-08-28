@@ -12,8 +12,8 @@ body:
 
         **This request is honored when we receive it, not when we finish reviewing it.**
         The listed space is excluded from any future probing and existing records
-        are deleted. Active probing is currently suspended. You do not need to
-        explain why, and we will not ask you to justify it.
+        are deleted. You do not need to explain why, and we will not ask you to
+        justify it.
 
         Exclusions are permanent and do not expire. You can add to them later.
 
@@ -21,11 +21,16 @@ body:
         weight by email — see the contact on the maintainer's profile, or the
         `/scanning` page. A GitHub account is not required to be left alone.
 
-        **Current status:** active probing and hosted checks are suspended. Historical
-        probes used read-only `GET` requests to version, health, and listing endpoints
-        on hosts already present in public indexes. We never sent a payload, submitted
-        a job, or attempted to authenticate. See
-        [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md).
+        **Current status:** governed verification is configured for a weekend-only
+        schedule and is paused whenever the strong control plane or an operational
+        safety check is unavailable. Candidates must come from fresh
+        approved public-index records, and an exclusion is checked authoritatively
+        again immediately before a one-time permit can emit a request. Hosted checks
+        are separate, user-initiated self-checks. All probes are read-only `GET`
+        requests to reviewed version, health, or listing endpoints; we never send a
+        payload, submit a job, or attempt to authenticate. See the live
+        [scanning and opt-out status](https://leakycompute.mahdihedhli.com/scanning.html)
+        and [SECURITY.md](https://github.com/MahdiHedhli/LeakyCompute/blob/main/docs/SECURITY.md).
   - type: textarea
     id: scope
     attributes:
