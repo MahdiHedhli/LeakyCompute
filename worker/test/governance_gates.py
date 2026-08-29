@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts", "discovery"))
 import provenance as P  # noqa: E402
 import run_multilane as R  # noqa: E402
 import discover as D  # noqa: E402
+import nominate_public_index as N  # noqa: E402
 
 FAILURES = 0
 
@@ -607,6 +608,97 @@ def _lane_failure_aborts_before_fallback():
 
 
 check("a passive lane failure aborts instead of falling back to corpus probes", _lane_failure_aborts_before_fallback)
+
+
+def _scheduled_nomination_isolates_failed_lane():
+    original_lanes = N.LANES
+    original_collect = N.collect_lane
+    original_cursor = N.cursor_call
+    original_http = N.http_json
+    original_sleep = N.time.sleep
+    original_argv = sys.argv
+    captured = {"nominations": None, "cursors": None}
+    ollama = next(lane for lane in R.LANES if lane["id"] == "ollama")
+    litellm = next(lane for lane in R.LANES if lane["id"] == "litellm")
+
+    def fake_collect(_key, lane, _page):
+        if lane["id"] == "litellm":
+            raise RuntimeError("synthetic lane outage")
+        candidate = cand(
+            "8.8.8.14",
+            asn="AS64496",
+            country_code="US",
+            provenance=P.index_provenance(
+                "shodan", lane["query"], lane["id"], "lane_search", iso(0),
+                ip="8.8.8.14", asn="AS64496", port=11434,
+            ),
+        )
+        return [candidate], 1, 2, 10
+
+    def fake_cursor(_base, _token, method="GET", data=None):
+        if method == "GET":
+            return 200, {"cursors": {}}
+        captured["cursors"] = data["cursors"]
+        return 200, {"ok": True}
+
+    def fake_http(_url, **kwargs):
+        captured["nominations"] = kwargs["data"]["nominations"]
+        return 200, {"ok": True, "created": ["opaque-1"]}
+
+    try:
+        N.LANES = [ollama, litellm]
+        N.collect_lane = fake_collect
+        N.cursor_call = fake_cursor
+        N.http_json = fake_http
+        N.time.sleep = lambda _seconds: None
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "manifest.json")
+            sys.argv = [
+                "nominate_public_index.py", "--api-base", "https://api.invalid",
+                "--nominator-token", "test-token", "--shodan-key", "test-key",
+                "--lanes", "ollama,litellm", "--output", output,
+            ]
+            assert N.main() == 0
+            with open(output, encoding="utf-8") as handle:
+                manifest = json.load(handle)
+    finally:
+        N.LANES = original_lanes
+        N.collect_lane = original_collect
+        N.cursor_call = original_cursor
+        N.http_json = original_http
+        N.time.sleep = original_sleep
+        sys.argv = original_argv
+
+    assert len(captured["nominations"]) == 1, captured
+    assert captured["nominations"][0]["service"] == "ollama", captured
+    assert [row["lane"] for row in captured["cursors"]] == ["ollama"], captured
+    assert manifest["meta"]["lanes"] == ["ollama"], manifest
+    assert manifest["meta"]["failed_lanes"] == ["litellm"], manifest
+    assert manifest["meta"]["partial_lane_run"] is True, manifest
+    assert "indexed_observed" not in manifest["meta"], manifest
+    assert manifest["meta"]["indexed_observed_publication"] == (
+        "withheld_incomplete_lane_measurement"
+    ), manifest
+
+
+check(
+    "scheduled nomination isolates one failed lane and withholds partial census totals",
+    _scheduled_nomination_isolates_failed_lane,
+)
+
+
+def _scheduled_nomination_stops_if_every_lane_failed():
+    try:
+        N.require_nomination_lane_available(set(), ["litellm", "ollama"])
+        raise AssertionError("an all-lane outage was allowed to nominate targets")
+    except SystemExit as exc:
+        assert "no passive lane succeeded" in str(exc), exc
+
+
+check(
+    "scheduled nomination stops before work when every passive lane fails",
+    _scheduled_nomination_stops_if_every_lane_failed,
+)
 
 
 def _no_redirect_following():

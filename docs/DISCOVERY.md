@@ -334,8 +334,11 @@ Public indexes ──► source-specific passive counts/facets
 ```
 
 The legacy packet-sending runner remains hard-disabled. Production scheduling
-uses only the governed path above, and a passive lane failure aborts rather than
-falling back to historical corpus targets.
+uses only the governed path above. A passive lane failure contributes no
+candidates, advances no cursor, and cannot replace the last complete global
+index measurement; healthy lanes continue through the same provenance,
+exclusion, cooldown, rate, lease, and permit gates. If every requested lane
+fails, the run stops before nominations or target traffic.
 
 ---
 

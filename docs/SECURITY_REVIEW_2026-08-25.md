@@ -27,10 +27,15 @@ The first governed production run exposed four additional defects:
   discovery path at the socket boundary; the registries now union their reviewed
   paths and an end-to-end regression covers the overlap.
 
-Passive lane failures now abort before corpus reads or target work, workflow
-logs contain no raw target addresses, and the corrected path was re-tested in a
-capped production run. These incidents remain part of the audit trail rather
-than being rewritten out of the original review.
+The initial remediation made any passive lane failure abort before corpus reads
+or target work. On 29 August, after a single LiteLLM index failure unnecessarily
+stopped every healthy lane, production nomination was narrowed further: the
+failed lane now contributes no candidate, cursor update, or public census value,
+while healthy lanes may continue through the same governed path. An all-lane
+failure still stops before nominations or target work, and an incomplete run
+still cannot replace the last complete global index measurement. Workflow logs
+contain no raw target addresses. These incidents remain part of the audit trail
+rather than being rewritten out of the original review.
 
 ## Status
 

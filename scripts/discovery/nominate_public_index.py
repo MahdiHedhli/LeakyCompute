@@ -22,7 +22,6 @@ from run_multilane import (
     http_json,
     partition_by_allowed_port,
     partition_by_provenance,
-    require_lane_collection_succeeded,
 )
 
 
@@ -34,6 +33,23 @@ def cursor_call(api_base: str, token: str, method: str = "GET", data=None):
         data=data,
         timeout=20,
     )
+
+
+def require_nomination_lane_available(completed: set[str], failures: list[str]) -> None:
+    """Isolate failed passive lanes while requiring at least one healthy lane.
+
+    A failed lane contributes no candidates, advances no cursor, and cannot
+    publish a partial global index measurement. Healthy lanes retain their own
+    fresh provenance and may continue through the normal nomination gates.
+    """
+    if not completed:
+        raise SystemExit("no passive lane succeeded; no nominations created")
+    if failures:
+        print(
+            "[!] isolated passive lane failure(s): "
+            + ", ".join(sorted(failures))
+            + "; continuing with healthy lanes only"
+        )
 
 
 def main() -> int:
@@ -62,6 +78,7 @@ def main() -> int:
 
     candidates = []
     failures = []
+    completed = set()
     cursor_updates = []
     index_listed = {}
     pulled = 0
@@ -73,6 +90,7 @@ def main() -> int:
             pulled += observed
             if isinstance(total, int):
                 index_listed[lane["id"]] = total
+            completed.add(lane["id"])
             cursor_updates.append({
                 "lane": lane["id"],
                 "page": next_page,
@@ -85,7 +103,7 @@ def main() -> int:
             print(f"[!] passive lane failed: {lane['id']}")
             failures.append(lane["id"])
         time.sleep(1.0)
-    require_lane_collection_succeeded(failures)
+    require_nomination_lane_available(completed, failures)
 
     by_key = {}
     for candidate in candidates:
@@ -133,14 +151,23 @@ def main() -> int:
     if status != 200:
         raise SystemExit("lane cursor commit failed; nominations exist but probing is withheld")
 
+    requested_lane_ids = [lane["id"] for lane in lanes]
+    completed_lane_ids = [lane_id for lane_id in requested_lane_ids if lane_id in completed]
     manifest = {
         "nomination_ids": ids,
         "meta": {
-            "lanes": [lane["id"] for lane in lanes],
+            "lanes": completed_lane_ids,
+            "requested_lanes": requested_lane_ids,
+            "failed_lanes": sorted(failures),
+            "partial_lane_run": bool(failures),
             "candidate_count": len(ids),
             "pulled_count": pulled,
             "index_listed_by_lane": index_listed,
             "index_listed_records": sum(index_listed.values()),
+            "indexed_observed_publication": (
+                "withheld_incomplete_lane_measurement"
+                if failures else "candidate_feed_only"
+            ),
             "provenance_enforced": True,
             "immutable_nominations": True,
             "credential_split": True,
