@@ -340,6 +340,13 @@ index measurement; healthy lanes continue through the same provenance,
 exclusion, cooldown, rate, lease, and permit gates. If every requested lane
 fails, the run stops before nominations or target traffic.
 
+Each Shodan page gets at most three attempts. Transport failures, rate limits,
+and upstream `5xx` responses use bounded exponential backoff with full jitter;
+authentication failures, rejected queries, redirects, and malformed responses
+fail the lane immediately. Retry logs contain only a public-safe category and
+attempt count. If all attempts fail, the lane remains isolated and its durable
+cursor stays unchanged for the next scheduled run.
+
 ---
 
 ## Rate limits (free-tier / anti-block)

@@ -41,6 +41,7 @@ import argparse
 import ipaddress
 import json
 import os
+import random
 import sys
 import threading
 import time
@@ -71,6 +72,12 @@ HARD_MAX_TOTAL = 128
 # so roughly 70 runs a month. The cursor carries position forward, so each run
 # walks further down the list rather than re-reading the top.
 PAGES_PER_RUN = 10
+# A passive source outage must not consume an entire scheduled run, but retrying
+# forever would hide a persistent provider or query failure and could burn
+# credits. Each page therefore gets one request plus two bounded retries.
+SHODAN_MAX_ATTEMPTS = 3
+SHODAN_RETRY_BASE_SECONDS = 2.0
+SHODAN_RETRY_MAX_SECONDS = 8.0
 HARD_MAX_RATE = 1.0  # probes/sec global absolute ceiling
 HARD_MIN_PREFIX = 28  # never expand wider than /28
 HARD_MAX_HOSTS_PER_ASN = 25
@@ -170,6 +177,71 @@ def payload_shape(payload: Any) -> str:
     return type(payload).__name__
 
 
+def shodan_failure_category(status: int | None, payload: Any) -> tuple[str, bool]:
+    """Return a public-safe failure category and whether retrying is safe.
+
+    Response bodies and transport exception strings are deliberately ignored:
+    Shodan banners and provider messages do not belong in public workflow logs.
+    Only failures that are plausibly transient are retried. Authentication,
+    query, redirect, and malformed-response failures need operator attention and
+    fail the lane immediately.
+    """
+    if status is None:
+        return "transport_error", True
+    if status in {408, 425}:
+        return "transient_request_error", True
+    if status == 429:
+        return "rate_limited", True
+    if 500 <= status <= 599:
+        return "upstream_server_error", True
+    if status in {401, 403}:
+        return "authentication_rejected", False
+    if 400 <= status <= 499:
+        return "request_rejected", False
+    if 300 <= status <= 399:
+        return "redirect_refused", False
+    if 200 <= status <= 299 and not isinstance(payload, dict):
+        return "malformed_response", False
+    return "unexpected_response", False
+
+
+def shodan_json_with_retry(
+    url: str,
+    *,
+    retry_sleep=time.sleep,
+    retry_jitter=random.uniform,
+) -> dict:
+    """Fetch one Shodan page with bounded full-jitter transient retries."""
+    for attempt in range(1, SHODAN_MAX_ATTEMPTS + 1):
+        status, payload = http_json(
+            url,
+            timeout=60,
+            max_response_bytes=256 * 1024,
+        )
+        if status == 200 and isinstance(payload, dict):
+            return payload
+
+        category, retryable = shodan_failure_category(status, payload)
+        if not retryable or attempt == SHODAN_MAX_ATTEMPTS:
+            raise SystemExit(
+                f"Shodan search failed: {category}; attempts={attempt}"
+            )
+
+        ceiling = min(
+            SHODAN_RETRY_MAX_SECONDS,
+            SHODAN_RETRY_BASE_SECONDS * (2 ** (attempt - 1)),
+        )
+        delay = min(ceiling, max(0.0, float(retry_jitter(0.0, ceiling))))
+        print(
+            f"[!] Shodan transient failure: {category}; "
+            f"retrying attempt {attempt + 1}/{SHODAN_MAX_ATTEMPTS} "
+            f"after {delay:.1f}s"
+        )
+        retry_sleep(delay)
+
+    raise AssertionError("unreachable Shodan retry state")
+
+
 def probe_ollama(ip: str, port: int, timeout: float, limiter: GlobalRateLimiter) -> dict:
     limiter.wait()
     status, payload = http_json(
@@ -247,11 +319,7 @@ def shodan_search(
         if facets and page == 1:
             params["facets"] = facets
         url = "https://api.shodan.io/shodan/host/search?" + urllib.parse.urlencode(params)
-        status, data = http_json(url, timeout=60, max_response_bytes=256 * 1024)
-        if status != 200 or not isinstance(data, dict):
-            raise SystemExit(
-                f"Shodan search failed: HTTP {status}; response={payload_shape(data)}"
-            )
+        data = shodan_json_with_retry(url)
         # `total` rides on every page, not just the first. Reading it only in
         # the page==1 branch left it None for every lane that resumed from a
         # cursor — which is every lane after the first run.

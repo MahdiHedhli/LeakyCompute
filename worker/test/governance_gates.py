@@ -591,12 +591,124 @@ def _shodan_minimized_and_errors_sanitized():
         except SystemExit as exc:
             message = str(exc)
             assert hostile not in message
-            assert "response=text length=" in message
+            assert "malformed_response" in message
+            assert "attempts=1" in message
     finally:
         D.http_json = original
 
 
 check("Shodan data is minimized and failure logs cannot disclose response content", _shodan_minimized_and_errors_sanitized)
+
+
+def _shodan_transient_failures_recover_with_bounded_backoff():
+    original = D.http_json
+    hostile = "93.184.216.34 SECRET-MODEL-CONTENT"
+    responses = [
+        (429, hostile),
+        (None, hostile),
+        (200, {"total": 0, "matches": []}),
+    ]
+    sleeps = []
+    calls = []
+
+    def fake_http(url, **kwargs):
+        calls.append((url, kwargs))
+        return responses.pop(0)
+
+    try:
+        D.http_json = fake_http
+        payload = D.shodan_json_with_retry(
+            "https://api.shodan.io/test?key=secret",
+            retry_sleep=sleeps.append,
+            retry_jitter=lambda _low, high: high,
+        )
+    finally:
+        D.http_json = original
+
+    assert payload == {"total": 0, "matches": []}, payload
+    assert len(calls) == 3, calls
+    assert sleeps == [2.0, 4.0], sleeps
+    assert all(call[1]["max_response_bytes"] == 256 * 1024 for call in calls)
+
+
+check(
+    "transient Shodan failures recover within three jittered attempts",
+    _shodan_transient_failures_recover_with_bounded_backoff,
+)
+
+
+def _shodan_permanent_failures_are_not_retried():
+    original = D.http_json
+    hostile = "93.184.216.34 SECRET-MODEL-CONTENT"
+    calls = []
+    sleeps = []
+
+    def fake_http(_url, **_kwargs):
+        calls.append(True)
+        return 400, hostile
+
+    try:
+        D.http_json = fake_http
+        try:
+            D.shodan_json_with_retry(
+                "https://api.shodan.io/test?key=secret",
+                retry_sleep=sleeps.append,
+                retry_jitter=lambda _low, high: high,
+            )
+            raise AssertionError("a permanent Shodan rejection was retried or accepted")
+        except SystemExit as exc:
+            message = str(exc)
+            assert "request_rejected" in message, message
+            assert "attempts=1" in message, message
+            assert hostile not in message, message
+    finally:
+        D.http_json = original
+
+    assert len(calls) == 1, calls
+    assert sleeps == [], sleeps
+
+
+check(
+    "permanent Shodan request failures isolate immediately without retry",
+    _shodan_permanent_failures_are_not_retried,
+)
+
+
+def _shodan_exhausted_retries_fail_without_leaking_response_data():
+    original = D.http_json
+    hostile = "93.184.216.34 SECRET-MODEL-CONTENT"
+    calls = []
+    sleeps = []
+
+    def fake_http(_url, **_kwargs):
+        calls.append(True)
+        return 503, hostile
+
+    try:
+        D.http_json = fake_http
+        try:
+            D.shodan_json_with_retry(
+                "https://api.shodan.io/test?key=secret",
+                retry_sleep=sleeps.append,
+                retry_jitter=lambda _low, high: high,
+            )
+            raise AssertionError("an exhausted Shodan outage was accepted")
+        except SystemExit as exc:
+            message = str(exc)
+            assert "upstream_server_error" in message, message
+            assert "attempts=3" in message, message
+            assert hostile not in message, message
+    finally:
+        D.http_json = original
+
+    assert len(calls) == 3, calls
+    assert sleeps == [2.0, 4.0], sleeps
+
+
+check(
+    "exhausted Shodan retries fail the lane with public-safe diagnostics",
+    _shodan_exhausted_retries_fail_without_leaking_response_data,
+)
 
 
 def _lane_failure_aborts_before_fallback():

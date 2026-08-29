@@ -37,6 +37,13 @@ still cannot replace the last complete global index measurement. Workflow logs
 contain no raw target addresses. These incidents remain part of the audit trail
 rather than being rewritten out of the original review.
 
+The same recovery path now gives each Shodan page at most three attempts.
+Transport failures, rate limits, and upstream server errors use bounded
+exponential backoff with full jitter. Permanent request, authentication,
+redirect, and malformed-response failures do not retry. Exhaustion still
+isolates only that lane, preserves its authoritative cursor, withholds a partial
+global census value, and emits only a sanitized failure category.
+
 ## Status
 
 Daybreak Blue and the primary agent reviewed the Worker, static clients,
