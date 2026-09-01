@@ -87,7 +87,7 @@ services:
     restart: "no"
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:latest@sha256:9f9276e57cda1593cfa0fe8519145cd49328e119e85951851b9244e82e3769be
+    image: ghcr.io/mlflow/mlflow:latest@sha256:2c9c50ca72e314cb1b8b301ceaa43882629ad91873d7271f3be92796930c3647
     ports: ["127.0.0.1:5000:5000"]
     command: mlflow server --host 0.0.0.0 --port 5000
     restart: "no"
