@@ -81,7 +81,7 @@ services:
 
   # --- favicon donors (tier-2 lanes) ---------------------------------------
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main@sha256:c792953395b43d4f49085fa4026850c5e923578345ebeaf56eabd980bcfc273a
+    image: ghcr.io/open-webui/open-webui:main@sha256:8afd2d774834c618a75411b3491cdc5da7396dc464f56a160b937ff2992eb6e4
     ports: ["127.0.0.1:3000:8080"]
     environment: ["WEBUI_AUTH=False"]
     restart: "no"
