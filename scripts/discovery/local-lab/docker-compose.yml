@@ -95,7 +95,7 @@ services:
   # tensorflow/tensorflow is amd64-only (slow emulation on Apple silicon) and
   # no longer ships the tensorboard CLI. Install the package on a native base.
   tensorboard:
-    image: python:3.11-slim@sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76
+    image: python:3.14-slim@sha256:656d12e70054d5fda18a045e2494c96701e9792dd1445f95b3d038df954f57e9
     ports: ["127.0.0.1:6006:6006"]
     volumes:
       - "./tensorboard-requirements.lock:/tmp/tensorboard-requirements.lock:ro"
