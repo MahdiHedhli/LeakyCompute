@@ -10,6 +10,7 @@ const workflowFiles = readdirSync(workflowDir)
   .map((name) => `.github/workflows/${name}`);
 
 const discoveryWorkflow = read(".github/workflows/scheduled-discovery.yml");
+const labWorkflow = read(".github/workflows/deploy-lab.yml");
 
 const failures = [];
 const fail = (message) => failures.push(message);
@@ -99,6 +100,24 @@ if (!/Publish current aggregate generation/.test(discoveryWorkflow) ||
 }
 if (!/max_total[^\n]*\n\s+description:[^\n]*\n\s+default:\s*["']120["']/.test(discoveryWorkflow)) {
   fail("scheduled discovery must retain the reviewed 120-candidate default");
+}
+
+if (!/deployments\?env=production&per_page=1/.test(labWorkflow)) {
+  fail("lab deployment verification must exclude preview deployments");
+}
+if (/deployments\?per_page=1/.test(labWorkflow)) {
+  fail("lab deployment verification restored the unfiltered deployment query");
+}
+for (const required of [
+  '--max-filesize 131072',
+  'python3 scripts/operations/parse_pages_deployment.py "$response_file"',
+]) {
+  if (!labWorkflow.includes(required)) {
+    fail(`lab deployment verification is missing fail-closed check: ${required}`);
+  }
+}
+if (!/-o "\$response_file"/.test(labWorkflow) || /\|\s*python3/.test(labWorkflow)) {
+  fail("lab deployment verification must parse a private response file, not stream API data to logs");
 }
 
 const packageJson = JSON.parse(read("package.json"));
