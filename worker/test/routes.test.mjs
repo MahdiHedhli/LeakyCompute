@@ -14,7 +14,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { recordExposedHost } from "../src/lib/discovery.js";
+import {
+  recordExposedHost,
+  recommendDiscoveryCandidates,
+} from "../src/lib/discovery.js";
 import { LAB_ROUTES } from "../src/lib/lab.js";
 import { check, section, finish, makeKV, daysAgo } from "./_harness.mjs";
 
@@ -130,6 +133,8 @@ const ADMIN_ROUTES = [
   // so it is not something an unauthenticated caller may read or move.
   { method: "GET", path: "/v1/admin/discovery/cursors" },
   { method: "POST", path: "/v1/admin/discovery/cursors", body: { lane: "ollama", page: 2 } },
+  // Aggregate-only budget state still controls active scheduling and is admin-only.
+  { method: "GET", path: "/v1/admin/discovery/budget" },
   // Dark control plane. These routes mutate permission state but cannot emit a
   // target request; they are still admin-only because they carry raw addresses.
   { method: "GET", path: "/v1/admin/control/health" },
@@ -330,6 +335,35 @@ for (const route of ADMIN_ROUTES) {
   });
   await check(`${route.method} ${route.path} 401 body leaks no address`, () => {
     assert.ok(!text.includes(CORPUS_IP) && !text.includes(CORPUS_IP_2));
+  });
+}
+
+{
+  await check("adaptive discovery sizing preserves the operational reserve", () => {
+    assert.equal(recommendDiscoveryCandidates(990, 100), 425);
+    assert.equal(recommendDiscoveryCandidates(425, 100), 300);
+    assert.equal(recommendDiscoveryCandidates(100, 100), 0);
+  });
+
+  const env = await seededEnv({ KV_DAILY_PUT_BUDGET: "990", KV_DISCOVERY_RESERVE: "100" });
+  const today = new Date().toISOString().slice(0, 10);
+  await env.KV.put(`kv:puts:${today}`, "500");
+  const res = await worker.fetch(
+    req("GET", "/v1/admin/discovery/budget", { headers: { "X-Admin-Token": ADMIN } }),
+    env,
+    ctx
+  );
+  const body = await res.json();
+  await check("the authenticated budget route returns aggregate headroom only", () => {
+    assert.equal(res.status, 200);
+    assert.deepEqual(Object.keys(body).sort(), [
+      "budget", "ok", "recommended_max_candidates", "remaining", "reserve", "reset_at", "used",
+    ]);
+    assert.equal(body.used, 500);
+    assert.equal(body.remaining, 490);
+    assert.equal(body.reserve, 100);
+    assert.equal(body.recommended_max_candidates, 358);
+    assert.match(body.reset_at, /^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/);
   });
 }
 

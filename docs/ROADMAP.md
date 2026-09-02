@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status date:** 2026-08-27
+**Status date:** 2026-09-02
 **Authority:** this is the current execution order. `SECURITY.md` remains the
 constitution; the 2026-08-25 security review supplies the open security
 requirements. Older specs and archived handoffs preserve reasoning, not current
@@ -15,7 +15,7 @@ authorization to run active traffic.
 | Local defensive CLI | Available for infrastructure the operator controls |
 | Passive discovery reports and dry-run plans | Available; send no target traffic |
 | Hosted `/v1/check` | Available for the requester's own public address behind a dedicated Turnstile widget and strong control-plane permits |
-| Active discovery and ingest | Governed weekend schedule active; every run fails closed before index access or traffic if schema-3 strong health is unavailable |
+| Active discovery and ingest | Daily lane-sharded schedule active with an adaptive pre-reset catch-up pass; every run fails closed before index access or traffic if schema-3 strong health or safe KV headroom is unavailable |
 | 2026-08 discovery incident | Contained; 13 artifacts and 13 log sets deleted and verified |
 
 Nothing on this roadmap silently widens what the project touches. Passive source
@@ -50,7 +50,10 @@ the migration, owned canary, and re-enable suite passed. A later free-tier
 control-store quota event correctly stopped new permits. After the allowance
 reset, authenticated schema-3 health, an address-pinned canary, a capped
 split-role Ollama-only run, and a fresh adversarial pass all completed before
-the weekend schedule resumed.
+the governed schedule resumed. On 2026-09-02 the schedule was expanded to four
+daily lane shards capped at 128 candidates plus an adaptive all-lane catch-up
+pass. A manual 425-candidate envelope remains transactionally bounded as
+`128 + 128 + 128 + 41`; a 100-write KV reserve remains unavailable to discovery.
 
 **What would make this step wrong:** allowing the existing dormant runner to
 become the de facto decision. It remains fail-closed until the choice and its

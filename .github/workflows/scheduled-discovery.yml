@@ -7,18 +7,23 @@ name: Governed discovery
 
 on:
   schedule:
-    # Weekend-only, off the hour. Saturday and Sunday runs draw fresh index
-    # candidates, while the durable 14-day per-host cooldown remains
-    # authoritative and prevents either run from accelerating an old target.
-    - cron: "43 5 * * 0,6"
+    # Four daily lane shards limit the capacity lost to any one failed run.
+    # Successful lanes advance independent cursors; failed lanes do not.
+    - cron: "43 5 * * *"
+    - cron: "43 9 * * *"
+    - cron: "43 13 * * *"
+    - cron: "43 17 * * *"
+    # Final all-lane catch-up pass, early enough to finish before the 00:00 UTC
+    # KV reset. Packet-free preflight sizes it from remaining KV headroom.
+    - cron: "13 22 * * *"
   workflow_dispatch:
     inputs:
       max_total:
         description: "Maximum governed candidates"
-        default: "120"
+        default: "425"
       lanes:
         description: "Comma-separated lane IDs"
-        default: "ollama,jupyter,ray,open_webui,litellm,vllm,comfyui"
+        default: "all"
 
 concurrency:
   # Two runs must never overlap: they would each read the probe clock before the
@@ -34,18 +39,67 @@ jobs:
   preflight:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      max_total: ${{ steps.plan.outputs.max_total }}
+      lanes: ${{ steps.plan.outputs.lanes }}
+      should_run: ${{ steps.plan.outputs.should_run }}
     steps:
-      - name: Verify strong control plane
+      - name: Verify strong control plane and size the run
+        id: plan
         env:
           LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
           LEAKY_ADMIN_TOKEN: ${{ secrets.LEAKY_DISCOVERY_ADMIN_TOKEN }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          INPUT_MAX: ${{ github.event.inputs.max_total || '425' }}
+          INPUT_LANES: ${{ github.event.inputs.lanes || 'all' }}
         run: |
           set -euo pipefail
           if [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_ADMIN_TOKEN:-}" ]; then
             echo "Required control-plane credentials are not configured."
             exit 1
           fi
+          case "$EVENT_SCHEDULE" in
+            "43 5 * * *")
+              REQUESTED_MAX=128
+              LANES="ollama,open_webui,litellm,triton"
+              ;;
+            "43 9 * * *")
+              REQUESTED_MAX=128
+              LANES="jupyter,ray,comfyui,tensorboard"
+              ;;
+            "43 13 * * *")
+              REQUESTED_MAX=128
+              LANES="localai,vllm,openai_compat_8000"
+              ;;
+            "43 17 * * *")
+              REQUESTED_MAX=128
+              LANES="openai_compat_8080,gradio,mlflow"
+              ;;
+            "13 22 * * *")
+              REQUESTED_MAX=425
+              LANES="all"
+              ;;
+            "")
+              REQUESTED_MAX="$INPUT_MAX"
+              LANES="$INPUT_LANES"
+              ;;
+            *)
+              echo "Unknown schedule; refusing to infer a discovery plan."
+              exit 1
+              ;;
+          esac
+          case "$REQUESTED_MAX" in (*[!0-9]*|'') echo "max_total must be an integer"; exit 1;; esac
+          if [ "$REQUESTED_MAX" -lt 1 ] || [ "$REQUESTED_MAX" -gt 425 ]; then
+            echo "max_total must be between 1 and 425"
+            exit 1
+          fi
+          if ! printf '%s' "$LANES" | grep -Eq '^(all|[a-z0-9_]+(,[a-z0-9_]+)*)$'; then
+            echo "lanes must be 'all' or a comma-separated list of lane IDs"
+            exit 1
+          fi
           HEALTH_FILE="$(mktemp)"
+          BUDGET_FILE="$(mktemp)"
+          trap 'rm -f "$HEALTH_FILE" "$BUDGET_FILE"' EXIT
           HTTP_CODE=$(curl -sS -o "$HEALTH_FILE" -w '%{http_code}' \
             -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
             "${LEAKY_API_BASE%/}/v1/admin/control/health")
@@ -57,10 +111,41 @@ jobs:
             "$HEALTH_FILE" >/dev/null
           jq '{ok, ready, schema, pending_purges}' "$HEALTH_FILE"
 
+          HTTP_CODE=$(curl -sS -o "$BUDGET_FILE" -w '%{http_code}' \
+            -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+            "${LEAKY_API_BASE%/}/v1/admin/discovery/budget")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Authenticated KV budget view is unavailable (HTTP $HTTP_CODE); no index query or target traffic was attempted."
+            exit 1
+          fi
+          jq -e '
+            .ok == true and
+            (.used | type == "number" and . >= 0) and
+            (.budget | type == "number" and . > 0) and
+            (.remaining | type == "number" and . >= 0) and
+            (.reserve | type == "number" and . >= 0) and
+            (.recommended_max_candidates | type == "number" and . >= 0 and . <= 425)
+          ' "$BUDGET_FILE" >/dev/null
+          SAFE_MAX=$(jq -r '.recommended_max_candidates | floor' "$BUDGET_FILE")
+          if [ "$SAFE_MAX" -lt "$REQUESTED_MAX" ]; then MAX_TOTAL="$SAFE_MAX"; else MAX_TOTAL="$REQUESTED_MAX"; fi
+          jq '{used, budget, remaining, reserve, recommended_max_candidates, reset_at}' "$BUDGET_FILE"
+          if [ "$MAX_TOTAL" -lt 1 ]; then
+            echo "No safe KV headroom remains; skipping before index access or target traffic."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "max_total=0" >> "$GITHUB_OUTPUT"
+            echo "lanes=$LANES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Governed candidate envelope: $MAX_TOTAL across $LANES"
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          echo "max_total=$MAX_TOTAL" >> "$GITHUB_OUTPUT"
+          echo "lanes=$LANES" >> "$GITHUB_OUTPUT"
+
   nominate:
     needs: preflight
+    if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,8 +160,8 @@ jobs:
           SHODAN_API_KEY: ${{ secrets.SHODAN_API_KEY }}
           LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
           LEAKY_NOMINATOR_TOKEN: ${{ secrets.LEAKY_DISCOVERY_NOMINATOR_TOKEN }}
-          MAX_TOTAL: ${{ github.event.inputs.max_total || '120' }}
-          LANES: ${{ github.event.inputs.lanes || 'ollama,jupyter,ray,open_webui,litellm,vllm,comfyui' }}
+          MAX_TOTAL: ${{ needs.preflight.outputs.max_total }}
+          LANES: ${{ needs.preflight.outputs.lanes }}
         run: |
           set -euo pipefail
           if [ -z "${SHODAN_API_KEY:-}" ] || [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_NOMINATOR_TOKEN:-}" ]; then
@@ -84,8 +169,8 @@ jobs:
             exit 1
           fi
           case "$MAX_TOTAL" in (*[!0-9]*|'') echo "max_total must be an integer"; exit 1;; esac
-          if [ "$MAX_TOTAL" -lt 1 ] || [ "$MAX_TOTAL" -gt 128 ]; then
-            echo "max_total must be between 1 and 128"
+          if [ "$MAX_TOTAL" -lt 1 ] || [ "$MAX_TOTAL" -gt 425 ]; then
+            echo "max_total must be between 1 and 425"
             exit 1
           fi
           python3 -u scripts/discovery/nominate_public_index.py \
@@ -108,7 +193,7 @@ jobs:
   probe:
     needs: nominate
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

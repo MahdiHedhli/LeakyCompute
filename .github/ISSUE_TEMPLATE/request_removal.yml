@@ -21,9 +21,10 @@ body:
         weight by email — see the contact on the maintainer's profile, or the
         `/scanning` page. A GitHub account is not required to be left alone.
 
-        **Current status:** governed verification is configured for a weekend-only
-        schedule and is paused whenever the strong control plane or an operational
-        safety check is unavailable. Candidates must come from fresh
+        **Current status:** governed verification uses a daily lane-sharded
+        schedule plus a pre-reset catch-up pass sized from remaining KV capacity.
+        It is paused whenever the strong control plane, the reserved KV headroom,
+        or another operational safety check is unavailable. Candidates must come from fresh
         approved public-index records, and an exclusion is checked authoritatively
         again immediately before a one-time permit can emit a request. Hosted checks
         are separate, user-initiated self-checks. All probes are read-only `GET`

@@ -15,6 +15,7 @@ describes the contract; when they disagree, the code wins and this file is a bug
 | `/v1/admin/allowlist` | POST | `X-Admin-Token` | approve / revoke researchers |
 | `/v1/admin/discovery/hits` | GET | `X-Admin-Token` | private hit list (raw IPs) |
 | `/v1/admin/discovery/clock` | GET | `X-Admin-Token` | I-24 re-probe clock (raw IPs) |
+| `/v1/admin/discovery/budget` | GET | `X-Admin-Token` | aggregate KV headroom and a safe discovery ceiling |
 | `/v1/admin/discovery/ingest` | POST | `X-Admin-Token` | mirror emitted governed results into the legacy compatibility cache |
 
 CORS is allowlisted via the `ALLOWED_ORIGINS` var. All responses are
@@ -305,6 +306,13 @@ whole ledger in one read, and it includes hosts that did not answer and so have
 no record at all. Those are the operators who already closed the port; without
 this they were the only ones the 14-day interval did not protect. Entries age
 out after 90 days and an exclusion deletes them (I-25).
+
+**`GET /v1/admin/discovery/budget`** — aggregate-only Workers KV budget state:
+`{ used, budget, remaining, reserve, recommended_max_candidates, reset_at }`.
+The recommendation assumes worst-case 100-result ingest batches plus fixed
+aggregate overhead, caps the run envelope at 425, and withholds the configured
+operational reserve. It never returns addresses or other corpus data. Scheduled
+discovery clamps to this recommendation or skips before reading the index.
 
 **`POST /v1/admin/discovery/ingest`** — `{ results: [...], run_meta?, indexed_observed? }`.
 Batches capped at 150; rate-limited to 10/hour. `indexed_observed` (also accepted

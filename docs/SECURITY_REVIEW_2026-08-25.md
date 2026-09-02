@@ -255,9 +255,9 @@ authority must also contain a faulty or compromised credentialed caller.
   probe credentials run in separate jobs with a minimized one-day artifact
   handoff containing no addresses. A listing for one stack cannot authorize
   another reviewed port on the same host, even if the probe role is compromised.
-- Public opt-out and access forms now describe the governed weekend schedule
-  and hosted self-check accurately. An invariant test compares those claims to
-  the production traffic switches.
+- Public opt-out and access forms described the then-current governed weekend
+  schedule and hosted self-check accurately. An invariant test compares current
+  claims to the production traffic switches.
 
 The same pass found that the earlier canary authorized an IP but connected by
 hostname for TLS. The canary now connects over HTTP to the configured canonical
@@ -273,4 +273,21 @@ bounded read-only checks; both confirmed exposures were ingested. The public
 workflow log and one-day opaque-ID artifact contained no address, hostname,
 identity, private control-plane identifier, or local path. A final Daybreak
 Blue review found no remaining Critical or High issue, after which the
-weekend-only schedule resumed.
+then-current weekend-only schedule resumed.
+
+## 2026-09-02 throughput and failure-isolation correction
+
+The 128-candidate value above remains the maximum for one immutable nomination
+transaction; it is not the daily throughput ceiling. The earlier 445-candidate,
+twice-daily design had been sized from the 1,000-write Workers KV allowance.
+During re-certification the legacy runner's 128 safety constant was imported
+into the governed workflow without a new daily-budget derivation and became an
+accidental run ceiling.
+
+The corrected schedule uses four daily lane shards, each capped at 128, so one
+failed job cannot consume the day's only opportunity. Each lane owns its cursor
+and advances it only after its durable nominations commit. A final all-lane pass
+at 22:13 UTC retries missed pages and is sized from the authenticated remaining
+KV allowance after reserving 100 writes for opt-outs, hosted checks, and normal
+churn. A manual 425-candidate envelope is committed through four serialized
+transactions of `128 + 128 + 128 + 41`; no transaction boundary was widened.

@@ -2,17 +2,21 @@
 
 **Current status:** passive reports, index comparisons, local-container
 validation, and dry-run governance plans are available. Governed verification
-runs on Saturday and Sunday after its packet-free health preflight. Schema 3,
-the split nomination/probe roles, an address-pinned operator-owned canary, and a
-capped production run passed re-certification on 2026-08-27. The runner cannot
-open a target socket: only the API Worker's pinned runtime can do so after the
-Durable Object commits and consumes a one-time permit. The authoritative order
-is [`ROADMAP.md`](ROADMAP.md).
+runs every day through four lane-sharded passes capped at 128 candidates, then
+an all-lane catch-up pass at 22:13 UTC sized from the remaining Workers KV
+allowance. Schema 3, the split nomination/probe roles, an address-pinned
+operator-owned canary, and capped production runs passed re-certification. The
+runner cannot open a target socket: only the API Worker's pinned runtime can do
+so after the Durable Object commits and consumes a one-time permit. The
+authoritative order is [`ROADMAP.md`](ROADMAP.md).
 
 Every scheduled run checks the authenticated strong-store health endpoint
 before it queries Shodan. A degraded store, incomplete migration, unavailable
 aggregate generation, or pending purge stops the job before candidate discovery
-or target traffic.
+or target traffic. The same packet-free preflight reads an authenticated,
+aggregate-only KV budget view. It reserves 100 writes for opt-outs, hosted
+self-checks, and operational churn, then clamps or skips the run before index
+access when the remaining allowance cannot safely cover worst-case ingest.
 
 Passive collection and active probing are separate jobs with separate bearer
 credentials. The collector commits the exact index-observed IP, ASN, lane,
@@ -20,6 +24,13 @@ port, source, and timestamp as an immutable Durable Object nomination. The
 only handoff is an opaque one-day artifact of nomination IDs; it contains no
 address-level data. The probe job can lease those IDs but cannot create or
 alter a nomination.
+
+The four regular shards cover every reviewed lane once per day. Each lane owns
+its cursor: a successful shard advances only its completed lanes, while a failed
+lane advances nothing. The final all-lane pass therefore retries missed pages
+and uses safe remaining capacity before the 00:00 UTC reset. Manual runs may
+request a 425-candidate envelope; the nominator commits it as four serialized
+transactions of `128 + 128 + 128 + 41`, never as one widened transaction.
 
 ## Critical fact about the archive seed
 

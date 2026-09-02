@@ -11,6 +11,11 @@ const workflowFiles = readdirSync(workflowDir)
 
 const discoveryWorkflow = read(".github/workflows/scheduled-discovery.yml");
 const labWorkflow = read(".github/workflows/deploy-lab.yml");
+const discoveryRunner = read("scripts/discovery/discover.py");
+const discoveryNominator = read("scripts/discovery/nominate_public_index.py");
+const discoveryControlPlane = read("worker/src/control_plane.js");
+const discoveryBudget = read("worker/src/lib/discovery.js");
+const wranglerConfig = read("wrangler.toml");
 
 const failures = [];
 const fail = (message) => failures.push(message);
@@ -70,8 +75,10 @@ for (const file of workflowFiles) {
   }
 }
 
-if (!/cron:\s*["']43 5 \* \* 0,6["']/.test(discoveryWorkflow)) {
-  fail("scheduled discovery must remain weekend-only and off the hour");
+for (const cron of ["43 5 * * *", "43 9 * * *", "43 13 * * *", "43 17 * * *", "13 22 * * *"]) {
+  if (!discoveryWorkflow.includes(`cron: "${cron}"`)) {
+    fail(`scheduled discovery is missing reviewed daily pass: ${cron}`);
+  }
 }
 const uploadedArtifacts = [...discoveryWorkflow.matchAll(/uses:\s*actions\/upload-artifact@/g)];
 if (
@@ -98,8 +105,54 @@ if (!/Publish current aggregate generation/.test(discoveryWorkflow) ||
     !/\/v1\/admin\/control\/reconcile/.test(discoveryWorkflow)) {
   fail("scheduled discovery must publish authoritative aggregates before downstream hooks run");
 }
-if (!/max_total[^\n]*\n\s+description:[^\n]*\n\s+default:\s*["']120["']/.test(discoveryWorkflow)) {
-  fail("scheduled discovery must retain the reviewed 120-candidate default");
+if (!/max_total[^\n]*\n\s+description:[^\n]*\n\s+default:\s*["']425["']/.test(discoveryWorkflow) ||
+    !/if \[ "\$MAX_TOTAL" -lt 1 \] \|\| \[ "\$MAX_TOTAL" -gt 425 \]/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must retain the reviewed 425-candidate daily envelope");
+}
+if (!/LANES:\s*\$\{\{ needs\.preflight\.outputs\.lanes \}\}/.test(discoveryWorkflow) ||
+    !/EVENT_SCHEDULE:\s*\$\{\{ github\.event\.schedule \}\}/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must use the reviewed lane-shard plan from packet-free preflight");
+}
+if (!/\/v1\/admin\/discovery\/budget/.test(discoveryWorkflow) ||
+    !/recommended_max_candidates/.test(discoveryWorkflow) ||
+    !/should_run=false/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must size itself from authenticated KV headroom and skip fail-closed");
+}
+
+const reviewedLaneShards = [
+  "ollama,open_webui,litellm,triton",
+  "jupyter,ray,comfyui,tensorboard",
+  "localai,vllm,openai_compat_8000",
+  "openai_compat_8080,gradio,mlflow",
+];
+for (const lanes of reviewedLaneShards) {
+  const occurrences = discoveryWorkflow.split(`LANES="${lanes}"`).length - 1;
+  if (occurrences !== 1) {
+    fail(`scheduled discovery must contain reviewed lane shard exactly once: ${lanes}`);
+  }
+}
+const flattenedLanes = reviewedLaneShards.flatMap((shard) => shard.split(","));
+if (new Set(flattenedLanes).size !== flattenedLanes.length) {
+  fail("scheduled discovery lane shards must not overlap");
+}
+if (!/"13 22 \* \* \*"\)[\s\S]*?REQUESTED_MAX=425[\s\S]*?LANES="all"/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must retain the reviewed all-lane pre-reset catch-up");
+}
+
+if (!/^HARD_MAX_TOTAL = 425$/m.test(discoveryRunner)) {
+  fail("local discovery runner must retain the reviewed 425-candidate envelope");
+}
+if (!/^NOMINATION_BATCH_MAX = 128$/m.test(discoveryNominator) ||
+    !/range\(0, len\(payload\), NOMINATION_BATCH_MAX\)/.test(discoveryNominator)) {
+  fail("nominator must split the 425-candidate envelope into Durable Object transactions of at most 128");
+}
+if (!/body\.nominations\) \? body\.nominations\.slice\(0, 128\)/.test(discoveryControlPlane)) {
+  fail("Durable Object nomination authority must retain its 128-item transaction limit");
+}
+if (!/DISCOVERY_DAILY_MAX_CANDIDATES = 425/.test(discoveryBudget) ||
+    !/DEFAULT_DISCOVERY_KV_RESERVE = 100/.test(discoveryBudget) ||
+    !/KV_DISCOVERY_RESERVE = "100"/.test(wranglerConfig)) {
+  fail("Worker and deployment config must retain the reviewed 425 ceiling and 100-write reserve");
 }
 
 if (!/deployments\?env=production&per_page=1/.test(labWorkflow)) {

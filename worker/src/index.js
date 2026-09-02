@@ -58,6 +58,8 @@ import {
   purgeExcluded,
   getProbeAttempts,
   checkWriteBudget,
+  recommendDiscoveryCandidates,
+  DEFAULT_DISCOVERY_KV_RESERVE,
   reconcileCorpusCounts,
   RECONCILE_ADMIN_MAX_SCAN,
   RETENTION_DAYS,
@@ -172,6 +174,10 @@ export default {
 
       if (path === "/v1/admin/discovery/cursors" && request.method === "POST") {
         return handleSetCursor(request, env);
+      }
+
+      if (path === "/v1/admin/discovery/budget" && request.method === "GET") {
+        return handleDiscoveryBudget(request, env);
       }
 
       // Passive nomination is deliberately authenticated with a credential
@@ -984,6 +990,34 @@ async function handleControlHealth(request, env) {
   }
   const result = await controlCall(env, "/health", { method: "GET" });
   return json(result.body, result.status, request, env);
+}
+
+async function handleDiscoveryBudget(request, env) {
+  if (!requireAdmin(request, env)) {
+    return json({ error: "unauthorized" }, 401, request, env);
+  }
+  if (!env.KV) {
+    return json({ error: "kv_budget_unavailable" }, 503, request, env);
+  }
+  const state = await checkWriteBudget(env, 0);
+  const askedReserve = Number(env.KV_DISCOVERY_RESERVE);
+  const reserve = Number.isFinite(askedReserve) && askedReserve >= 0
+    ? Math.floor(askedReserve)
+    : DEFAULT_DISCOVERY_KV_RESERVE;
+  const recommended = recommendDiscoveryCandidates(state.remaining, reserve);
+  const now = new Date();
+  const resetAt = new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1
+  ));
+  return json({
+    ok: true,
+    used: state.used,
+    budget: state.budget,
+    remaining: state.remaining,
+    reserve,
+    recommended_max_candidates: recommended,
+    reset_at: resetAt.toISOString(),
+  }, 200, request, env);
 }
 
 function requireControlMaintenance(request, env) {

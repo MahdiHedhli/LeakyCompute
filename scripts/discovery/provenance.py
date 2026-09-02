@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 PATH_PUBLIC_INDEX = "public_index"  # I-22(a)
@@ -46,6 +47,8 @@ MAX_INDEX_PROVENANCE_AGE_DAYS = 7
 MIN_REQUEST_PREFIX4 = 16
 MIN_REQUEST_PREFIX6 = 32
 
+ASN_PATTERN = re.compile(r"^(?:as)?(\d{1,10})$", re.IGNORECASE)
+
 
 class ProvenanceUnavailable(RuntimeError):
     """Raised when approved-request data cannot be trusted. Callers must not probe."""
@@ -64,6 +67,15 @@ def parse_ts(value) -> datetime | None:
     except ValueError:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def normalize_asn(value) -> str | None:
+    """Mirror the control plane's strict, public ASN representation."""
+    match = ASN_PATTERN.fullmatch(str(value or "").strip())
+    if not match:
+        return None
+    number = int(match.group(1))
+    return f"AS{number}" if 0 <= number <= 4_294_967_295 else None
 
 
 # ---------------------------------------------------------------------------

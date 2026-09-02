@@ -755,7 +755,7 @@ def _scheduled_nomination_isolates_failed_lane():
 
     def fake_http(_url, **kwargs):
         captured["nominations"] = kwargs["data"]["nominations"]
-        return 200, {"ok": True, "created": ["opaque-1"]}
+        return 200, {"ok": True, "created": ["opaque-1"], "rejected": []}
 
     try:
         N.LANES = [ollama, litellm]
@@ -796,6 +796,103 @@ def _scheduled_nomination_isolates_failed_lane():
 check(
     "scheduled nomination isolates one failed lane and withholds partial census totals",
     _scheduled_nomination_isolates_failed_lane,
+)
+
+
+def _nomination_envelope_uses_bounded_transactions():
+    original_http = N.http_json
+    sizes = []
+    sequence = 0
+
+    def fake_http(_url, **kwargs):
+        nonlocal sequence
+        batch = kwargs["data"]["nominations"]
+        sizes.append(len(batch))
+        created = []
+        for _row in batch:
+            sequence += 1
+            created.append(f"opaque-{sequence}")
+        return 200, {"ok": True, "created": created, "rejected": []}
+
+    try:
+        N.http_json = fake_http
+        ids, rejected = N.commit_nomination_batches(
+            "https://api.invalid", "test-token", [{"candidate": n} for n in range(425)]
+        )
+    finally:
+        N.http_json = original_http
+
+    assert sizes == [128, 128, 128, 41], sizes
+    assert len(ids) == 425, len(ids)
+    assert rejected == 0, rejected
+    assert D.HARD_MAX_TOTAL == 425, D.HARD_MAX_TOTAL
+    assert N.NOMINATION_BATCH_MAX == 128, N.NOMINATION_BATCH_MAX
+
+
+check(
+    "a 425-candidate envelope is committed as 128 + 128 + 128 + 41",
+    _nomination_envelope_uses_bounded_transactions,
+)
+
+
+def _durable_candidate_rejections_are_isolated():
+    original_http = N.http_json
+
+    def fake_http(_url, **_kwargs):
+        return 200, {
+            "ok": False,
+            "created": ["opaque-valid"],
+            "rejected": [{"error": "invalid_public_index_nomination"}],
+        }
+
+    try:
+        N.http_json = fake_http
+        ids, rejected = N.commit_nomination_batches(
+            "https://api.invalid", "test-token", [{"candidate": 1}, {"candidate": 2}]
+        )
+    finally:
+        N.http_json = original_http
+
+    assert ids == ["opaque-valid"], ids
+    assert rejected == 1, rejected
+
+
+check(
+    "one authoritative candidate rejection cannot strand valid opaque nominations",
+    _durable_candidate_rejections_are_isolated,
+)
+
+
+def _scheduled_gate_matches_durable_identity_requirements():
+    good = cand(
+        "8.8.8.14",
+        asn="AS64496",
+        provenance=P.index_provenance(
+            "shodan", "product:Ollama", "ollama", "lane_search", iso(0),
+            ip="8.8.8.14", asn="AS64496", port=11434,
+        ),
+    )
+    missing_asn = {
+        **good,
+        "provenance": {**good["provenance"], "asn": None},
+    }
+    future = {
+        **good,
+        "provenance": {
+            **good["provenance"],
+            "observed_at": (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(),
+        },
+    }
+    accepted, dropped = N.partition_by_durable_authority([good, missing_asn, future])
+    assert accepted == [good], accepted
+    assert [row["dropped_by"] for row in dropped] == [
+        "durable_asn_missing", "durable_time_invalid",
+    ], dropped
+
+
+check(
+    "scheduled nomination drops unknown-ASN and future-dated rows before the ledger",
+    _scheduled_gate_matches_durable_identity_requirements,
 )
 
 

@@ -65,8 +65,11 @@ USER_AGENT = "LeakyCompute-Discovery/1.0 (+defensive research; safe GET /api/ps 
 PROBE_USER_AGENT = "LeakyCompute-SafeProbe/1.0 (+defensive research; read-only GET)"
 MAX_RESPONSE_BYTES = 32 * 1024
 
-# Hard safety rails (cannot be overridden above these without editing code)
-HARD_MAX_TOTAL = 128
+# Hard safety rails (cannot be overridden above these without editing code).
+# The governed workflow may nominate up to one free-tier-safe daily envelope,
+# but commits that envelope to the strong control plane in transactions of at
+# most 128 records. Keep the run ceiling distinct from that transaction bound.
+HARD_MAX_TOTAL = 425
 # Pages walked per lane per run. Raised from 3 with the Freelancer plan: at
 # ~14 lanes this is ~140 query credits a run against a 10,000/month allowance,
 # so roughly 70 runs a month. The cursor carries position forward, so each run

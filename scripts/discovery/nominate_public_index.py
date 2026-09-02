@@ -10,10 +10,14 @@ written to the workflow workspace or public log.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import time
 from collections import Counter
+from datetime import datetime, timezone
+
+from provenance import normalize_asn, parse_ts
 
 from run_multilane import (
     HARD_MAX_TOTAL,
@@ -23,6 +27,11 @@ from run_multilane import (
     partition_by_allowed_port,
     partition_by_provenance,
 )
+
+
+# The Durable Object deliberately bounds one transaction. A governed run may
+# contain several such transactions, but no request may widen this boundary.
+NOMINATION_BATCH_MAX = 128
 
 
 def cursor_call(api_base: str, token: str, method: str = "GET", data=None):
@@ -50,6 +59,80 @@ def require_nomination_lane_available(completed: set[str], failures: list[str]) 
             + ", ".join(sorted(failures))
             + "; continuing with healthy lanes only"
         )
+
+
+def partition_by_durable_authority(candidates: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Mirror the stronger nomination-ledger checks before committing a batch."""
+    accepted = []
+    dropped = []
+    now = datetime.now(timezone.utc)
+    for candidate in candidates:
+        provenance = candidate.get("provenance") or {}
+        reason = None
+        try:
+            candidate_ip = ipaddress.ip_address(str(candidate.get("ip")))
+            provenance_ip = ipaddress.ip_address(str(provenance.get("ip")))
+        except ValueError:
+            reason = "durable_address_missing"
+        else:
+            if candidate_ip != provenance_ip:
+                reason = "durable_address_mismatch"
+        if reason is None and (
+            str(provenance.get("lane") or "").strip().lower()
+            != str(candidate.get("stack") or "").strip().lower()
+        ):
+            reason = "durable_lane_mismatch"
+        if reason is None and normalize_asn(provenance.get("asn")) is None:
+            reason = "durable_asn_missing"
+        observed = parse_ts(provenance.get("observed_at"))
+        if reason is None and (observed is None or observed > now):
+            reason = "durable_time_invalid"
+        if reason:
+            dropped.append({**candidate, "dropped_by": reason})
+        else:
+            accepted.append(candidate)
+    return accepted, dropped
+
+
+def commit_nomination_batches(api_base: str, token: str, payload: list[dict]) -> tuple[list[str], int]:
+    """Commit a run envelope through bounded authoritative transactions.
+
+    Candidate-level rejections stay isolated: the control plane has already
+    refused them, so withholding valid opaque IDs would reduce availability
+    without improving safety. Malformed responses and an all-rejected envelope
+    still fail closed before target traffic.
+    """
+    ids: list[str] = []
+    rejected_total = 0
+    for offset in range(0, len(payload), NOMINATION_BATCH_MAX):
+        batch = payload[offset : offset + NOMINATION_BATCH_MAX]
+        status, response = http_json(
+            f"{api_base.rstrip('/')}/v1/nominator/discovery/nominations",
+            method="POST",
+            headers={"X-Nominator-Token": token},
+            data={"nominations": batch},
+            timeout=30,
+        )
+        if status != 200 or not isinstance(response, dict):
+            raise SystemExit(f"durable nomination failed (HTTP {status}); no target traffic authorized")
+        created = response.get("created")
+        rejected = response.get("rejected")
+        if not isinstance(created, list) or not isinstance(rejected, list):
+            raise SystemExit("invalid durable nomination response; no target traffic authorized")
+        if len(created) + len(rejected) != len(batch):
+            raise SystemExit("durable nomination count mismatch; no target traffic authorized")
+        if not all(isinstance(value, str) and value for value in created):
+            raise SystemExit("invalid durable nomination identifiers; no target traffic authorized")
+        if not all(
+            isinstance(row, dict) and row.get("error") == "invalid_public_index_nomination"
+            for row in rejected
+        ):
+            raise SystemExit("unexpected durable nomination rejection; no target traffic authorized")
+        ids.extend(created)
+        rejected_total += len(rejected)
+    if not ids:
+        raise SystemExit("all durable nominations were rejected; no target traffic authorized")
+    return ids, rejected_total
 
 
 def main() -> int:
@@ -109,12 +192,15 @@ def main() -> int:
     for candidate in candidates:
         if candidate.get("ip"):
             by_key.setdefault(f"{candidate['ip']}:{candidate.get('port')}", candidate)
-    candidates = list(by_key.values())[: args.max_total]
+    candidates = list(by_key.values())
     candidates, bad_ports = partition_by_allowed_port(candidates, LANES)
     candidates, bad_provenance = partition_by_provenance(candidates, {})
+    candidates, bad_authority = partition_by_durable_authority(candidates)
+    candidates = candidates[: args.max_total]
     print(
         f"[+] passive nomination gates: eligible={len(candidates)} "
-        f"port_dropped={len(bad_ports)} provenance_dropped={len(bad_provenance)}"
+        f"port_dropped={len(bad_ports)} provenance_dropped={len(bad_provenance)} "
+        f"authority_dropped={len(bad_authority)}"
     )
 
     payload = []
@@ -129,18 +215,14 @@ def main() -> int:
             "observed_at": provenance.get("observed_at"),
             "country_code": candidate.get("country_code"),
         })
-    status, response = http_json(
-        f"{args.api_base.rstrip('/')}/v1/nominator/discovery/nominations",
-        method="POST",
-        headers={"X-Nominator-Token": args.nominator_token},
-        data={"nominations": payload},
-        timeout=30,
+    ids, authoritative_rejections = commit_nomination_batches(
+        args.api_base, args.nominator_token, payload
     )
-    if status != 200 or not isinstance(response, dict) or response.get("ok") is not True:
-        raise SystemExit(f"durable nomination failed (HTTP {status}); no target traffic authorized")
-    ids = response.get("created") or []
-    if len(ids) != len(payload):
-        raise SystemExit("durable nomination count mismatch; no target traffic authorized")
+    if authoritative_rejections:
+        print(
+            f"[!] durable nomination candidate rejections: {authoritative_rejections}; "
+            "continuing with authoritatively accepted opaque IDs only"
+        )
 
     status, _ = cursor_call(
         args.api_base,
@@ -161,6 +243,10 @@ def main() -> int:
             "failed_lanes": sorted(failures),
             "partial_lane_run": bool(failures),
             "candidate_count": len(ids),
+            "requested_candidate_count": len(payload),
+            "authoritative_rejections": authoritative_rejections,
+            "nomination_batches": (len(payload) + NOMINATION_BATCH_MAX - 1) // NOMINATION_BATCH_MAX,
+            "nomination_batch_max": NOMINATION_BATCH_MAX,
             "pulled_count": pulled,
             "index_listed_by_lane": index_listed,
             "index_listed_records": sum(index_listed.values()),

@@ -38,9 +38,10 @@ counts.
 > I maintain LeakyCompute, a non-commercial defensive research project studying
 > publicly indexed, internet-exposed AI services such as Ollama, Ray, and
 > Jupyter. The project publishes aggregate measurements and local defensive
-> tooling. Fresh public-index nominations may receive bounded, read-only
-> weekend verification under durable exclusions, cooldowns, rate limits, and
-> one-time address-pinned permits. A separate Turnstile-gated hosted check lets
+> tooling. Fresh public-index nominations may receive bounded, read-only daily
+> verification under durable exclusions, cooldowns, rate limits, and one-time
+> address-pinned permits. Daily work is split into small lane shards with an
+> adaptive pre-reset catch-up pass. A separate Turnstile-gated hosted check lets
 > an operator assess only the public address making the request.
 >
 > We are looking for a responsible way to help network owners and national

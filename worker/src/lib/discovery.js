@@ -796,6 +796,10 @@ export async function mergeValidatedModels(env, modelHits) {
  * raises it with KV_DAILY_PUT_BUDGET.
  */
 export const DEFAULT_KV_DAILY_PUTS = 900;
+export const DISCOVERY_DAILY_MAX_CANDIDATES = 425;
+export const DISCOVERY_INGEST_BATCH_SIZE = 100;
+export const DISCOVERY_INGEST_BATCH_OVERHEAD = 8;
+export const DEFAULT_DISCOVERY_KV_RESERVE = 100;
 
 function budgetKey(now = Date.now()) {
   return `kv:puts:${new Date(now).toISOString().slice(0, 10)}`;
@@ -819,6 +823,33 @@ export async function checkWriteBudget(env, estimatedPuts) {
     remaining,
     estimated: estimatedPuts,
   };
+}
+
+/**
+ * Size a governed run against the KV headroom that exists now.
+ *
+ * The runner ingests results in batches of 100 and the ingest route reserves
+ * eight fixed writes for each batch before it starts. Work backwards from the
+ * remaining allowance so the late daily run can consume safe headroom without
+ * risking the account-wide 1,000-write stop. The separate reserve belongs to
+ * opt-outs, hosted checks and ordinary operational churn.
+ */
+export function recommendDiscoveryCandidates(
+  remaining,
+  reserve = DEFAULT_DISCOVERY_KV_RESERVE,
+  ceiling = DISCOVERY_DAILY_MAX_CANDIDATES
+) {
+  const spendable = Math.max(0, Math.floor(Number(remaining) || 0) - Math.max(0, Math.floor(Number(reserve) || 0)));
+  const boundedCeiling = Math.max(0, Math.min(
+    Math.floor(Number(ceiling) || 0),
+    DISCOVERY_DAILY_MAX_CANDIDATES
+  ));
+  for (let candidates = boundedCeiling; candidates > 0; candidates--) {
+    const batches = Math.ceil(candidates / DISCOVERY_INGEST_BATCH_SIZE);
+    const worstCasePuts = candidates + batches * DISCOVERY_INGEST_BATCH_OVERHEAD;
+    if (worstCasePuts <= spendable) return candidates;
+  }
+  return 0;
 }
 
 async function chargeWriteBudget(env, puts) {

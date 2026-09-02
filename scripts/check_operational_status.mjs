@@ -11,7 +11,7 @@ const enabled = (name) => new RegExp(`^${name} = "true"$`, "m").test(wrangler);
 
 if (enabled("ACTIVE_DISCOVERY_ENABLED")) {
   assert.doesNotMatch(removal, /active probing (?:is currently|and hosted checks are) suspended/i);
-  assert.match(removal, /weekend-only\s+schedule/i);
+  assert.match(removal, /daily(?:\s+[a-z-]+){0,2}\s+schedule/i);
   assert.match(removal, /immediately before a one-time permit/i);
 }
 

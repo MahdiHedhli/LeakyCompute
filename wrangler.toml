@@ -103,6 +103,9 @@ CORPUS_EXPIRY_DAYS = "180"
 # rather than failing partway and leaving records without the aggregates that
 # describe them. Raise this on a paid plan.
 KV_DAILY_PUT_BUDGET = "990"
+# Held outside adaptive discovery for opt-outs, hosted self-checks, and normal
+# operational churn. The pre-reset run sizes itself only from headroom above it.
+KV_DISCOVERY_RESERVE = "100"
 # I-27: days between the first notification attempt and publication of any
 # host-identifying detail. Aggregates are not gated by this window.
 DISCLOSURE_WINDOW_DAYS = "90"
