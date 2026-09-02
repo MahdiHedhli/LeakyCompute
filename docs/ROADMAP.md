@@ -122,22 +122,27 @@ credential and never print alias-bearing responses.
 interruption, a corpus larger than every page limit, a matching record beyond
 the first purge page, an owned production canary, and a capped governed run.
 
-### 1c. Incremental Shodan credit governance — next sprint
+### 1c. Incremental Shodan credit governance — implemented 2026-09-02
 
-The current 10-pages-per-lane setting is a transitional paid-plan burn-down
-configuration, not the long-term operating model. Before switching to a
-monthly-limited tier, add a strongly consistent source-credit ledger and reduce
-scheduled pulls to small cursor-based increments. The pre-reset pass must size
-itself against both remaining Shodan credits and remaining Workers KV capacity;
-neither budget may substitute for the other.
+Scheduled search lanes now read one cursor page at a time; ASN lanes rotate
+through two provider groups per invocation. A strongly consistent, month-paced
+source ledger consumes one unit before every Shodan request and retry. Unused
+allowance carries forward through the month, while scheduled preflight requires
+both source headroom and Workers KV capacity; neither budget substitutes for the
+other.
 
-A secondary Shodan credential may be wired later as a disabled break-glass
-fallback, but both credentials share one configured project budget. Exhausted
+A secondary Shodan credential may be provisioned later as a disabled break-glass
+fallback. The code path is present but inert; both credentials share one
+configured project budget. Exhausted
 credits, rate limits, or plan restrictions must stop the lane rather than select
 another key. Automatic promotion is permitted only for an invalid or revoked
 primary, after explicit maintainer enablement and a terms check. The detailed
 implementation order and acceptance tests are in
 [`ADR 0003`](decisions/0003-incremental-shodan-budget-and-key-failover.md).
+
+**Still open before a tier change or secondary-key activation:** verify current
+Shodan allowance/terms, set the reviewed monthly limit and reserve, provision
+the secret privately, run the failover canary, and repeat adversarial review.
 
 ### 1d. Hosted checks — completed with a separate purpose and policy path
 

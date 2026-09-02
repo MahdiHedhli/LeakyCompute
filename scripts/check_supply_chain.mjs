@@ -118,6 +118,16 @@ if (!/\/v1\/admin\/discovery\/budget/.test(discoveryWorkflow) ||
     !/should_run=false/.test(discoveryWorkflow)) {
   fail("scheduled discovery must size itself from authenticated KV headroom and skip fail-closed");
 }
+if (!/\/v1\/admin\/discovery\/source-budget/.test(discoveryWorkflow) ||
+    !/available_now/.test(discoveryWorkflow) ||
+    !/--pages-per-lane 1/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must require strong month-paced source headroom and one-page increments");
+}
+if (!/SHODAN_API_KEY_PRIMARY:\s*\$\{\{ secrets\.SHODAN_API_KEY_PRIMARY \|\| secrets\.SHODAN_API_KEY \}\}/.test(discoveryWorkflow) ||
+    !/SHODAN_API_KEY_SECONDARY:\s*\$\{\{ secrets\.SHODAN_API_KEY_SECONDARY \}\}/.test(discoveryWorkflow) ||
+    !/SHODAN_SECONDARY_FAILOVER_ENABLED/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must keep primary and optional secondary credentials in separate secret slots");
+}
 
 const reviewedLaneShards = [
   "ollama,open_webui,litellm,triton",
@@ -142,6 +152,10 @@ if (!/"13 22 \* \* \*"\)[\s\S]*?REQUESTED_MAX=425[\s\S]*?LANES="all"/.test(disco
 if (!/^HARD_MAX_TOTAL = 425$/m.test(discoveryRunner)) {
   fail("local discovery runner must retain the reviewed 425-candidate envelope");
 }
+if (!/^PAGES_PER_RUN = 1$/m.test(discoveryRunner) ||
+    !/budget_consumer\(\)[\s\S]*?status, payload = http_json/.test(discoveryRunner)) {
+  fail("Shodan requests must consume strong source budget before each one-page provider call");
+}
 if (!/^NOMINATION_BATCH_MAX = 128$/m.test(discoveryNominator) ||
     !/range\(0, len\(payload\), NOMINATION_BATCH_MAX\)/.test(discoveryNominator)) {
   fail("nominator must split the 425-candidate envelope into Durable Object transactions of at most 128");
@@ -153,6 +167,14 @@ if (!/DISCOVERY_DAILY_MAX_CANDIDATES = 425/.test(discoveryBudget) ||
     !/DEFAULT_DISCOVERY_KV_RESERVE = 100/.test(discoveryBudget) ||
     !/KV_DISCOVERY_RESERVE = "100"/.test(wranglerConfig)) {
   fail("Worker and deployment config must retain the reviewed 425 ceiling and 100-write reserve");
+}
+if (!/consumeSourceBudget\(body\)/.test(discoveryControlPlane) ||
+    !/source_budget:\$\{policy\.provider\}:\$\{policy\.month\}/.test(discoveryControlPlane) ||
+    !/SHODAN_MONTHLY_QUERY_BUDGET = "10000"/.test(wranglerConfig) ||
+    !/SHODAN_MONTHLY_QUERY_RESERVE = "500"/.test(wranglerConfig) ||
+    !/SHODAN_PAGES_PER_LANE = "1"/.test(wranglerConfig) ||
+    !/SHODAN_SECONDARY_FAILOVER_ENABLED = "false"/.test(wranglerConfig)) {
+  fail("source budget must remain strong, month-paced, incremental, and secondary-disabled by default");
 }
 
 if (!/deployments\?env=production&per_page=1/.test(labWorkflow)) {

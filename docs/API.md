@@ -16,6 +16,9 @@ describes the contract; when they disagree, the code wins and this file is a bug
 | `/v1/admin/discovery/hits` | GET | `X-Admin-Token` | private hit list (raw IPs) |
 | `/v1/admin/discovery/clock` | GET | `X-Admin-Token` | I-24 re-probe clock (raw IPs) |
 | `/v1/admin/discovery/budget` | GET | `X-Admin-Token` | aggregate KV headroom and a safe discovery ceiling |
+| `/v1/admin/discovery/source-budget` | GET | `X-Admin-Token` | aggregate month-paced Shodan allowance |
+| `/v1/nominator/discovery/source-budget` | GET | `X-Nominator-Token` | passive collector's aggregate allowance view |
+| `/v1/nominator/discovery/source-budget/consume` | POST | `X-Nominator-Token` | atomically consume one source unit before a provider call |
 | `/v1/admin/discovery/ingest` | POST | `X-Admin-Token` | mirror emitted governed results into the legacy compatibility cache |
 
 CORS is allowlisted via the `ALLOWED_ORIGINS` var. All responses are
@@ -313,6 +316,16 @@ The recommendation assumes worst-case 100-result ingest batches plus fixed
 aggregate overhead, caps the run envelope at 425, and withholds the configured
 operational reserve. It never returns addresses or other corpus data. Scheduled
 discovery clamps to this recommendation or skips before reading the index.
+
+**`GET /v1/admin/discovery/source-budget`** and its nominator-scoped read-only
+equivalent return `{ provider, month, consumed, monthly_limit, reserve,
+paced_limit, available_now, remaining_month, reset_at }`. The paced ceiling
+grows continuously across the month, so unused capacity carries forward without
+letting early runs spend the full allowance. The nominator-only `POST
+/v1/nominator/discovery/source-budget/consume` atomically charges exactly one
+unit immediately before every Shodan request or retry. It returns 429 before
+provider access when pacing or the monthly budget is exhausted. No route returns
+keys, key fingerprints, account identifiers, response bodies, or target data.
 
 **`POST /v1/admin/discovery/ingest`** — `{ results: [...], run_meta?, indexed_observed? }`.
 Batches capped at 150; rate-limited to 10/hour. `indexed_observed` (also accepted

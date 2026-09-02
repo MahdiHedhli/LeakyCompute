@@ -45,6 +45,9 @@ async function seededEnv(overrides = {}) {
     ALLOWED_ORIGINS: "https://mahdihedhli.github.io",
     ADMIN_SYNC_TOKEN: ADMIN,
     DISCOVERY_NOMINATOR_TOKEN: NOMINATOR,
+    CONTROL_PLANE_READY: "true",
+    SHODAN_MONTHLY_QUERY_BUDGET: "10000",
+    SHODAN_MONTHLY_QUERY_RESERVE: "500",
     CHECK_TIMEOUT_MS: "200",
     // The lab's corpus cache is module-level, so a suite that builds a fresh
     // env per case would otherwise assert against the previous case's corpus.
@@ -135,6 +138,7 @@ const ADMIN_ROUTES = [
   { method: "POST", path: "/v1/admin/discovery/cursors", body: { lane: "ollama", page: 2 } },
   // Aggregate-only budget state still controls active scheduling and is admin-only.
   { method: "GET", path: "/v1/admin/discovery/budget" },
+  { method: "GET", path: "/v1/admin/discovery/source-budget" },
   // Dark control plane. These routes mutate permission state but cannot emit a
   // target request; they are still admin-only because they carry raw addresses.
   { method: "GET", path: "/v1/admin/control/health" },
@@ -162,6 +166,8 @@ const NOMINATOR_ROUTES = [
   { method: "POST", path: "/v1/nominator/discovery/nominations", body: { nominations: [] } },
   { method: "GET", path: "/v1/nominator/discovery/cursors" },
   { method: "POST", path: "/v1/nominator/discovery/cursors", body: { lane: "ollama", page: 2 } },
+  { method: "GET", path: "/v1/nominator/discovery/source-budget" },
+  { method: "POST", path: "/v1/nominator/discovery/source-budget/consume", body: { units: 1 } },
 ];
 
 /* ------------------------------------------------------------------ */

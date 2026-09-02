@@ -17,6 +17,7 @@ const HOST_RETENTION_MS = 180 * DAY_MS;
 const ATTEMPT_RETENTION_MS = 90 * DAY_MS;
 const MAX_PAGE = 500;
 const UNKNOWN_ASN = "AS-UNKNOWN";
+const MAX_SOURCE_MONTHLY_UNITS = 1_000_000;
 
 export function authoritativeNow(env, body = {}) {
   if (
@@ -352,6 +353,8 @@ export class DiscoveryControlPlane {
     if (path === "/exclusions/add") return this.addExclusions(body);
     if (path === "/schema/upgrade") return this.upgradeSchema(body);
     if (path === "/nominations/create") return this.createNominations(body);
+    if (path === "/source-budget/state") return this.sourceBudgetState(body);
+    if (path === "/source-budget/consume") return this.consumeSourceBudget(body);
     if (path === "/lease/acquire") return this.acquireLease(body);
     if (path === "/permit/consume") return this.consumePermit(body);
     if (path === "/lease/complete") return this.completeLease(body);
@@ -478,6 +481,75 @@ export class DiscoveryControlPlane {
       }
     });
     return json({ ok: rejected.length === 0, created, rejected });
+  }
+
+  sourceBudgetPolicy(body) {
+    const provider = String(body?.provider || "").trim().toLowerCase();
+    const limit = Math.floor(Number(body?.monthly_limit));
+    const reserve = Math.floor(Number(body?.reserve));
+    if (
+      provider !== "shodan" || !Number.isInteger(limit) || limit < 1 ||
+      limit > MAX_SOURCE_MONTHLY_UNITS || !Number.isInteger(reserve) ||
+      reserve < 0 || reserve >= limit
+    ) {
+      return null;
+    }
+    const now = authoritativeNow(this.env, body);
+    const date = new Date(now);
+    const start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+    const reset = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+    const month = new Date(start).toISOString().slice(0, 7);
+    const spendableTotal = limit - reserve;
+    const elapsed = Math.max(0, Math.min(reset - start, now - start));
+    const pacedLimit = Math.min(
+      spendableTotal,
+      Math.floor(spendableTotal * elapsed / (reset - start))
+    );
+    return { provider, limit, reserve, now, month, reset, pacedLimit };
+  }
+
+  sourceBudgetSnapshot(policy, consumed) {
+    const used = Math.max(0, Math.floor(Number(consumed) || 0));
+    return {
+      ok: true,
+      provider: policy.provider,
+      month: policy.month,
+      consumed: used,
+      monthly_limit: policy.limit,
+      reserve: policy.reserve,
+      paced_limit: policy.pacedLimit,
+      available_now: Math.max(0, policy.pacedLimit - used),
+      remaining_month: Math.max(0, policy.limit - policy.reserve - used),
+      reset_at: new Date(policy.reset).toISOString(),
+    };
+  }
+
+  sourceBudgetState(body) {
+    const policy = this.sourceBudgetPolicy(body);
+    if (!policy) return json({ ok: false, error: "invalid_source_budget_policy" }, 503);
+    const key = `source_budget:${policy.provider}:${policy.month}`;
+    const consumed = Number(this.meta(key) || 0);
+    return json(this.sourceBudgetSnapshot(policy, consumed));
+  }
+
+  consumeSourceBudget(body) {
+    const policy = this.sourceBudgetPolicy(body);
+    if (!policy) return json({ ok: false, error: "invalid_source_budget_policy" }, 503);
+    const units = Math.floor(Number(body?.units));
+    if (units !== 1) return json({ ok: false, error: "one_source_unit_required" }, 400);
+    const key = `source_budget:${policy.provider}:${policy.month}`;
+    let result;
+    this.ctx.storage.transactionSync(() => {
+      const consumed = Math.max(0, Math.floor(Number(this.meta(key) || 0)));
+      const snapshot = this.sourceBudgetSnapshot(policy, consumed);
+      if (snapshot.available_now < units) {
+        result = { ...snapshot, ok: false, error: "source_budget_pacing_exhausted" };
+        return;
+      }
+      this.setMeta(key, consumed + units);
+      result = this.sourceBudgetSnapshot(policy, consumed + units);
+    });
+    return json(result, result.ok ? 200 : 429);
   }
 
   meta(key) {

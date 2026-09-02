@@ -99,7 +99,8 @@ jobs:
           fi
           HEALTH_FILE="$(mktemp)"
           BUDGET_FILE="$(mktemp)"
-          trap 'rm -f "$HEALTH_FILE" "$BUDGET_FILE"' EXIT
+          SOURCE_FILE="$(mktemp)"
+          trap 'rm -f "$HEALTH_FILE" "$BUDGET_FILE" "$SOURCE_FILE"' EXIT
           HTTP_CODE=$(curl -sS -o "$HEALTH_FILE" -w '%{http_code}' \
             -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
             "${LEAKY_API_BASE%/}/v1/admin/control/health")
@@ -110,6 +111,32 @@ jobs:
           jq -e '.ok == true and .ready == true and (.schema >= 3) and (.pending_purges == 0)' \
             "$HEALTH_FILE" >/dev/null
           jq '{ok, ready, schema, pending_purges}' "$HEALTH_FILE"
+
+          HTTP_CODE=$(curl -sS -o "$SOURCE_FILE" -w '%{http_code}' \
+            -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
+            "${LEAKY_API_BASE%/}/v1/admin/discovery/source-budget")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Strong Shodan source budget is unavailable (HTTP $HTTP_CODE); no index query or target traffic was attempted."
+            exit 1
+          fi
+          jq -e '
+            .ok == true and .provider == "shodan" and
+            (.consumed | type == "number" and . >= 0) and
+            (.monthly_limit | type == "number" and . > 0) and
+            (.reserve | type == "number" and . >= 0) and
+            (.paced_limit | type == "number" and . >= 0) and
+            (.available_now | type == "number" and . >= 0) and
+            (.remaining_month | type == "number" and . >= 0)
+          ' "$SOURCE_FILE" >/dev/null
+          jq '{provider, month, consumed, monthly_limit, reserve, paced_limit, available_now, remaining_month, reset_at}' "$SOURCE_FILE"
+          SOURCE_AVAILABLE=$(jq -r '.available_now | floor' "$SOURCE_FILE")
+          if [ "$SOURCE_AVAILABLE" -lt 1 ]; then
+            echo "No paced Shodan source headroom remains; skipping before index access or target traffic."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "max_total=0" >> "$GITHUB_OUTPUT"
+            echo "lanes=$LANES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           HTTP_CODE=$(curl -sS -o "$BUDGET_FILE" -w '%{http_code}' \
             -H "X-Admin-Token: $LEAKY_ADMIN_TOKEN" \
@@ -157,14 +184,16 @@ jobs:
 
       - name: Nominate fresh public-index records
         env:
-          SHODAN_API_KEY: ${{ secrets.SHODAN_API_KEY }}
+          SHODAN_API_KEY_PRIMARY: ${{ secrets.SHODAN_API_KEY_PRIMARY || secrets.SHODAN_API_KEY }}
+          SHODAN_API_KEY_SECONDARY: ${{ secrets.SHODAN_API_KEY_SECONDARY }}
+          SHODAN_SECONDARY_FAILOVER_ENABLED: ${{ vars.SHODAN_SECONDARY_FAILOVER_ENABLED || 'false' }}
           LEAKY_API_BASE: ${{ secrets.LEAKY_API_BASE }}
           LEAKY_NOMINATOR_TOKEN: ${{ secrets.LEAKY_DISCOVERY_NOMINATOR_TOKEN }}
           MAX_TOTAL: ${{ needs.preflight.outputs.max_total }}
           LANES: ${{ needs.preflight.outputs.lanes }}
         run: |
           set -euo pipefail
-          if [ -z "${SHODAN_API_KEY:-}" ] || [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_NOMINATOR_TOKEN:-}" ]; then
+          if [ -z "${SHODAN_API_KEY_PRIMARY:-}" ] || [ -z "${LEAKY_API_BASE:-}" ] || [ -z "${LEAKY_NOMINATOR_TOKEN:-}" ]; then
             echo "Required nomination credentials are not configured."
             exit 1
           fi
@@ -174,7 +203,7 @@ jobs:
             exit 1
           fi
           python3 -u scripts/discovery/nominate_public_index.py \
-            --lanes "$LANES" --max-total "$MAX_TOTAL" \
+            --lanes "$LANES" --max-total "$MAX_TOTAL" --pages-per-lane 1 \
             --output "nomination-manifest.json" 2>&1 | tee nomination.log
           jq -e '
             (keys | sort) == ["meta", "nomination_ids"] and

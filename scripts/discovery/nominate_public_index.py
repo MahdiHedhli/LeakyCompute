@@ -22,6 +22,8 @@ from provenance import normalize_asn, parse_ts
 from run_multilane import (
     HARD_MAX_TOTAL,
     LANES,
+    PAGES_PER_RUN,
+    ShodanRequestError,
     collect_lane,
     http_json,
     partition_by_allowed_port,
@@ -32,6 +34,77 @@ from run_multilane import (
 # The Durable Object deliberately bounds one transaction. A governed run may
 # contain several such transactions, but no request may widen this boundary.
 NOMINATION_BATCH_MAX = 128
+
+
+def enabled_env(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class SourceBudgetConsumer:
+    """Consume one strongly accounted source unit before a Shodan request."""
+
+    def __init__(self, api_base: str, token: str):
+        self.api_base = api_base.rstrip("/")
+        self.token = token
+        self.consumed = 0
+
+    def consume(self) -> None:
+        status, response = http_json(
+            f"{self.api_base}/v1/nominator/discovery/source-budget/consume",
+            method="POST",
+            headers={"X-Nominator-Token": self.token},
+            data={"units": 1},
+            timeout=20,
+        )
+        if status != 200 or not isinstance(response, dict) or response.get("ok") is not True:
+            reason = response.get("error") if isinstance(response, dict) else "unavailable"
+            raise SystemExit(f"source budget refused provider request: {reason}")
+        self.consumed += 1
+
+
+def collect_lane_with_failover(
+    primary_key: str,
+    secondary_key: str | None,
+    secondary_enabled: bool,
+    active_slot: str,
+    lane: dict,
+    start_page: int,
+    *,
+    pages_per_run: int,
+    budget_consumer,
+):
+    """Collect one lane, promoting the secondary only for invalid primary auth."""
+    active_key = secondary_key if active_slot == "secondary" else primary_key
+    try:
+        return (
+            collect_lane(
+                active_key,
+                lane,
+                start_page,
+                pages_per_run=pages_per_run,
+                budget_consumer=budget_consumer,
+            ),
+            active_slot,
+        )
+    except ShodanRequestError as error:
+        if (
+            error.category != "authentication_rejected" or
+            active_slot != "primary" or
+            not secondary_enabled or
+            not secondary_key
+        ):
+            raise
+        print("[!] primary Shodan credential unavailable; promoting configured secondary for this run")
+        return (
+            collect_lane(
+                secondary_key,
+                lane,
+                start_page,
+                pages_per_run=pages_per_run,
+                budget_consumer=budget_consumer,
+            ),
+            "secondary",
+        )
 
 
 def cursor_call(api_base: str, token: str, method: str = "GET", data=None):
@@ -139,7 +212,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Create immutable public-index nominations")
     ap.add_argument("--api-base", default=os.getenv("LEAKY_API_BASE"))
     ap.add_argument("--nominator-token", default=os.getenv("LEAKY_NOMINATOR_TOKEN"))
-    ap.add_argument("--shodan-key", default=os.getenv("SHODAN_API_KEY"))
+    ap.add_argument(
+        "--shodan-key",
+        default=os.getenv("SHODAN_API_KEY_PRIMARY") or os.getenv("SHODAN_API_KEY"),
+    )
+    ap.add_argument("--secondary-shodan-key", default=os.getenv("SHODAN_API_KEY_SECONDARY"))
+    ap.add_argument(
+        "--allow-secondary-failover",
+        action="store_true",
+        default=enabled_env("SHODAN_SECONDARY_FAILOVER_ENABLED"),
+    )
+    ap.add_argument("--pages-per-lane", type=int, default=PAGES_PER_RUN)
     ap.add_argument("--lanes", default="all")
     ap.add_argument("--max-total", type=int, default=HARD_MAX_TOTAL)
     ap.add_argument("--output", default="nomination-manifest.json")
@@ -148,6 +231,10 @@ def main() -> int:
         raise SystemExit("API base, nominator token, and Shodan key are required")
     if args.max_total < 1 or args.max_total > HARD_MAX_TOTAL:
         raise SystemExit(f"--max-total must be between 1 and {HARD_MAX_TOTAL}")
+    if args.pages_per_lane != 1:
+        raise SystemExit("scheduled nomination requires exactly one incremental page per search lane")
+    if args.allow_secondary_failover and not args.secondary_shodan_key:
+        raise SystemExit("secondary failover enabled without a configured secondary credential")
 
     status, cursor_body = cursor_call(args.api_base, args.nominator_token)
     if status != 200 or not isinstance(cursor_body, dict):
@@ -158,6 +245,10 @@ def main() -> int:
     lanes = [lane for lane in LANES if wanted is None or lane["id"] in wanted]
     if not lanes:
         raise SystemExit("no recognized lanes selected")
+    # Search lanes need one source unit; ASN lanes need a facet plus the
+    # rotating group calls. Spend scarce paced headroom on complete small units
+    # before beginning a larger lane that might stop midway.
+    lanes.sort(key=lambda lane: lane.get("mode") == "asn")
 
     candidates = []
     failures = []
@@ -165,10 +256,22 @@ def main() -> int:
     cursor_updates = []
     index_listed = {}
     pulled = 0
+    source_budget = SourceBudgetConsumer(args.api_base, args.nominator_token)
+    active_key_slot = "primary"
     for lane in lanes:
         try:
             start_page = int((cursors.get(lane["id"]) or {}).get("page") or 1)
-            found, observed, next_page, total = collect_lane(args.shodan_key, lane, start_page)
+            lane_result, active_key_slot = collect_lane_with_failover(
+                args.shodan_key,
+                args.secondary_shodan_key,
+                args.allow_secondary_failover,
+                active_key_slot,
+                lane,
+                start_page,
+                pages_per_run=args.pages_per_lane,
+                budget_consumer=source_budget.consume,
+            )
+            found, observed, next_page, total = lane_result
             candidates.extend(found)
             pulled += observed
             if isinstance(total, int):
@@ -257,6 +360,9 @@ def main() -> int:
             "provenance_enforced": True,
             "immutable_nominations": True,
             "credential_split": True,
+            "source_budget_enforced": True,
+            "source_units_consumed": source_budget.consumed,
+            "source_key_slot": active_key_slot,
             "mode": "durable_public_index_nomination",
         },
     }

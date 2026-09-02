@@ -180,6 +180,10 @@ export default {
         return handleDiscoveryBudget(request, env);
       }
 
+      if (path === "/v1/admin/discovery/source-budget" && request.method === "GET") {
+        return handleAdminSourceBudget(request, env);
+      }
+
       // Passive nomination is deliberately authenticated with a credential
       // that cannot lease or emit a target request. The probe step receives
       // only opaque nomination IDs and the discovery-admin credential.
@@ -193,6 +197,14 @@ export default {
 
       if (path === "/v1/nominator/discovery/cursors" && request.method === "POST") {
         return handleSetNominatorCursor(request, env);
+      }
+
+      if (path === "/v1/nominator/discovery/source-budget" && request.method === "GET") {
+        return handleNominatorSourceBudget(request, env);
+      }
+
+      if (path === "/v1/nominator/discovery/source-budget/consume" && request.method === "POST") {
+        return handleConsumeNominatorSourceBudget(request, env);
       }
 
       // Dark control-plane routes. They can persist/consume permission state,
@@ -1018,6 +1030,54 @@ async function handleDiscoveryBudget(request, env) {
     recommended_max_candidates: recommended,
     reset_at: resetAt.toISOString(),
   }, 200, request, env);
+}
+
+function shodanSourceBudgetPolicy(env, input = {}) {
+  const monthlyLimit = Math.floor(Number(env.SHODAN_MONTHLY_QUERY_BUDGET));
+  const reserve = Math.floor(Number(env.SHODAN_MONTHLY_QUERY_RESERVE));
+  if (!Number.isInteger(monthlyLimit) || monthlyLimit < 1 ||
+      !Number.isInteger(reserve) || reserve < 0 || reserve >= monthlyLimit) {
+    return null;
+  }
+  const policy = {
+    provider: "shodan",
+    monthly_limit: monthlyLimit,
+    reserve,
+  };
+  if (env.ENVIRONMENT === "test" && env.CONTROL_PLANE_TEST_TIME_ENABLED === "true" &&
+      Number.isFinite(input?.now)) {
+    policy.now = Math.floor(input.now);
+  }
+  return policy;
+}
+
+async function sourceBudgetCall(request, env, { nominator = false, consume = false } = {}) {
+  const authorized = nominator ? requireNominator(request, env) : requireAdmin(request, env);
+  if (!authorized) return json({ error: "unauthorized" }, 401, request, env);
+  if (env.CONTROL_PLANE_READY !== "true") {
+    return json({ error: "control_plane_not_ready" }, 503, request, env);
+  }
+  const input = consume ? await readJsonBody(request) : {};
+  const policy = shodanSourceBudgetPolicy(env, input);
+  if (!policy) return json({ error: "source_budget_not_configured" }, 503, request, env);
+  const result = await controlCall(
+    env,
+    consume ? "/source-budget/consume" : "/source-budget/state",
+    { body: consume ? { ...policy, units: 1 } : policy }
+  );
+  return json(result.body, result.status, request, env);
+}
+
+async function handleAdminSourceBudget(request, env) {
+  return sourceBudgetCall(request, env);
+}
+
+async function handleNominatorSourceBudget(request, env) {
+  return sourceBudgetCall(request, env, { nominator: true });
+}
+
+async function handleConsumeNominatorSourceBudget(request, env) {
+  return sourceBudgetCall(request, env, { nominator: true, consume: true });
 }
 
 function requireControlMaintenance(request, env) {

@@ -610,6 +610,7 @@ def _shodan_transient_failures_recover_with_bounded_backoff():
     ]
     sleeps = []
     calls = []
+    budget_units = []
 
     def fake_http(url, **kwargs):
         calls.append((url, kwargs))
@@ -619,6 +620,7 @@ def _shodan_transient_failures_recover_with_bounded_backoff():
         D.http_json = fake_http
         payload = D.shodan_json_with_retry(
             "https://api.shodan.io/test?key=secret",
+            budget_consumer=lambda: budget_units.append(1),
             retry_sleep=sleeps.append,
             retry_jitter=lambda _low, high: high,
         )
@@ -627,6 +629,7 @@ def _shodan_transient_failures_recover_with_bounded_backoff():
 
     assert payload == {"total": 0, "matches": []}, payload
     assert len(calls) == 3, calls
+    assert len(budget_units) == 3, budget_units
     assert sleeps == [2.0, 4.0], sleeps
     assert all(call[1]["max_response_bytes"] == 256 * 1024 for call in calls)
 
@@ -634,6 +637,135 @@ def _shodan_transient_failures_recover_with_bounded_backoff():
 check(
     "transient Shodan failures recover within three jittered attempts",
     _shodan_transient_failures_recover_with_bounded_backoff,
+)
+
+
+def _source_budget_refusal_precedes_provider_request():
+    original = D.http_json
+    calls = []
+
+    def forbidden_http(*_args, **_kwargs):
+        calls.append(True)
+        raise AssertionError("provider request occurred without a source unit")
+
+    def refuse_budget():
+        raise SystemExit("source budget exhausted")
+
+    try:
+        D.http_json = forbidden_http
+        try:
+            D.shodan_json_with_retry(
+                "https://api.shodan.io/test?key=secret",
+                budget_consumer=refuse_budget,
+            )
+            raise AssertionError("budget refusal did not stop the request")
+        except SystemExit as exc:
+            assert "source budget" in str(exc)
+    finally:
+        D.http_json = original
+
+    assert calls == [], calls
+
+
+check(
+    "strong source budget is consumed before every provider request",
+    _source_budget_refusal_precedes_provider_request,
+)
+
+
+def _asn_lane_does_not_advance_after_source_failure():
+    original_search = R.shodan_search
+    original_hosts = R.hosts_for_asn
+    host_calls = []
+
+    def fake_search(*_args, **_kwargs):
+        return [], {"asn": [{"value": "AS64496", "count": 10}]}, 1, 10
+
+    def refused_hosts(*_args, **_kwargs):
+        host_calls.append(True)
+        raise SystemExit("source budget exhausted")
+
+    try:
+        R.shodan_search = fake_search
+        R.hosts_for_asn = refused_hosts
+        try:
+            R.collect_lane("primary", R.LANES[0], 1, pages_per_run=1)
+            raise AssertionError("ASN lane advanced after a source-budget refusal")
+        except SystemExit as exc:
+            assert "source budget" in str(exc)
+    finally:
+        R.shodan_search = original_search
+        R.hosts_for_asn = original_hosts
+
+    assert host_calls == [True], host_calls
+
+
+check(
+    "ASN source failures abort the lane before its cursor advances",
+    _asn_lane_does_not_advance_after_source_failure,
+)
+
+
+def _secondary_key_is_break_glass_not_quota_extension():
+    original_collect = N.collect_lane
+    calls = []
+
+    def fake_collect(key, _lane, _page, **_kwargs):
+        calls.append(key)
+        if key == "primary":
+            raise D.ShodanRequestError("authentication_rejected", 1)
+        return [], 0, 1, 0
+
+    try:
+        N.collect_lane = fake_collect
+        result, slot = N.collect_lane_with_failover(
+            "primary",
+            "secondary",
+            True,
+            "primary",
+            {"id": "ollama"},
+            1,
+            pages_per_run=1,
+            budget_consumer=lambda: None,
+        )
+    finally:
+        N.collect_lane = original_collect
+
+    assert result == ([], 0, 1, 0), result
+    assert slot == "secondary", slot
+    assert calls == ["primary", "secondary"], calls
+
+    calls.clear()
+
+    def quota_failure(key, _lane, _page, **_kwargs):
+        calls.append(key)
+        raise D.ShodanRequestError("rate_limited", 1)
+
+    try:
+        N.collect_lane = quota_failure
+        try:
+            N.collect_lane_with_failover(
+                "primary",
+                "secondary",
+                True,
+                "primary",
+                {"id": "ollama"},
+                1,
+                pages_per_run=1,
+                budget_consumer=lambda: None,
+            )
+            raise AssertionError("rate limiting selected the secondary credential")
+        except D.ShodanRequestError as exc:
+            assert exc.category == "rate_limited"
+    finally:
+        N.collect_lane = original_collect
+
+    assert calls == ["primary"], calls
+
+
+check(
+    "secondary Shodan credential promotes only after primary authentication failure",
+    _secondary_key_is_break_glass_not_quota_extension,
 )
 
 
@@ -733,7 +865,7 @@ def _scheduled_nomination_isolates_failed_lane():
     ollama = next(lane for lane in R.LANES if lane["id"] == "ollama")
     litellm = next(lane for lane in R.LANES if lane["id"] == "litellm")
 
-    def fake_collect(_key, lane, _page):
+    def fake_collect(_key, lane, _page, **_kwargs):
         if lane["id"] == "litellm":
             raise RuntimeError("synthetic lane outage")
         candidate = cand(
@@ -754,6 +886,8 @@ def _scheduled_nomination_isolates_failed_lane():
         return 200, {"ok": True}
 
     def fake_http(_url, **kwargs):
+        if _url.endswith("/source-budget/consume"):
+            return 200, {"ok": True}
         captured["nominations"] = kwargs["data"]["nominations"]
         return 200, {"ok": True, "created": ["opaque-1"], "rejected": []}
 

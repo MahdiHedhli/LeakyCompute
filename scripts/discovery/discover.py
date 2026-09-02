@@ -70,11 +70,14 @@ MAX_RESPONSE_BYTES = 32 * 1024
 # but commits that envelope to the strong control plane in transactions of at
 # most 128 records. Keep the run ceiling distinct from that transaction bound.
 HARD_MAX_TOTAL = 425
-# Pages walked per lane per run. This is the transitional paid-plan burn-down
-# setting, not the monthly-limited steady state. ADR 0003 requires a strong,
-# shared source-credit ledger and smaller incremental cursor slices before the
-# account changes tier. The cursor still prevents re-buying the same first page.
-PAGES_PER_RUN = 10
+# Incremental pages walked per search lane per scheduled invocation. The
+# strongly consistent source ledger separately paces every request across the
+# configured month. A local operator may lower this, never raise it above the
+# reviewed hard bound without editing code.
+PAGES_PER_RUN = 1
+HARD_MAX_PAGES_PER_LANE = 10
+# ASN lanes buy one facet page plus a small rotating slice of provider groups.
+ASN_GROUPS_PER_RUN = 2
 # A passive source outage must not consume an entire scheduled run, but retrying
 # forever would hide a persistent provider or query failure and could burn
 # credits. Each page therefore gets one request plus two bounded retries.
@@ -85,6 +88,15 @@ HARD_MAX_RATE = 1.0  # probes/sec global absolute ceiling
 HARD_MIN_PREFIX = 28  # never expand wider than /28
 HARD_MAX_HOSTS_PER_ASN = 25
 HARD_MAX_ASNS = 30
+
+
+class ShodanRequestError(SystemExit):
+    """Public-safe provider failure with a machine-readable category."""
+
+    def __init__(self, category: str, attempts: int):
+        self.category = category
+        self.attempts = attempts
+        super().__init__(f"Shodan search failed: {category}; attempts={attempts}")
 
 
 class GlobalRateLimiter:
@@ -211,11 +223,17 @@ def shodan_failure_category(status: int | None, payload: Any) -> tuple[str, bool
 def shodan_json_with_retry(
     url: str,
     *,
+    budget_consumer=None,
     retry_sleep=time.sleep,
     retry_jitter=random.uniform,
 ) -> dict:
     """Fetch one Shodan page with bounded full-jitter transient retries."""
     for attempt in range(1, SHODAN_MAX_ATTEMPTS + 1):
+        if budget_consumer is not None:
+            # Ambiguous requests remain charged: consume the strong monthly
+            # source unit immediately before the provider call and never refund
+            # based on a response we may not have received.
+            budget_consumer()
         status, payload = http_json(
             url,
             timeout=60,
@@ -226,9 +244,7 @@ def shodan_json_with_retry(
 
         category, retryable = shodan_failure_category(status, payload)
         if not retryable or attempt == SHODAN_MAX_ATTEMPTS:
-            raise SystemExit(
-                f"Shodan search failed: {category}; attempts={attempt}"
-            )
+            raise ShodanRequestError(category, attempt)
 
         ceiling = min(
             SHODAN_RETRY_MAX_SECONDS,
@@ -283,6 +299,8 @@ def shodan_search(
     *,
     facets: str | None = None,
     start_page: int = 1,
+    pages_per_run: int = PAGES_PER_RUN,
+    budget_consumer=None,
 ) -> tuple[list[dict], dict, int]:
     """
     Shodan host search. Returns (matches, facet_dict, next_page).
@@ -297,6 +315,7 @@ def shodan_search(
     changes underneath us, so the top of the list next month is not the list we
     already hold.
     """
+    page_cap = max(1, min(int(pages_per_run), HARD_MAX_PAGES_PER_LANE))
     out: list[dict] = []
     facets_out: dict = {}
     exhausted = False
@@ -322,7 +341,7 @@ def shodan_search(
         if facets and page == 1:
             params["facets"] = facets
         url = "https://api.shodan.io/shodan/host/search?" + urllib.parse.urlencode(params)
-        data = shodan_json_with_retry(url)
+        data = shodan_json_with_retry(url, budget_consumer=budget_consumer)
         # `total` rides on every page, not just the first. Reading it only in
         # the page==1 branch left it None for every lane that resumed from a
         # cursor — which is every lane after the first run.
@@ -378,7 +397,7 @@ def shodan_search(
         # Walk at most PAGES_PER_RUN pages per lane per invocation. The cap is
         # per run, not absolute: the cursor carries the position forward, so
         # successive runs continue down the list rather than restarting it.
-        if page - start_page >= PAGES_PER_RUN:
+        if page - start_page >= page_cap:
             break
         time.sleep(1.25)  # slow Shodan pagination
 
@@ -415,12 +434,27 @@ def parse_org_facets(facets: dict) -> list[dict]:
     ]
 
 
-def hosts_for_asn(api_key: str, base_query: str, asn: str, limit: int) -> list[dict]:
+def hosts_for_asn(
+    api_key: str,
+    base_query: str,
+    asn: str,
+    limit: int,
+    *,
+    pages_per_run: int = PAGES_PER_RUN,
+    budget_consumer=None,
+) -> list[dict]:
     """Passive: limited hosts for one ASN (hosting-provider block seed)."""
     limit = min(limit, HARD_MAX_HOSTS_PER_ASN)
     # Shodan filter: asn:AS####
     q = f"{base_query} asn:{asn}"
-    matches, _, _, _ = shodan_search(api_key, q, limit, facets=None)
+    matches, _, _, _ = shodan_search(
+        api_key,
+        q,
+        limit,
+        facets=None,
+        pages_per_run=pages_per_run,
+        budget_consumer=budget_consumer,
+    )
     for m in matches:
         m["source"] = f"shodan_asn:{asn}"
         m["asn"] = asn

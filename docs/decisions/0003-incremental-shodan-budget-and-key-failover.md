@@ -1,12 +1,12 @@
 # ADR 0003: Incremental Shodan budget and governed credential failover
 
-- **Status:** proposed for the next sprint
+- **Status:** accepted and implemented; secondary credential not provisioned
 - **Date:** 2026-09-02
 - **Blocks:** switching the production discovery account to a lower Shodan tier
 
 ## Context
 
-The current paid-plan setting permits up to 10 result pages per lane. With every
+The former paid-plan setting permitted up to 10 result pages per lane. With every
 reviewed lane covered once by the daily shards and again by the pre-reset
 catch-up, that is intentionally a transitional burn-down configuration. It is
 not an acceptable steady state for a monthly-limited account.
@@ -23,16 +23,16 @@ free-tier allowance is encoded in this decision.
 
 ## Decision
 
-Implement an incremental Shodan scheduler backed by a strongly consistent,
+LeakyCompute uses an incremental Shodan scheduler backed by a strongly consistent,
 month-scoped source-credit ledger:
 
-1. Reserve a query unit before every Shodan request, including retries. If the
+1. Atomically consume a query unit before every Shodan request, including retries. If the
    ledger cannot be read or the reservation cannot be committed, make no
    provider request.
 2. Configure a conservative monthly ceiling and a separate reserve without
    committing either API key. The late daily run is bounded by both remaining
    Shodan credits and remaining Workers KV capacity.
-3. Replace the fixed 10-page production behavior with small cursor-based page
+3. Replace the fixed 10-page production behavior with one-page cursor-based
    slices. Each regular shard buys only its assigned incremental slice. The
    pre-reset run may use unused daily capacity but cannot exceed the remaining
    monthly source budget.
@@ -61,25 +61,27 @@ month-scoped source-credit ledger:
 - Promotion uses a circuit breaker for the rest of the run. Do not alternate
   credentials per request or race them concurrently.
 
-## Sprint implementation order
+## Implementation record
 
-1. Confirm the target Shodan plan's current monthly allowance, request charging
-   rules, retry behavior, and multi-credential terms from primary documentation.
-2. Add a source-budget table and authenticated aggregate health endpoint to the
-   existing Durable Object. Budget state must include month, reserved, consumed,
-   remaining, reserve, and reset time—never keys or raw target data.
-3. Add reserve/commit/release operations with concurrency and crash tests.
-   Ambiguous requests remain consumed rather than being optimistically refunded.
-4. Teach the nominator to request one bounded page slice at a time and to stop
-   before the next provider call when the reservation is unavailable.
-5. Add the optional secondary secret and disabled-by-default promotion flag.
-6. Update scheduled preflight to calculate the run envelope from the minimum of
-   source-credit capacity, KV capacity, and the reviewed candidate ceiling.
-7. Canary with the secondary unset, then with a deliberately invalid primary
-   and an operator-enabled test secondary. Verify that quota/rate responses do
-   not fail over and that logs remain public-safe.
-8. Run the full invariant suite and a fresh adversarial review before enabling
-   automatic promotion or switching away from the paid plan.
+1. The existing Durable Object now holds a month-scoped consumed-unit value in
+   its SQLite metadata and updates it transactionally.
+2. The paced ceiling grows continuously through the month. Unused allowance
+   carries forward, while early runs cannot front-load the whole month.
+3. Admin and nominator health routes return aggregate budget state only. The
+   nominator consumes one unit immediately before each provider call.
+4. Search lanes read one page per invocation. ASN lanes rotate through two
+   provider groups at a time instead of rereading every top ASN.
+5. Scheduled preflight stops before index access when either source pacing or
+   Workers KV headroom is unavailable.
+6. The optional secondary secret and promotion path exist but remain inert while
+   `SHODAN_SECONDARY_FAILOVER_ENABLED=false` and the secret is unset.
+7. Tests verify pre-request accounting, retry charging, monthly pacing, route
+   isolation, and refusal to fail over for rate limits.
+
+Before changing the production Shodan tier or enabling the secondary, confirm
+the current allowance, charging rules, and multi-credential terms from Shodan's
+primary documentation. Then run an operator-approved failover canary and fresh
+adversarial review.
 
 ## Acceptance criteria
 

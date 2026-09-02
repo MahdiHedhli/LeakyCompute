@@ -53,8 +53,11 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from discover import (  # noqa: E402
     HARD_MAX_TOTAL,
+    ASN_GROUPS_PER_RUN,
+    PAGES_PER_RUN,
     HARD_MAX_RATE,
     PROBE_USER_AGENT,
+    ShodanRequestError,
     GlobalRateLimiter,
     hosts_for_asn,
     http_json,
@@ -720,7 +723,12 @@ def retire_hosts(api_base: str, token: str, ips: list[str]) -> None:
 
 
 def collect_lane(
-    api_key: str, lane: dict, start_page: int = 1
+    api_key: str,
+    lane: dict,
+    start_page: int = 1,
+    *,
+    pages_per_run: int = PAGES_PER_RUN,
+    budget_consumer=None,
 ) -> tuple[list[dict], int, int, int | None]:
     """
     Returns (candidates, indexed_observed, next_page).
@@ -740,21 +748,38 @@ def collect_lane(
     cands: list[dict] = []
     if lane["mode"] == "asn":
         # facet + top ASNs
-        next_page = start_page
         sample, facets, _, lane_total = shodan_search(
-            api_key, lane["query"], limit=5, facets="asn:20,org:15"
+            api_key,
+            lane["query"],
+            limit=5,
+            facets="asn:20,org:15",
+            pages_per_run=1,
+            budget_consumer=budget_consumer,
         )
         asns = parse_asn_facets(facets)
         print(f"  total indexed (sample page) facets ASNs={len(asns)}")
-        for row in asns[: lane.get("top_asns", 10)]:
+        top_asns = asns[: lane.get("top_asns", 10)]
+        group_start = max(0, (start_page - 1) * ASN_GROUPS_PER_RUN)
+        selected_asns = top_asns[group_start : group_start + ASN_GROUPS_PER_RUN]
+        if not selected_asns and top_asns:
+            group_start = 0
+            selected_asns = top_asns[:ASN_GROUPS_PER_RUN]
+        exhausted_group = group_start + len(selected_asns) >= len(top_asns)
+        next_page = 1 if exhausted_group else start_page + 1
+        for row in selected_asns:
             asn = row["asn"]
-            try:
-                hosts = hosts_for_asn(
-                    api_key, lane["query"], asn, lane.get("hosts_per_asn", 6)
-                )
-            except SystemExit as e:
-                print(f"  ! {asn}: {e}")
-                hosts = []
+            # A provider or strong-budget failure invalidates the lane. Do not
+            # swallow it here and advance the cursor past a group we did not
+            # actually collect; the outer runner isolates this lane while
+            # healthy lanes can continue.
+            hosts = hosts_for_asn(
+                api_key,
+                lane["query"],
+                asn,
+                lane.get("hosts_per_asn", 6),
+                pages_per_run=pages_per_run,
+                budget_consumer=budget_consumer,
+            )
             print(f"  {asn}: {len(hosts)} hosts")
             for h in hosts:
                 # hosts_for_asn returns simplified dicts without full location
@@ -787,8 +812,9 @@ def collect_lane(
                 cands.append(c)
             time.sleep(1.0)
         # also add sample matches which have full geo
-        for m in sample:
-            cands.append(match_to_candidate(m, lane))
+        if group_start == 0:
+            for m in sample:
+                cands.append(match_to_candidate(m, lane))
     else:
         matches, facets, next_page, lane_total = shodan_search(
             api_key,
@@ -796,6 +822,8 @@ def collect_lane(
             limit=lane.get("search_limit", 30),
             start_page=start_page,
             facets="asn:15,country:20",
+            pages_per_run=pages_per_run,
+            budget_consumer=budget_consumer,
         )
         print(f"  matches={len(matches)} countries_facet={len((facets or {}).get('country') or [])}")
         for m in matches:

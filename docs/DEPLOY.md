@@ -162,6 +162,22 @@ skips the run before index access or target traffic. Manual envelopes may reach
 425 candidates, but nomination commits remain bounded to
 `128 + 128 + 128 + 41`.
 
+Every scheduled preflight also calls the strong, aggregate-only
+`GET /v1/admin/discovery/source-budget` route. `SHODAN_MONTHLY_QUERY_BUDGET` and
+`SHODAN_MONTHLY_QUERY_RESERVE` define one shared project allowance; the paced
+ceiling grows continuously through the month. Search lanes use
+`SHODAN_PAGES_PER_LANE=1`, and the nominator consumes a serialized unit before
+each initial request and retry. Confirm the active Shodan plan before changing
+either value.
+
+The workflow reads the primary key from the `SHODAN_API_KEY_PRIMARY` GitHub
+secret, falling back to the legacy `SHODAN_API_KEY` secret during migration.
+`SHODAN_API_KEY_SECONDARY` is optional and must remain unset until its use is
+terms-reviewed. Even when present it is inert unless the repository variable
+`SHODAN_SECONDARY_FAILOVER_ENABLED` is explicitly set to `true`; quota, rate,
+and plan failures never select it. Both credentials consume the same strong
+ledger.
+
 URLs are set in:
 
 - `public/js/config.js` → `API_BASE`

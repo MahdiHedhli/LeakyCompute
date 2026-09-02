@@ -106,6 +106,15 @@ KV_DAILY_PUT_BUDGET = "990"
 # Held outside adaptive discovery for opt-outs, hosted self-checks, and normal
 # operational churn. The pre-reset run sizes itself only from headroom above it.
 KV_DISCOVERY_RESERVE = "100"
+# Transitional paid-plan ceiling. ADR 0003 paces this allowance continuously
+# across the month; change only after confirming the active Shodan plan.
+SHODAN_MONTHLY_QUERY_BUDGET = "10000"
+SHODAN_MONTHLY_QUERY_RESERVE = "500"
+# Scheduled discovery buys one incremental result page per search lane.
+SHODAN_PAGES_PER_LANE = "1"
+# The secondary credential remains inert until the maintainer explicitly
+# enables a terms-reviewed invalid-primary failover.
+SHODAN_SECONDARY_FAILOVER_ENABLED = "false"
 # I-27: days between the first notification attempt and publication of any
 # host-identifying detail. Aggregates are not gated by this window.
 DISCLOSURE_WINDOW_DAYS = "90"

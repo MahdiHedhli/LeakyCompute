@@ -32,8 +32,8 @@ version: 1
 sources:
   shodan:
     status: live
-    auth: {account: true, key: SHODAN_API_KEY, friction: none}
-    note: Already wired. Membership tier. Facets + host search.
+    auth: {account: true, key: SHODAN_API_KEY_PRIMARY, optional_fallback: SHODAN_API_KEY_SECONDARY, friction: none}
+    note: Incremental, month-paced facets + host search. Fallback is disabled by default.
 
   crt_sh:
     status: planned

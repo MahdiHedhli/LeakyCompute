@@ -35,6 +35,10 @@ const child = spawn(
     "--var",
     "CONTROL_PLANE_TEST_TIME_ENABLED:true",
     "--var",
+    "SHODAN_MONTHLY_QUERY_BUDGET:10",
+    "--var",
+    "SHODAN_MONTHLY_QUERY_RESERVE:2",
+    "--var",
     `DISCOVERY_NOMINATOR_TOKEN:${NOMINATOR}`,
     "--var",
     "CANARY_PROBE_ENABLED:true",
@@ -85,7 +89,11 @@ async function get(pathname) {
 }
 
 async function postNominator(body, token = NOMINATOR) {
-  const response = await fetch(`${base}/v1/nominator/discovery/nominations`, {
+  return postNominatorPath("/v1/nominator/discovery/nominations", body, token);
+}
+
+async function postNominatorPath(pathname, body, token = NOMINATOR) {
+  const response = await fetch(`${base}${pathname}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -197,6 +205,23 @@ try {
   const unauthorizedNomination = await postNominator({ nominations: [{}] }, "wrong-token");
   await check("the discovery-admin role cannot create passive nominations", () => {
     assert.equal(unauthorizedNomination.status, 401);
+  });
+
+  const budgetNow = Date.parse("2026-08-31T23:59:00Z");
+  const sourceUnits = [];
+  for (let i = 0; i < 8; i++) {
+    sourceUnits.push(await postNominatorPath(
+      "/v1/nominator/discovery/source-budget/consume",
+      { units: 1, now: budgetNow }
+    ));
+  }
+  await check("the month-paced source ledger is shared and fail-closed", () => {
+    assert.equal(sourceUnits.filter((result) => result.status === 200).length, 7);
+    assert.equal(sourceUnits.at(-1).status, 429);
+    assert.equal(sourceUnits.at(-1).body.error, "source_budget_pacing_exhausted");
+    assert.equal(sourceUnits.at(-1).body.consumed, 7);
+    assert.equal(sourceUnits.at(-1).body.reserve, 2);
+    assert.equal(sourceUnits.at(-1).body.monthly_limit, 10);
   });
 
   const { nomination: firstNomination, lease } = await leaseCandidate();
