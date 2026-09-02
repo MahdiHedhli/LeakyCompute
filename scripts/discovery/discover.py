@@ -70,10 +70,10 @@ MAX_RESPONSE_BYTES = 32 * 1024
 # but commits that envelope to the strong control plane in transactions of at
 # most 128 records. Keep the run ceiling distinct from that transaction bound.
 HARD_MAX_TOTAL = 425
-# Pages walked per lane per run. Raised from 3 with the Freelancer plan: at
-# ~14 lanes this is ~140 query credits a run against a 10,000/month allowance,
-# so roughly 70 runs a month. The cursor carries position forward, so each run
-# walks further down the list rather than re-reading the top.
+# Pages walked per lane per run. This is the transitional paid-plan burn-down
+# setting, not the monthly-limited steady state. ADR 0003 requires a strong,
+# shared source-credit ledger and smaller incremental cursor slices before the
+# account changes tier. The cursor still prevents re-buying the same first page.
 PAGES_PER_RUN = 10
 # A passive source outage must not consume an entire scheduled run, but retrying
 # forever would hide a persistent provider or query failure and could burn

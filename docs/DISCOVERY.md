@@ -32,6 +32,14 @@ and uses safe remaining capacity before the 00:00 UTC reset. Manual runs may
 request a 425-candidate envelope; the nominator commits it as four serialized
 transactions of `128 + 128 + 128 + 41`, never as one widened transaction.
 
+The current `PAGES_PER_RUN=10` is a temporary paid-plan burn-down setting. It
+must not survive a move to a monthly-limited Shodan tier. The next sprint adds a
+strong, shared monthly source-credit ledger and changes scheduled pulls to small
+incremental cursor slices. A planned secondary credential is continuity only:
+it shares the same budget and cannot be selected for exhausted credits, rate
+limits, or plan restrictions. See
+[`ADR 0003`](decisions/0003-incremental-shodan-budget-and-key-failover.md).
+
 ## Critical fact about the archive seed
 
 `data/seed-models.json` lists **model names + host counts** from STOLEN COMPUTE.
