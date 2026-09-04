@@ -69,6 +69,28 @@ GitHub explicitly documents that scheduled Actions can be delayed under load
 and may even be dropped; cron time is therefore a request, not a deadline:
 [GitHub schedule event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 
+## Post-repair production verification — 4 September 2026 UTC
+
+The packet-free preflight for a manually dispatched 425-candidate ceiling found
+916 Shodan source units and 964 governed KV operations available. The all-lane
+run nominated 212 candidates; the strong control plane leased 26, safely gated
+186 under interval or rate controls, confirmed 12 exposure outcomes, and
+published a new authoritative aggregate generation. The
+[run completed successfully](https://github.com/MahdiHedhli/LeakyCompute/actions/runs/33827429330).
+
+A second all-lane run from the repaired revision used a 10-candidate ceiling.
+It nominated 10, leased seven, safely gated three, found no new exposure
+outcomes, and published successfully. Its complete 14-lane manifest measured
+21,970 public-index records with no failed lanes. The public API then reported
+exactly 21,970 records with a fresh observation time and 1,479 rolling retained
+hosts. This proves both the complete-measurement publication gate and the
+observation-only ingest path in production. The
+[validation run completed successfully](https://github.com/MahdiHedhli/LeakyCompute/actions/runs/33828078913).
+
+The social-preview hook ran after aggregate publication, rendered the same
+19,348 archive, 21,970 public-index, and 1,479 rolling re-verification values,
+and triggered the public-site deployment.
+
 ## Limitations and follow-up
 
 One day of delay observations is enough to prove that 22:13 is unsafe, but not
@@ -76,4 +98,3 @@ to characterize GitHub's long-run delay distribution. Monitor actual versus
 nominal start time for seven days. If an 18:13 catch-up ever crosses reset, move
 the trigger outside GitHub Actions or add an independent scheduler rather than
 weakening the budget or safety gates.
-
