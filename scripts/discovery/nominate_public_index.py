@@ -28,12 +28,27 @@ from run_multilane import (
     http_json,
     partition_by_allowed_port,
     partition_by_provenance,
+    public_index_publication_meta,
 )
 
 
 # The Durable Object deliberately bounds one transaction. A governed run may
 # contain several such transactions, but no request may widen this boundary.
 NOMINATION_BATCH_MAX = 128
+
+
+def nomination_publication_meta(
+    requested_all_lanes: bool,
+    completed_lane_ids: set[str],
+    index_listed: dict[str, int],
+) -> dict:
+    """Publish only a complete measurement across every reviewed lane."""
+    return public_index_publication_meta(
+        requested_all_lanes=requested_all_lanes,
+        completed_lane_ids=completed_lane_ids,
+        index_listed=index_listed,
+        approved_host_count=0,
+    )
 
 
 def enabled_env(name: str) -> bool:
@@ -338,6 +353,11 @@ def main() -> int:
 
     requested_lane_ids = [lane["id"] for lane in lanes]
     completed_lane_ids = [lane_id for lane_id in requested_lane_ids if lane_id in completed]
+    public_metrics = nomination_publication_meta(
+        requested_all_lanes=wanted is None,
+        completed_lane_ids=completed,
+        index_listed=index_listed,
+    )
     manifest = {
         "nomination_ids": ids,
         "meta": {
@@ -355,8 +375,12 @@ def main() -> int:
             "index_listed_records": sum(index_listed.values()),
             "indexed_observed_publication": (
                 "withheld_incomplete_lane_measurement"
-                if failures else "candidate_feed_only"
+                if failures else (
+                    "complete_all_lane_measurement"
+                    if public_metrics else "candidate_feed_only"
+                )
             ),
+            **public_metrics,
             "provenance_enforced": True,
             "immutable_nominations": True,
             "credential_split": True,

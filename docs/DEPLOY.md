@@ -153,9 +153,11 @@ or dashboard-created resource. Do not remove either independently:
 `/v1/stats` relies on caching for normal traffic and the limiter to stop cold
 misses or cache-bypass requests before they consume security-state KV reads.
 
-Governed discovery uses four daily lane shards capped at 128 candidates and a
-22:13 UTC all-lane catch-up pass. Before reading the index, every pass calls the
-admin-only `GET /v1/admin/discovery/budget` route. The route reports aggregate
+Governed discovery uses four daily lane shards capped at 128 candidates and an
+18:13 UTC all-lane catch-up pass. The wide buffer is intentional: GitHub
+scheduled events can be delayed, and a delayed 22:13 pass was observed starting
+after the 00:00 UTC Workers KV reset. Before reading the index, every pass calls
+the admin-only `GET /v1/admin/discovery/budget` route. The route reports aggregate
 KV usage only and recommends a worst-case-safe candidate ceiling after holding
 back `KV_DISCOVERY_RESERVE` (100 writes in production). A recommendation of zero
 skips the run before index access or target traffic. Manual envelopes may reach

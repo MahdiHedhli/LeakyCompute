@@ -1215,6 +1215,24 @@ def self_test_candidates() -> list[dict]:
 def ingest(api_base: str, token: str, results: list[dict], meta: dict) -> list:
     batch = 100
     outs = []
+    if not results and meta.get("indexed_observed") is not None:
+        # Passive breadth is independent of whether any target was due under
+        # the interval/rate gates. The Worker explicitly accepts an empty
+        # observation-only batch so a complete census is not made stale by
+        # correct target-traffic suppression.
+        st, data = http_json(
+            f"{api_base.rstrip('/')}/v1/admin/discovery/ingest",
+            method="POST",
+            data={"results": [], "run_meta": meta},
+            headers={"X-Admin-Token": token},
+            timeout=120,
+        )
+        if st != 200:
+            raise SystemExit(
+                f"observation-only ingest failed: HTTP {st}; response={payload_shape(data)}"
+            )
+        print(f"  observation-only ingest ok: {data}")
+        return [data]
     for i in range(0, len(results), batch):
         chunk = [r for r in results[i : i + batch] if r.get("outcome") in {
             "exposed", "not_observed", "target_error"

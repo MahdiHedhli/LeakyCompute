@@ -287,7 +287,9 @@ accidental run ceiling.
 The corrected schedule uses four daily lane shards, each capped at 128, so one
 failed job cannot consume the day's only opportunity. Each lane owns its cursor
 and advances it only after its durable nominations commit. A final all-lane pass
-at 22:13 UTC retries missed pages and is sized from the authenticated remaining
+at 18:13 UTC retries missed pages and is sized from the authenticated remaining
 KV allowance after reserving 100 writes for opt-outs, hosted checks, and normal
-churn. A manual 425-candidate envelope is committed through four serialized
-transactions of `128 + 128 + 128 + 41`; no transaction boundary was widened.
+churn. The earlier time provides a wide buffer for GitHub schedule delays after
+an observed 22:13 pass crossed the 00:00 UTC reset. A manual 425-candidate
+envelope is committed through four serialized transactions of
+`128 + 128 + 128 + 41`; no transaction boundary was widened.

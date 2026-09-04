@@ -3,7 +3,7 @@
 **Current status:** passive reports, index comparisons, local-container
 validation, and dry-run governance plans are available. Governed verification
 runs every day through four lane-sharded passes capped at 128 candidates, then
-an all-lane catch-up pass at 22:13 UTC sized from the remaining Workers KV
+an all-lane catch-up pass at 18:13 UTC sized from the remaining Workers KV
 allowance. Schema 3, the split nomination/probe roles, an address-pinned
 operator-owned canary, and capped production runs passed re-certification. The
 runner cannot open a target socket: only the API Worker's pinned runtime can do
@@ -28,9 +28,13 @@ alter a nomination.
 The four regular shards cover every reviewed lane once per day. Each lane owns
 its cursor: a successful shard advances only its completed lanes, while a failed
 lane advances nothing. The final all-lane pass therefore retries missed pages
-and uses safe remaining capacity before the 00:00 UTC reset. Manual runs may
-request a 425-candidate envelope; the nominator commits it as four serialized
-transactions of `128 + 128 + 128 + 41`, never as one widened transaction.
+and uses safe remaining capacity before the 00:00 UTC reset. Its early nominal
+time leaves room for GitHub's documented schedule delays; a 22:13 nominal pass
+was observed starting after the reset and was retired. The supporting run audit
+is in [`SCHEDULE_DIAGNOSTIC_2026-09-03.md`](SCHEDULE_DIAGNOSTIC_2026-09-03.md).
+Manual runs may request a 425-candidate envelope; the nominator commits it as
+four serialized transactions of `128 + 128 + 128 + 41`, never as one widened
+transaction.
 
 Scheduled search lanes now use `PAGES_PER_RUN=1`; ASN lanes rotate across two
 provider groups per invocation. Before every Shodan request or retry, the

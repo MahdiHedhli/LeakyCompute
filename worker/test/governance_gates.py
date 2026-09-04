@@ -196,6 +196,57 @@ def _public_index_metrics_require_complete_all_lane_run():
 check("only a complete all-lane run can publish the global index metric", _public_index_metrics_require_complete_all_lane_run)
 
 
+def _governed_nominator_publishes_complete_all_lane_measurement():
+    all_ids = {lane["id"] for lane in R.LANES}
+    totals = {lane_id: 10 for lane_id in all_ids}
+    complete = N.nomination_publication_meta(True, all_ids, totals)
+    assert complete["indexed_observed"] == len(all_ids) * 10, complete
+    assert complete["indexed_observed_sources"]["shodan"] == len(all_ids) * 10
+
+    missing = set(all_ids)
+    missing.pop()
+    assert N.nomination_publication_meta(True, missing, totals) == {}
+    assert N.nomination_publication_meta(False, all_ids, totals) == {}
+
+
+check(
+    "governed all-lane nomination publishes only a complete index measurement",
+    _governed_nominator_publishes_complete_all_lane_measurement,
+)
+
+
+def _complete_measurement_ingests_without_due_probes():
+    original_http = R.http_json
+    calls = []
+
+    def fake_http(url, **kwargs):
+        calls.append((url, kwargs))
+        return 200, {"ok": True}
+
+    try:
+        R.http_json = fake_http
+        out = R.ingest(
+            "https://api.invalid",
+            "test-token",
+            [],
+            {"indexed_observed": 140, "indexed_observed_publication": "complete_all_lane_measurement"},
+        )
+    finally:
+        R.http_json = original_http
+
+    assert out == [{"ok": True}], out
+    assert len(calls) == 1, calls
+    assert calls[0][0].endswith("/v1/admin/discovery/ingest")
+    assert calls[0][1]["data"]["results"] == []
+    assert calls[0][1]["data"]["run_meta"]["indexed_observed"] == 140
+
+
+check(
+    "complete index measurement ingests even when no target is due",
+    _complete_measurement_ingests_without_due_probes,
+)
+
+
 def _stale_index_source():
     prov = P.provenance_from_corpus_source("shodan_asn:AS64497", iso(30), 11434)
     ok, why = eligible([cand("1.1.1.8", provenance=prov)])

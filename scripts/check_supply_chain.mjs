@@ -75,7 +75,7 @@ for (const file of workflowFiles) {
   }
 }
 
-for (const cron of ["43 5 * * *", "43 9 * * *", "43 13 * * *", "43 17 * * *", "13 22 * * *"]) {
+for (const cron of ["43 5 * * *", "43 9 * * *", "43 13 * * *", "43 17 * * *", "13 18 * * *"]) {
   if (!discoveryWorkflow.includes(`cron: "${cron}"`)) {
     fail(`scheduled discovery is missing reviewed daily pass: ${cron}`);
   }
@@ -145,7 +145,7 @@ const flattenedLanes = reviewedLaneShards.flatMap((shard) => shard.split(","));
 if (new Set(flattenedLanes).size !== flattenedLanes.length) {
   fail("scheduled discovery lane shards must not overlap");
 }
-if (!/"13 22 \* \* \*"\)[\s\S]*?REQUESTED_MAX=425[\s\S]*?LANES="all"/.test(discoveryWorkflow)) {
+if (!/"13 18 \* \* \*"\)[\s\S]*?REQUESTED_MAX=425[\s\S]*?LANES="all"/.test(discoveryWorkflow)) {
   fail("scheduled discovery must retain the reviewed all-lane pre-reset catch-up");
 }
 

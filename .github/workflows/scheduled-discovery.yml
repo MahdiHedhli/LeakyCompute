@@ -13,9 +13,10 @@ on:
     - cron: "43 9 * * *"
     - cron: "43 13 * * *"
     - cron: "43 17 * * *"
-    # Final all-lane catch-up pass, early enough to finish before the 00:00 UTC
-    # KV reset. Packet-free preflight sizes it from remaining KV headroom.
-    - cron: "13 22 * * *"
+    # Final all-lane catch-up pass has a wide buffer before the 00:00 UTC KV
+    # reset because GitHub documents that scheduled events can be delayed. Its
+    # packet-free preflight sizes it from remaining KV headroom.
+    - cron: "13 18 * * *"
   workflow_dispatch:
     inputs:
       max_total:
@@ -75,7 +76,7 @@ jobs:
               REQUESTED_MAX=128
               LANES="openai_compat_8080,gradio,mlflow"
               ;;
-            "13 22 * * *")
+            "13 18 * * *")
               REQUESTED_MAX=425
               LANES="all"
               ;;

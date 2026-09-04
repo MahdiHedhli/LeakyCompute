@@ -90,7 +90,7 @@ def main() -> int:
         f"[+] governed results: nominated={len(ids)} leased={len(results)} "
         f"skipped={sum(skipped.values())} exposed={len(exposed)}"
     )
-    if args.ingest and results:
+    if args.ingest and (results or meta.get("indexed_observed") is not None):
         ingest(args.api_base, args.admin_token, results, meta)
     return 0
 
