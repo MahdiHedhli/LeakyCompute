@@ -24,6 +24,7 @@ from run_multilane import (
     LANES,
     PAGES_PER_RUN,
     ShodanRequestError,
+    allocate_lane_limits,
     collect_lane,
     http_json,
     partition_by_allowed_port,
@@ -85,6 +86,8 @@ def collect_lane_with_failover(
     lane: dict,
     start_page: int,
     *,
+    start_offset: int = 0,
+    candidate_limit: int | None = None,
     pages_per_run: int,
     budget_consumer,
 ):
@@ -96,6 +99,8 @@ def collect_lane_with_failover(
                 active_key,
                 lane,
                 start_page,
+                start_offset=start_offset,
+                candidate_limit=candidate_limit,
                 pages_per_run=pages_per_run,
                 budget_consumer=budget_consumer,
             ),
@@ -115,6 +120,8 @@ def collect_lane_with_failover(
                 secondary_key,
                 lane,
                 start_page,
+                start_offset=start_offset,
+                candidate_limit=candidate_limit,
                 pages_per_run=pages_per_run,
                 budget_consumer=budget_consumer,
             ),
@@ -187,8 +194,9 @@ def commit_nomination_batches(api_base: str, token: str, payload: list[dict]) ->
 
     Candidate-level rejections stay isolated: the control plane has already
     refused them, so withholding valid opaque IDs would reduce availability
-    without improving safety. Malformed responses and an all-rejected envelope
-    still fail closed before target traffic.
+    without improving safety. An empty or authoritatively all-rejected envelope
+    is a successful zero-work result: no opaque ID exists, so no target traffic
+    can be authorized. Malformed responses still fail closed.
     """
     ids: list[str] = []
     rejected_total = 0
@@ -218,8 +226,6 @@ def commit_nomination_batches(api_base: str, token: str, payload: list[dict]) ->
             raise SystemExit("unexpected durable nomination rejection; no target traffic authorized")
         ids.extend(created)
         rejected_total += len(rejected)
-    if not ids:
-        raise SystemExit("all durable nominations were rejected; no target traffic authorized")
     return ids, rejected_total
 
 
@@ -264,6 +270,7 @@ def main() -> int:
     # rotating group calls. Spend scarce paced headroom on complete small units
     # before beginning a larger lane that might stop midway.
     lanes.sort(key=lambda lane: lane.get("mode") == "asn")
+    lane_limits = allocate_lane_limits(lanes, args.max_total)
 
     candidates = []
     failures = []
@@ -275,7 +282,9 @@ def main() -> int:
     active_key_slot = "primary"
     for lane in lanes:
         try:
-            start_page = int((cursors.get(lane["id"]) or {}).get("page") or 1)
+            lane_cursor = cursors.get(lane["id"]) or {}
+            start_page = int(lane_cursor.get("page") or 1)
+            start_offset = int(lane_cursor.get("offset") or 0)
             lane_result, active_key_slot = collect_lane_with_failover(
                 args.shodan_key,
                 args.secondary_shodan_key,
@@ -283,10 +292,12 @@ def main() -> int:
                 active_key_slot,
                 lane,
                 start_page,
+                start_offset=start_offset,
+                candidate_limit=lane_limits[lane["id"]],
                 pages_per_run=args.pages_per_lane,
                 budget_consumer=source_budget.consume,
             )
-            found, observed, next_page, total = lane_result
+            found, observed, next_page, total, next_offset = lane_result
             candidates.extend(found)
             pulled += observed
             if isinstance(total, int):
@@ -295,6 +306,7 @@ def main() -> int:
             cursor_updates.append({
                 "lane": lane["id"],
                 "page": next_page,
+                "offset": next_offset,
                 "exhausted": next_page == 1 and start_page != 1,
                 "observed": observed,
             })
@@ -314,6 +326,8 @@ def main() -> int:
     candidates, bad_ports = partition_by_allowed_port(candidates, LANES)
     candidates, bad_provenance = partition_by_provenance(candidates, {})
     candidates, bad_authority = partition_by_durable_authority(candidates)
+    # allocate_lane_limits() bounded the sum before collection. This slice is a
+    # final invariant, not the mechanism that decides which lane loses its tail.
     candidates = candidates[: args.max_total]
     print(
         f"[+] passive nomination gates: eligible={len(candidates)} "
@@ -387,6 +401,7 @@ def main() -> int:
             "source_budget_enforced": True,
             "source_units_consumed": source_budget.consumed,
             "source_key_slot": active_key_slot,
+            "lane_candidate_limits": lane_limits,
             "mode": "durable_public_index_nomination",
         },
     }

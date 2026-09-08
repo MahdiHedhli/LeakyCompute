@@ -1174,18 +1174,34 @@ export async function getLaneCursors(env) {
   return (await env.KV.get(CURSOR_KEY, "json")) || {};
 }
 
-export async function setLaneCursor(env, lane, { page, exhausted = false, observed = 0 }) {
-  if (!env.KV || !lane) return null;
+export async function setLaneCursors(env, updates = []) {
+  if (!env.KV) return [];
   const all = (await env.KV.get(CURSOR_KEY, "json")) || {};
-  const p = Number(page);
-  all[lane] = {
-    page: Number.isFinite(p) && p >= 1 ? Math.floor(p) : 1,
-    exhausted: !!exhausted,
-    observed_last_run: Number(observed) || 0,
-    updated_at: new Date().toISOString(),
-  };
-  await env.KV.put(CURSOR_KEY, JSON.stringify(all));
-  return all[lane];
+  const saved = [];
+  const updatedAt = new Date().toISOString();
+  for (const update of Array.isArray(updates) ? updates.slice(0, 100) : []) {
+    const lane = String(update?.lane || "").trim();
+    if (!lane) continue;
+    const p = Number(update.page);
+    const o = Number(update.offset);
+    all[lane] = {
+      page: Number.isFinite(p) && p >= 1 ? Math.floor(p) : 1,
+      offset: Number.isFinite(o) && o >= 0 ? Math.floor(o) : 0,
+      exhausted: !!update.exhausted,
+      observed_last_run: Number(update.observed) || 0,
+      updated_at: updatedAt,
+    };
+    saved.push(all[lane]);
+  }
+  // One batch is one KV write. Writing once per lane consumed scarce daily
+  // allowance without creating a stronger cursor guarantee.
+  if (saved.length) await env.KV.put(CURSOR_KEY, JSON.stringify(all));
+  return saved;
+}
+
+export async function setLaneCursor(env, lane, update = {}) {
+  const saved = await setLaneCursors(env, [{ lane, ...update }]);
+  return saved[0] || null;
 }
 
 /* ------------------------------------------------------------------ */

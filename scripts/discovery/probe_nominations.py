@@ -31,13 +31,18 @@ def main() -> int:
     with open(args.manifest, encoding="utf-8") as handle:
         manifest = json.load(handle)
     ids = manifest.get("nomination_ids") or []
-    if not isinstance(ids, list) or not ids or len(ids) > HARD_MAX_TOTAL:
-        raise SystemExit("invalid or empty nomination manifest")
+    if not isinstance(ids, list) or len(ids) > HARD_MAX_TOTAL:
+        raise SystemExit("invalid nomination manifest")
+    if not all(isinstance(value, str) and value for value in ids):
+        raise SystemExit("invalid nomination identifiers")
 
     limiter = GlobalRateLimiter(min(args.rate, RUNNER_MAX_RATE))
     results = []
     skipped = Counter()
-    print(f"[*] Probing up to {len(ids)} immutable nomination(s) @ {min(args.rate, RUNNER_MAX_RATE)}/s")
+    if ids:
+        print(f"[*] Probing up to {len(ids)} immutable nomination(s) @ {min(args.rate, RUNNER_MAX_RATE)}/s")
+    else:
+        print("[*] No opaque nominations were accepted; completing as a safe no-op")
     for position, nomination_id in enumerate(ids, 1):
         limiter.wait()
         lease_status, lease = http_json(
@@ -75,12 +80,26 @@ def main() -> int:
         )
 
     exposed = [result for result in results if result.get("outcome") == "exposed"]
+    outcome_counts = Counter(str(result.get("outcome") or "unknown") for result in results)
+    error_class_counts = Counter(
+        str(result.get("error_class"))
+        for result in results
+        if result.get("error_class")
+    )
+    platform_errors_by_lane = Counter(
+        str(result.get("stack") or "unknown")
+        for result in results
+        if result.get("error_class") == "platform_error"
+    )
     meta = {
         **(manifest.get("meta") or {}),
         "leased_count": len(results),
         "skipped_count": sum(skipped.values()),
         "skipped_reasons": dict(skipped),
         "exposed_count": len(exposed),
+        "outcome_counts": dict(outcome_counts),
+        "error_class_counts": dict(error_class_counts),
+        "platform_errors_by_lane": dict(platform_errors_by_lane),
         "rate": min(args.rate, RUNNER_MAX_RATE),
     }
     with open(args.output, "w", encoding="utf-8") as handle:
@@ -90,6 +109,8 @@ def main() -> int:
         f"[+] governed results: nominated={len(ids)} leased={len(results)} "
         f"skipped={sum(skipped.values())} exposed={len(exposed)}"
     )
+    print(f"[+] aggregate outcomes: {dict(outcome_counts)}")
+    print(f"[+] aggregate error classes: {dict(error_class_counts)}")
     if args.ingest and (results or meta.get("indexed_observed") is not None):
         ingest(args.api_base, args.admin_token, results, meta)
     return 0

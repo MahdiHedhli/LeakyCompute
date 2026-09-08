@@ -7,8 +7,9 @@
 ## Context
 
 The former paid-plan setting permitted up to 10 result pages per lane. With every
-reviewed lane covered once by the daily shards and again by the pre-reset
-catch-up, that is intentionally a transitional burn-down configuration. It is
+reviewed lane covered once by the daily shards and again by bounded pre-reset
+catch-up waves, that is intentionally a transitional burn-down configuration.
+It is
 not an acceptable steady state for a monthly-limited account.
 
 Per-lane cursors already prevent ordinary runs from buying the same first page
@@ -30,14 +31,15 @@ month-scoped source-credit ledger:
    ledger cannot be read or the reservation cannot be committed, make no
    provider request.
 2. Configure a conservative monthly ceiling and a separate reserve without
-   committing either API key. The late daily run is bounded by both remaining
+   committing either API key. Every late daily wave is bounded by both remaining
    Shodan credits and remaining Workers KV capacity.
-3. Replace the fixed 10-page production behavior with one-page cursor-based
+3. Replace the fixed 10-page production behavior with one-page page-and-offset
    slices. Each regular shard buys only its assigned incremental slice. The
-   pre-reset run may use unused daily capacity but cannot exceed the remaining
-   monthly source budget.
-4. Persist one cursor per lane and advance it only after that lane's accepted
-   response and cursor update commit. A failed passive lane retains its page.
+   pre-reset waves may use unused daily capacity but cannot exceed the remaining
+   monthly source budget or run inside the final 90 minutes before KV reset.
+4. Persist one cursor per lane and advance its page only after every selected
+   row on that page is processed and the cursor update commits. A failed passive
+   lane retains its page and offset.
 5. Keep one shared credit ledger across the primary and secondary credentials.
    Changing credentials never creates a second budget.
 
@@ -77,6 +79,8 @@ month-scoped source-credit ledger:
    `SHODAN_SECONDARY_FAILOVER_ENABLED=false` and the secret is unset.
 7. Tests verify pre-request accounting, retry charging, monthly pacing, route
    isolation, and refusal to fail over for rate limits.
+8. Cursor batches use one KV write, run capacity is allocated fairly before
+   collection, and an empty accepted set completes as a target-free no-op.
 
 Before changing the production Shodan tier or enabling the secondary, confirm
 the current allowance, charging rules, and multi-credential terms from Shodan's

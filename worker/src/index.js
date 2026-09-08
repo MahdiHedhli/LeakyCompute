@@ -53,7 +53,7 @@ import {
   listExpiringHosts,
   retireUnreachableHost,
   getLaneCursors,
-  setLaneCursor,
+  setLaneCursors,
   FINAL_VERIFY_DAYS,
   purgeExcluded,
   getProbeAttempts,
@@ -1678,15 +1678,7 @@ async function handleSetCursor(request, env) {
     return json({ error: "invalid_json" }, 400, request, env);
   }
   const updates = Array.isArray(body.cursors) ? body.cursors : [body];
-  const out = [];
-  for (const u of updates.slice(0, 100)) {
-    if (!u || !u.lane) continue;
-    out.push(await setLaneCursor(env, String(u.lane), {
-      page: u.page,
-      exhausted: u.exhausted,
-      observed: u.observed,
-    }));
-  }
+  const out = await setLaneCursors(env, updates);
   return json({ ok: true, updated: out.filter(Boolean).length, cursors: out }, 200, request, env);
 }
 
@@ -1708,15 +1700,7 @@ async function handleSetNominatorCursor(request, env) {
     return json({ error: "invalid_json" }, 400, request, env);
   }
   const updates = Array.isArray(body.cursors) ? body.cursors : [body];
-  const out = [];
-  for (const u of updates.slice(0, 100)) {
-    if (!u || !u.lane) continue;
-    out.push(await setLaneCursor(env, String(u.lane), {
-      page: u.page,
-      exhausted: u.exhausted,
-      observed: u.observed,
-    }));
-  }
+  const out = await setLaneCursors(env, updates);
   return json({ ok: true, updated: out.filter(Boolean).length, cursors: out }, 200, request, env);
 }
 

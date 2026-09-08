@@ -13,10 +13,12 @@ on:
     - cron: "43 9 * * *"
     - cron: "43 13 * * *"
     - cron: "43 17 * * *"
-    # Final all-lane catch-up pass has a wide buffer before the 00:00 UTC KV
-    # reset because GitHub documents that scheduled events can be delayed. Its
-    # packet-free preflight sizes it from remaining KV headroom.
+    # Three bounded all-lane catch-up waves use otherwise stranded daily
+    # headroom. Every wave repeats packet-free strong-state and budget preflight;
+    # a delayed wave without 90 minutes before reset skips safely.
     - cron: "13 18 * * *"
+    - cron: "23 18 * * *"
+    - cron: "33 18 * * *"
   workflow_dispatch:
     inputs:
       max_total:
@@ -76,7 +78,7 @@ jobs:
               REQUESTED_MAX=128
               LANES="openai_compat_8080,gradio,mlflow"
               ;;
-            "13 18 * * *")
+            "13 18 * * *"|"23 18 * * *"|"33 18 * * *")
               REQUESTED_MAX=425
               LANES="all"
               ;;
@@ -157,6 +159,23 @@ jobs:
           SAFE_MAX=$(jq -r '.recommended_max_candidates | floor' "$BUDGET_FILE")
           if [ "$SAFE_MAX" -lt "$REQUESTED_MAX" ]; then MAX_TOTAL="$SAFE_MAX"; else MAX_TOTAL="$REQUESTED_MAX"; fi
           jq '{used, budget, remaining, reserve, recommended_max_candidates, reset_at}' "$BUDGET_FILE"
+          RESET_AT=$(jq -r '.reset_at' "$BUDGET_FILE")
+          RESET_EPOCH=$(date -u -d "$RESET_AT" +%s 2>/dev/null || true)
+          NOW_EPOCH=$(date -u +%s)
+          if [ -z "$RESET_EPOCH" ] || [ "$RESET_EPOCH" -le "$NOW_EPOCH" ]; then
+            echo "KV reset boundary is invalid or already passed; skipping before index access or target traffic."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "max_total=0" >> "$GITHUB_OUTPUT"
+            echo "lanes=$LANES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ $((RESET_EPOCH - NOW_EPOCH)) -lt 5400 ]; then
+            echo "Less than 90 minutes remain before KV reset; skipping this delayed wave before index access or target traffic."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "max_total=0" >> "$GITHUB_OUTPUT"
+            echo "lanes=$LANES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$MAX_TOTAL" -lt 1 ]; then
             echo "No safe KV headroom remains; skipping before index access or target traffic."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -288,7 +307,7 @@ jobs:
           {
             echo "### Discovery run"
             echo '```'
-            grep -E 'Probing up to|SKIP:|governed results:|ingest batch ok' \
+            grep -E 'No opaque nominations|Probing up to|SKIP:|governed results:|aggregate outcomes:|aggregate error classes:|ingest batch ok' \
               discovery-run.log 2>/dev/null || echo "(no log captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

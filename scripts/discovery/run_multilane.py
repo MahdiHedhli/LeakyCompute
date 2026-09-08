@@ -249,6 +249,32 @@ def spread_by_bucket(cands: list[dict]) -> list[dict]:
     return out
 
 
+def allocate_lane_limits(lanes: list[dict], max_total: int) -> dict[str, int]:
+    """Share a run envelope fairly without exceeding any lane's reviewed cap.
+
+    Allocating before source collection is what lets each lane advance its own
+    page offset only for rows that fit inside this run. A global slice after
+    collection would silently strand the tail of whichever lane came last.
+    """
+    limits = {str(lane["id"]): 0 for lane in lanes}
+    remaining = max(0, int(max_total))
+    while remaining:
+        progressed = False
+        for lane in lanes:
+            lane_id = str(lane["id"])
+            cap = max(0, int(lane.get("max_hosts", 0)))
+            if limits[lane_id] >= cap:
+                continue
+            limits[lane_id] += 1
+            remaining -= 1
+            progressed = True
+            if remaining == 0:
+                break
+        if not progressed:
+            break
+    return limits
+
+
 def fetch_hits(api_base: str, token: str, limit: int = 500) -> list[dict]:
     """
     Read the admin hit store: the corpus, and the last-seen clock behind I-24.
@@ -727,14 +753,18 @@ def collect_lane(
     lane: dict,
     start_page: int = 1,
     *,
+    start_offset: int = 0,
+    candidate_limit: int | None = None,
     pages_per_run: int = PAGES_PER_RUN,
     budget_consumer=None,
-) -> tuple[list[dict], int, int, int | None]:
+) -> tuple[list[dict], int, int, int | None, int]:
     """
-    Returns (candidates, indexed_observed, next_page).
+    Returns (candidates, indexed_observed, next_page, lane_total, next_offset).
 
-    next_page is the lane's Shodan cursor. Without it every run re-bought the
-    same first page: the corpus stopped growing while the quota still drained.
+    The page+offset pair is the lane's Shodan cursor. A page can contain more
+    rows than the lane may nominate in one run; keeping the page fixed until
+    its remaining rows have been processed prevents that tail from being
+    silently skipped.
 
     The second number is spec §4's middle column: unique hosts this lane's
     public-index query listed, before `max_hosts` cut the set down to what we
@@ -765,7 +795,7 @@ def collect_lane(
             group_start = 0
             selected_asns = top_asns[:ASN_GROUPS_PER_RUN]
         exhausted_group = group_start + len(selected_asns) >= len(top_asns)
-        next_page = 1 if exhausted_group else start_page + 1
+        provider_next_page = 1 if exhausted_group else start_page + 1
         for row in selected_asns:
             asn = row["asn"]
             # A provider or strong-budget failure invalidates the lane. Do not
@@ -816,7 +846,7 @@ def collect_lane(
             for m in sample:
                 cands.append(match_to_candidate(m, lane))
     else:
-        matches, facets, next_page, lane_total = shodan_search(
+        matches, facets, provider_next_page, lane_total = shodan_search(
             api_key,
             lane["query"],
             limit=lane.get("search_limit", 30),
@@ -842,11 +872,31 @@ def collect_lane(
             for field in ("country", "country_code", "city", "asn", "org", "product"):
                 if c.get(field) and not prev.get(field):
                     prev[field] = c[field]
-    observed = len(by_key)
-    out = list(by_key.values())[: lane.get("max_hosts", 40)]
+    page_candidates = list(by_key.values())
+    observed = len(page_candidates)
+    try:
+        offset = max(0, int(start_offset))
+    except (TypeError, ValueError):
+        offset = 0
+    if offset > observed:
+        # Upstream indexes are live. If a page shrinks between reads, repeating
+        # from its beginning can duplicate work but cannot skip a surviving row.
+        print("  saved page offset exceeded the current page; restarting this page")
+        offset = 0
+    lane_cap = max(0, int(lane.get("max_hosts", 40)))
+    if candidate_limit is not None:
+        lane_cap = min(lane_cap, max(0, int(candidate_limit)))
+    out = page_candidates[offset : offset + lane_cap]
+    consumed_to = offset + len(out)
+    if consumed_to < observed:
+        next_page = start_page
+        next_offset = consumed_to
+    else:
+        next_page = provider_next_page
+        next_offset = 0
     print(
         f"  unique candidates this lane: {len(out)} (indexed, observed: {observed})"
-        f" · pages {start_page}->{next_page}"
+        f" · cursor {start_page}:{offset}->{next_page}:{next_offset}"
     )
     # Three different numbers, deliberately not collapsed:
     #   len(out)     what we are willing to probe   (max_hosts)
@@ -854,7 +904,7 @@ def collect_lane(
     #   lane_total   what the index says exists      (free, arrives with the page)
     # Only the third is a measurement of the exposed population; the other two
     # measure our own budget.
-    return out, observed, next_page, lane_total
+    return out, observed, next_page, lane_total, next_offset
 
 
 def public_index_publication_meta(
@@ -1383,9 +1433,11 @@ def main() -> int:
     lane_failures: list[str] = []
     for lane in lanes:
         try:
-            start_page = int((cursors.get(lane["id"]) or {}).get("page") or 1)
-            lane_cands, lane_observed, next_page, lane_total = collect_lane(
-                args.shodan_key, lane, start_page
+            lane_cursor = cursors.get(lane["id"]) or {}
+            start_page = int(lane_cursor.get("page") or 1)
+            start_offset = int(lane_cursor.get("offset") or 0)
+            lane_cands, lane_observed, next_page, lane_total, next_offset = collect_lane(
+                args.shodan_key, lane, start_page, start_offset=start_offset
             )
             all_cands.extend(lane_cands)
             indexed_observed += lane_observed
@@ -1396,6 +1448,7 @@ def main() -> int:
                 {
                     "lane": lane["id"],
                     "page": next_page,
+                    "offset": next_offset,
                     "exhausted": next_page == 1 and start_page != 1,
                     "observed": lane_observed,
                 }

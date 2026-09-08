@@ -293,3 +293,20 @@ churn. The earlier time provides a wide buffer for GitHub schedule delays after
 an observed 22:13 pass crossed the 00:00 UTC reset. A manual 425-candidate
 envelope is committed through four serialized transactions of
 `128 + 128 + 128 + 41`; no transaction boundary was widened.
+
+## 2026-09-08 backlog and catch-up correction
+
+A multi-day production audit found that successful search lanes advanced their
+page cursor after retaining only the lane's per-run candidate slice. Rows in the
+unselected page tail could therefore be skipped indefinitely. Search lanes now
+persist a page offset and do not advance the provider page until the retained
+tail has been processed. The run envelope is allocated fairly before collection,
+and cursor batches consume one KV write rather than one write per lane.
+
+The pre-reset catch-up is now three bounded all-lane waves at 18:13, 18:23, and
+18:33 UTC. Each repeats strong control-plane, paced-source, and KV-budget checks;
+a delayed wave with less than 90 minutes before reset skips before index access
+or target traffic. Empty or fully rejected nomination sets produce an empty
+opaque manifest and a successful target-free no-op. Aggregate-only outcome,
+skip, error-class, and contained platform-error counts are retained for
+operations without exposing target details.

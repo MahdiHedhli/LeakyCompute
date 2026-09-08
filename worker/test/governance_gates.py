@@ -34,6 +34,7 @@ import provenance as P  # noqa: E402
 import run_multilane as R  # noqa: E402
 import discover as D  # noqa: E402
 import nominate_public_index as N  # noqa: E402
+import probe_nominations as Q  # noqa: E402
 
 FAILURES = 0
 
@@ -765,7 +766,7 @@ def _secondary_key_is_break_glass_not_quota_extension():
         calls.append(key)
         if key == "primary":
             raise D.ShodanRequestError("authentication_rejected", 1)
-        return [], 0, 1, 0
+        return [], 0, 1, 0, 0
 
     try:
         N.collect_lane = fake_collect
@@ -782,7 +783,7 @@ def _secondary_key_is_break_glass_not_quota_extension():
     finally:
         N.collect_lane = original_collect
 
-    assert result == ([], 0, 1, 0), result
+    assert result == ([], 0, 1, 0, 0), result
     assert slot == "secondary", slot
     assert calls == ["primary", "secondary"], calls
 
@@ -928,7 +929,7 @@ def _scheduled_nomination_isolates_failed_lane():
                 ip="8.8.8.14", asn="AS64496", port=11434,
             ),
         )
-        return [candidate], 1, 2, 10
+        return [candidate], 1, 2, 10, 0
 
     def fake_cursor(_base, _token, method="GET", data=None):
         if method == "GET":
@@ -984,6 +985,69 @@ check(
 )
 
 
+def _page_offset_preserves_every_retrieved_candidate():
+    original_search = R.shodan_search
+    lane = next(lane for lane in R.LANES if lane["id"] == "jupyter")
+    matches = [
+        {
+            "ip_str": f"192.0.2.{n}",
+            "port": 8888,
+            "asn": "AS64496",
+            "timestamp": iso(0),
+            "location": {"country_code": "ZZ"},
+        }
+        for n in range(1, 101)
+    ]
+
+    def fake_search(*_args, **_kwargs):
+        return matches, {}, 2, 100
+
+    try:
+        R.shodan_search = fake_search
+        first = R.collect_lane(
+            "test", lane, 1, start_offset=0, candidate_limit=30, pages_per_run=1
+        )
+        second = R.collect_lane(
+            "test", lane, 1, start_offset=30, candidate_limit=30, pages_per_run=1
+        )
+        third = R.collect_lane(
+            "test", lane, 1, start_offset=60, candidate_limit=40, pages_per_run=1
+        )
+    finally:
+        R.shodan_search = original_search
+
+    assert (first[2], first[4]) == (1, 30), first
+    assert (second[2], second[4]) == (1, 60), second
+    assert (third[2], third[4]) == (2, 0), third
+    emitted = [row["ip"] for result in (first, second, third) for row in result[0]]
+    assert emitted == [row["ip_str"] for row in matches], emitted
+
+
+check(
+    "page+offset cursors retain the tail until every retrieved row is processed",
+    _page_offset_preserves_every_retrieved_candidate,
+)
+
+
+def _lane_envelope_is_allocated_fairly():
+    lanes = [
+        {"id": "a", "max_hosts": 48},
+        {"id": "b", "max_hosts": 40},
+        {"id": "c", "max_hosts": 30},
+        {"id": "d", "max_hosts": 20},
+    ]
+    limits = R.allocate_lane_limits(lanes, 128)
+    assert sum(limits.values()) == 128, limits
+    assert all(limits[lane["id"]] <= lane["max_hosts"] for lane in lanes), limits
+    assert all(limits[lane["id"]] > 0 for lane in lanes), limits
+
+
+check(
+    "the run envelope is shared across lanes before any page cursor advances",
+    _lane_envelope_is_allocated_fairly,
+)
+
+
 def _nomination_envelope_uses_bounded_transactions():
     original_http = N.http_json
     sizes = []
@@ -1017,6 +1081,102 @@ def _nomination_envelope_uses_bounded_transactions():
 check(
     "a 425-candidate envelope is committed as 128 + 128 + 128 + 41",
     _nomination_envelope_uses_bounded_transactions,
+)
+
+
+def _empty_nomination_is_a_successful_noop():
+    original_http = N.http_json
+    calls = []
+
+    def forbidden_http(*_args, **_kwargs):
+        calls.append(True)
+        raise AssertionError("an empty envelope called the control plane")
+
+    try:
+        N.http_json = forbidden_http
+        ids, rejected = N.commit_nomination_batches(
+            "https://api.invalid", "test-token", []
+        )
+    finally:
+        N.http_json = original_http
+
+    assert ids == []
+    assert rejected == 0
+    assert calls == []
+
+
+check("an empty nomination envelope is a safe no-op", _empty_nomination_is_a_successful_noop)
+
+
+def _all_rejected_nomination_is_a_safe_noop():
+    original_http = N.http_json
+
+    def reject_all(_url, **kwargs):
+        rejected = [
+            {"error": "invalid_public_index_nomination"}
+            for _row in kwargs["data"]["nominations"]
+        ]
+        return 200, {"ok": False, "created": [], "rejected": rejected}
+
+    try:
+        N.http_json = reject_all
+        ids, rejected = N.commit_nomination_batches(
+            "https://api.invalid", "test-token", [{"candidate": 1}, {"candidate": 2}]
+        )
+    finally:
+        N.http_json = original_http
+
+    assert ids == []
+    assert rejected == 2
+
+
+check(
+    "an authoritatively all-rejected envelope is a safe no-op",
+    _all_rejected_nomination_is_a_safe_noop,
+)
+
+
+def _empty_probe_manifest_publishes_observation_only_meta():
+    original_argv = sys.argv
+    original_ingest = Q.ingest
+    captured = []
+    try:
+        Q.ingest = lambda base, token, results, meta: captured.append(
+            (base, token, results, meta)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = os.path.join(tmp, "manifest.json")
+            output_path = os.path.join(tmp, "run.json")
+            with open(manifest_path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "nomination_ids": [],
+                    "meta": {"indexed_observed": 123, "zero_work": True},
+                }, handle)
+            sys.argv = [
+                "probe_nominations.py",
+                "--api-base", "https://api.invalid",
+                "--admin-token", "test-token",
+                "--manifest", manifest_path,
+                "--output", output_path,
+                "--ingest",
+            ]
+            assert Q.main() == 0
+            with open(output_path, encoding="utf-8") as handle:
+                result = json.load(handle)
+    finally:
+        Q.ingest = original_ingest
+        sys.argv = original_argv
+
+    assert result["results"] == []
+    assert result["meta"]["leased_count"] == 0
+    assert len(captured) == 1
+    assert captured[0][2] == []
+    assert captured[0][3]["indexed_observed"] == 123
+
+
+check(
+    "an empty probe manifest exits cleanly and can publish a complete census",
+    _empty_probe_manifest_publishes_observation_only_meta,
 )
 
 

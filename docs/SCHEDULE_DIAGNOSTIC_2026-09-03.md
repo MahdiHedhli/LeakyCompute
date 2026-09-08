@@ -93,8 +93,108 @@ and triggered the public-site deployment.
 
 ## Limitations and follow-up
 
-One day of delay observations is enough to prove that 22:13 is unsafe, but not
-to characterize GitHub's long-run delay distribution. Monitor actual versus
-nominal start time for seven days. If an 18:13 catch-up ever crosses reset, move
-the trigger outside GitHub Actions or add an independent scheduler rather than
-weakening the budget or safety gates.
+Four complete days now confirm that GitHub's schedule delay is persistent, not
+an isolated event. The largest observed delay was 5h 31m. The 18:13 catch-up
+still completed before the 00:00 UTC reset on every complete day reviewed, but
+the remaining margin is not large enough to treat the trigger as a deadline. If
+the catch-up begins crossing reset, move it outside GitHub Actions or add an
+independent scheduler rather than weakening the budget or safety gates.
+
+## Multi-day operations review — 4–8 September 2026 UTC
+
+### Result
+
+Governed discovery is running, ingestion is advancing, and the public counter
+pipeline is current. From the 4 September post-repair baseline to the 8
+September review, public-index observations increased from 21,970 to 22,397,
+rolling retained hosts increased from 1,479 to 1,611, and exposure pairs
+increased from 1,484 to 1,620. The social preview displays the same 19,348
+archive, 22,397 public-index, and 1,611 rolling re-verification values.
+
+Across all repository workflows from 4 September through the review, CI,
+public-site deployment, the lab gate, social-preview refresh, and dependency
+maintenance had no failed runs. Governed discovery had one failed run followed
+by a successful all-lane recovery; every other governed-discovery run
+completed successfully.
+
+### Daily governed-discovery throughput
+
+The 8 September row is partial because only the first two delayed scheduled
+runs had started when this review closed.
+
+| UTC date | Successful scheduled runs | Nominated | Leased | Exposure outcomes | Final exact KV use | Shodan source units |
+|---|---:|---:|---:|---:|---:|---:|
+| 5 Sep | 5/5 | 474 | 123 | 48 | 149/990 | 36 |
+| 6 Sep | 5/5 | 447 | 145 | 30 | 173/990 | 36 |
+| 7 Sep | 5/5 | 432 | 136 | 32 | 165/990 | 36 |
+| 8 Sep, partial | 2/2 | 141 | 64 | 12 | 44/990 before the second run | 12 |
+
+The 5–7 September catch-ups completed with 82.5%–84.9% of the configured KV
+allowance unused. Raising only the probe ceiling will not consume that headroom:
+the nominator currently supplies roughly 200 candidates to a complete all-lane
+pass, and the strong control plane correctly rejects many of them under the
+14-day host interval and rate gates.
+
+### One safe zero-work run was reported as a failure
+
+The only governed-discovery failure in the review window occurred on 4
+September when three passive lanes completed successfully but no candidate
+survived the provenance and authority gates. No target traffic was authorized.
+The workflow then treated the empty durable nomination set as an exception.
+The next all-lane catch-up succeeded. This is fail-closed and safe, but it is a
+false operational alarm: a healthy zero-work shard should commit its successful
+cursors, publish any permitted observation-only aggregate, and exit as a
+successful no-op.
+
+Evidence: [zero-work failure](https://github.com/MahdiHedhli/LeakyCompute/actions/runs/33913341645),
+[recovery catch-up](https://github.com/MahdiHedhli/LeakyCompute/actions/runs/33917561879).
+
+### Shodan traversal is not yet a lossless backlog
+
+Every lane completed at least one page-cursor cycle by 6 September, but this
+does **not** mean the candidate list is complete. Search lanes can pull up to
+100 rows from a page and retain only their 20–40 candidate lane ceiling before
+advancing the page cursor. A complete 7 September all-lane run pulled 936 rows
+but committed 198 candidates. Depending on stable result ordering, rows beyond
+the per-lane slice may never be durably queued.
+
+For that reason, neither 1,611 divided by 22,397 nor cursor wrap count is a
+valid completion percentage. The public-index total is overlapping per-lane
+observations; the retained count is deduplicated distinct hosts; and the
+current cursor is a sampled traversal rather than a lossless work ledger. The
+present system can report that one sampled sweep completed, but it cannot yet
+state how close it is to exhausting the Shodan candidate set.
+
+The longest current lane has advanced through approximately five of 20 pages
+in its new cycle. At the observed two passes per day it should wrap again in
+roughly seven to eight days, but that wrap remains a sampling milestone rather
+than backlog completion.
+
+### Recommended repairs and optimizations
+
+1. Make a successful empty nomination manifest a successful no-op while
+   preserving fail-closed lane, cursor, and authorization behavior.
+2. Replace page-only progress with a durable page-and-offset cursor or candidate
+   queue. Do not advance a source page until every eligible row on it has been
+   durably queued; persist an offset when a ceiling cuts through a page.
+3. Allocate nominations fairly across lanes so a high-volume early lane cannot
+   starve later lanes.
+4. Let the final daily catch-up execute additional bounded waves. Before each
+   wave, re-read the strong KV and paced-source ledgers and stop on the first of:
+   the safety reserve, source budget, empty queue, or an operational wall-clock
+   limit. This makes unused daily allowance recoverable without weakening the
+   per-target controls.
+5. Add aggregate-only counts for contained platform errors and deferred retries
+   to the run summary. The reviewed period saw one or two contained platform
+   errors in several catch-ups, none in the two latest runs; they did not abort
+   other lanes.
+6. Keep monitoring actual schedule delay. The schedule delivered all five
+   expected runs on 5, 6, and 7 September, but start delays ranged from roughly
+   1h 47m to 5h 31m.
+
+The social-preview hook is functioning as designed. It produced 35 successful
+refreshes and 35 successful public deployments in the review window, plus 22
+counter-only commits after the prior production baseline. Coalescing these into
+fewer deployments could reduce Actions and history churn, but it is lower
+priority than making source traversal lossless and would change the current
+update-on-counter-change behavior.

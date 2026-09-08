@@ -3,9 +3,10 @@
 **Current status:** passive reports, index comparisons, local-container
 validation, and dry-run governance plans are available. Governed verification
 runs every day through four lane-sharded passes capped at 128 candidates, then
-an all-lane catch-up pass at 18:13 UTC sized from the remaining Workers KV
-allowance. Schema 3, the split nomination/probe roles, an address-pinned
-operator-owned canary, and capped production runs passed re-certification. The
+three bounded all-lane catch-up waves at 18:13, 18:23, and 18:33 UTC sized from
+the remaining Workers KV allowance. Schema 3, the split nomination/probe roles,
+an address-pinned operator-owned canary, and capped production runs passed
+re-certification. The
 runner cannot open a target socket: only the API Worker's pinned runtime can do
 so after the Durable Object commits and consumes a one-time permit. The
 authoritative order is [`ROADMAP.md`](ROADMAP.md).
@@ -26,15 +27,25 @@ address-level data. The probe job can lease those IDs but cannot create or
 alter a nomination.
 
 The four regular shards cover every reviewed lane once per day. Each lane owns
-its cursor: a successful shard advances only its completed lanes, while a failed
-lane advances nothing. The final all-lane pass therefore retries missed pages
-and uses safe remaining capacity before the 00:00 UTC reset. Its early nominal
-time leaves room for GitHub's documented schedule delays; a 22:13 nominal pass
-was observed starting after the reset and was retired. The supporting run audit
+a page-and-offset cursor: a successful shard advances only the rows processed
+by that lane, while a failed lane advances nothing. The run envelope is shared
+fairly across lanes before collection, so the last lane cannot lose a page tail
+to a global slice. Three all-lane waves then retry missed pages and use safe
+remaining capacity before the 00:00 UTC reset. Every wave repeats strong-state,
+source-budget, and KV-budget preflight; it skips without index or target traffic
+when less than 90 minutes remain. The early nominal times leave room for GitHub's
+documented schedule delays; a 22:13 nominal pass was observed starting after the
+reset and was retired. The supporting run audit
 is in [`SCHEDULE_DIAGNOSTIC_2026-09-03.md`](SCHEDULE_DIAGNOSTIC_2026-09-03.md).
 Manual runs may request a 425-candidate envelope; the nominator commits it as
 four serialized transactions of `128 + 128 + 128 + 41`, never as one widened
 transaction.
+
+An empty post-gate or authoritatively rejected nomination set is a healthy
+zero-work result. Its completed lane cursors are committed, a complete all-lane
+census may still publish, and the probe job exits successfully without target
+traffic. Public-safe summaries report only aggregate outcome, skip, and error
+class counts.
 
 Scheduled search lanes now use `PAGES_PER_RUN=1`; ASN lanes rotate across two
 provider groups per invocation. Before every Shodan request or retry, the

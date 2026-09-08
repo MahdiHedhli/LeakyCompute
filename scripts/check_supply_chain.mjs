@@ -75,7 +75,15 @@ for (const file of workflowFiles) {
   }
 }
 
-for (const cron of ["43 5 * * *", "43 9 * * *", "43 13 * * *", "43 17 * * *", "13 18 * * *"]) {
+for (const cron of [
+  "43 5 * * *",
+  "43 9 * * *",
+  "43 13 * * *",
+  "43 17 * * *",
+  "13 18 * * *",
+  "23 18 * * *",
+  "33 18 * * *",
+]) {
   if (!discoveryWorkflow.includes(`cron: "${cron}"`)) {
     fail(`scheduled discovery is missing reviewed daily pass: ${cron}`);
   }
@@ -145,8 +153,9 @@ const flattenedLanes = reviewedLaneShards.flatMap((shard) => shard.split(","));
 if (new Set(flattenedLanes).size !== flattenedLanes.length) {
   fail("scheduled discovery lane shards must not overlap");
 }
-if (!/"13 18 \* \* \*"\)[\s\S]*?REQUESTED_MAX=425[\s\S]*?LANES="all"/.test(discoveryWorkflow)) {
-  fail("scheduled discovery must retain the reviewed all-lane pre-reset catch-up");
+if (!/"13 18 \* \* \*"\|"23 18 \* \* \*"\|"33 18 \* \* \*"\)[\s\S]*?REQUESTED_MAX=425[\s\S]*?LANES="all"/.test(discoveryWorkflow) ||
+    !/RESET_EPOCH - NOW_EPOCH\)\) -lt 5400/.test(discoveryWorkflow)) {
+  fail("scheduled discovery must retain three bounded all-lane pre-reset catch-up waves");
 }
 
 if (!/^HARD_MAX_TOTAL = 425$/m.test(discoveryRunner)) {
