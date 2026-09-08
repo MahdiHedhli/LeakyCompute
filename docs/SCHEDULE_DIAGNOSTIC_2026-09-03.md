@@ -149,7 +149,7 @@ successful no-op.
 Evidence: [zero-work failure](https://github.com/MahdiHedhli/LeakyCompute/actions/runs/33913341645),
 [recovery catch-up](https://github.com/MahdiHedhli/LeakyCompute/actions/runs/33917561879).
 
-### Shodan traversal is not yet a lossless backlog
+### Pre-repair Shodan traversal was not a lossless backlog
 
 Every lane completed at least one page-cursor cycle by 6 September, but this
 does **not** mean the candidate list is complete. Search lanes can pull up to
@@ -158,39 +158,49 @@ advancing the page cursor. A complete 7 September all-lane run pulled 936 rows
 but committed 198 candidates. Depending on stable result ordering, rows beyond
 the per-lane slice may never be durably queued.
 
-For that reason, neither 1,611 divided by 22,397 nor cursor wrap count is a
-valid completion percentage. The public-index total is overlapping per-lane
-observations; the retained count is deduplicated distinct hosts; and the
-current cursor is a sampled traversal rather than a lossless work ledger. The
-present system can report that one sampled sweep completed, but it cannot yet
-state how close it is to exhausting the Shodan candidate set.
+For that reason, neither 1,611 divided by 22,397 nor the pre-repair cursor wrap
+count is a valid completion percentage. The public-index total is overlapping
+per-lane observations and the retained count is deduplicated distinct hosts.
+The old cursor could report that one sampled sweep completed, but it could not
+state how close the project was to exhausting the Shodan candidate set.
 
-The longest current lane has advanced through approximately five of 20 pages
-in its new cycle. At the observed two passes per day it should wrap again in
-roughly seven to eight days, but that wrap remains a sampling milestone rather
-than backlog completion.
+At the repair baseline, the longest lane had advanced through approximately
+five of 20 pages in its new cycle. Completion estimates should restart only
+after an offset-aware cycle proves that every retrieved page tail was processed.
 
-### Recommended repairs and optimizations
+### Repairs implemented and verified on 8 September
 
-1. Make a successful empty nomination manifest a successful no-op while
+1. A successful empty nomination manifest is now a successful no-op while
    preserving fail-closed lane, cursor, and authorization behavior.
-2. Replace page-only progress with a durable page-and-offset cursor or candidate
-   queue. Do not advance a source page until every eligible row on it has been
-   durably queued; persist an offset when a ceiling cuts through a page.
-3. Allocate nominations fairly across lanes so a high-volume early lane cannot
-   starve later lanes.
-4. Let the final daily catch-up execute additional bounded waves. Before each
-   wave, re-read the strong KV and paced-source ledgers and stop on the first of:
-   the safety reserve, source budget, empty queue, or an operational wall-clock
-   limit. This makes unused daily allowance recoverable without weakening the
-   per-target controls.
-5. Add aggregate-only counts for contained platform errors and deferred retries
-   to the run summary. The reviewed period saw one or two contained platform
+2. Page-only progress is now a page-and-offset cursor. A source page does not
+   advance while its selected tail remains, and the offset survives each
+   committed cursor batch.
+3. Nominations are allocated fairly across lanes so a high-volume early lane
+   cannot starve later lanes.
+4. The final daily catch-up now executes three bounded waves. Before each
+   wave, packet-free preflight re-reads the strong KV and paced-source ledgers.
+   A safety-reserve or source-budget refusal stops it, and a wave with less than
+   90 minutes before reset skips before index or target traffic. This makes more
+   unused daily allowance recoverable without weakening the per-target controls.
+5. Public-safe summaries now add aggregate-only counts for contained platform
+   errors. The reviewed period saw one or two contained platform
    errors in several catch-ups, none in the two latest runs; they did not abort
    other lanes.
-6. Keep monitoring actual schedule delay. The schedule delivered all five
-   expected runs on 5, 6, and 7 September, but start delays ranged from roughly
-   1h 47m to 5h 31m.
+
+The capped post-deployment
+[production run](https://github.com/MahdiHedhli/LeakyCompute/actions/runs/34258739647)
+completed all 14 passive lanes, persisted page offsets, committed five opaque
+nominations, safely gated four, issued one bounded read-only check, ingested one
+non-exposure outcome with one KV write, and published the authoritative
+aggregate generation. The one-day artifact contained only aggregate metadata
+and opaque IDs. The public log contained no address-like value or local path.
+The social-preview refresh and Pages deployment both completed successfully.
+
+### Monitoring still required
+
+Keep monitoring actual schedule delay. The schedule delivered all five expected
+runs on 5, 6, and 7 September, but start delays ranged from roughly 1h 47m to
+5h 31m.
 
 The social-preview hook is functioning as designed. It produced 35 successful
 refreshes and 35 successful public deployments in the review window, plus 22
