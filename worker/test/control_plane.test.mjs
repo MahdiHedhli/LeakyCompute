@@ -7,7 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { authoritativeNow } from "../src/control_plane.js";
+import { authoritativeNow, DiscoveryControlPlane } from "../src/control_plane.js";
 
 const ADMIN = "control-plane-test-admin";
 const NOMINATOR = "control-plane-test-nominator";
@@ -34,6 +34,7 @@ const child = spawn(
     "CONTROL_PLANE_READY:true",
     "--var",
     "CONTROL_PLANE_TEST_TIME_ENABLED:true",
+    "CONTROL_PLANE_TEST_MAINTENANCE_BUDGET_ENABLED:true",
     "--var",
     "SHODAN_MONTHLY_QUERY_BUDGET:10",
     "--var",
@@ -181,6 +182,23 @@ async function check(name, fn) {
 try {
   const health = await waitReady();
   console.log("\n[CP1] durable pre-probe permission state");
+  const alarmProbe = Object.create(DiscoveryControlPlane.prototype);
+  let scheduledAlarm = null;
+  alarmProbe.alarmScheduling = Promise.resolve();
+  alarmProbe.ctx = {
+    storage: {
+      getAlarm: async () => scheduledAlarm,
+      setAlarm: async (at) => { scheduledAlarm = at; },
+    },
+    waitUntil: () => {},
+  };
+  const sooner = Date.now() + 5_000;
+  alarmProbe.scheduleEarliestAlarm(sooner);
+  alarmProbe.scheduleEarliestAlarm(Date.now() + 180 * 86_400_000);
+  await alarmProbe.alarmScheduling;
+  await check("a later retention alarm cannot replace an earlier maintenance continuation", () => {
+    assert.equal(scheduledAlarm, sooner);
+  });
   await check("production permission clocks ignore caller-supplied time", () => {
     const supplied = Date.now() + 365 * 86_400_000;
     const before = Date.now();
@@ -416,6 +434,11 @@ try {
   });
   const directExclusion = await post("/v1/admin/control/exclusions", { entries: ["23.0.0.7"] });
   const purgeId = directExclusion.body.purge_jobs?.[0]?.id;
+  const duringPurge = await post("/v1/admin/control/reconcile", { limit: 2 });
+  await check("a pending purge blocks aggregate publication", () => {
+    assert.equal(duringPurge.status, 409);
+    assert.equal(duringPurge.body.error, "purge_pending");
+  });
   let purge;
   for (let i = 0; i < 30; i++) {
     purge = await post("/v1/admin/control/purge", { id: purgeId, limit: 2 });
@@ -507,8 +530,10 @@ try {
   });
 
   let reconciliation;
+  let firstPageBucketWrites;
   for (let i = 0; i < 20; i++) {
     reconciliation = await post("/v1/admin/control/reconcile", { limit: 2 });
+    if (i === 0) firstPageBucketWrites = reconciliation.body.bucket_writes;
     if (reconciliation.body.complete) break;
   }
   const aggregates = await get("/v1/admin/control/aggregates");
@@ -517,7 +542,107 @@ try {
     assert.equal(aggregates.status, 200);
     assert.equal(aggregates.body.dimensions.corpus.reverified_hosts, 6);
     assert.equal(aggregates.body.dimensions.stack.ollama, 6);
+    assert.equal(firstPageBucketWrites, 5);
+    assert.equal(aggregates.body.last_reverified_at, "2026-08-27T00:00:00.000Z");
   });
+
+  const reused = await post("/v1/admin/control/reconcile", { limit: 2 });
+  const identical = await post("/v1/admin/control/hosts", { records: [hostRecords[0]] });
+  const reusedAgain = await post("/v1/admin/control/reconcile", { limit: 2 });
+  await check("unchanged corpus reuses its complete generation without host or bucket writes", () => {
+    assert.equal(reused.body.reused, true);
+    assert.equal(reused.body.scanned, 0);
+    assert.equal(reused.body.generation_id, aggregates.body.generation_id);
+    assert.equal(identical.body.accepted, 1);
+    assert.equal(identical.body.changed, false);
+    assert.equal(reusedAgain.body.reused, true);
+    assert.equal(reusedAgain.body.generation_id, aggregates.body.generation_id);
+  });
+
+  const newerAnswer = await post("/v1/admin/control/hosts", {
+    records: [{ ...hostRecords[0], last_seen: "2026-09-01T00:00:00Z" }],
+  });
+  let refreshed;
+  for (let i = 0; i < 20; i++) {
+    refreshed = await post("/v1/admin/control/reconcile", { limit: 2 });
+    if (refreshed.body.complete) break;
+  }
+  const freshAggregates = await get("/v1/admin/control/aggregates");
+  await check("a newer successful answer advances freshness and rebuilds the generation", () => {
+    assert.equal(newerAnswer.body.changed, true);
+    assert.equal(refreshed.body.complete, true);
+    assert.notEqual(refreshed.body.generation_id, aggregates.body.generation_id);
+    assert.equal(freshAggregates.body.last_reverified_at, "2026-09-01T00:00:00.000Z");
+    assert.equal(freshAggregates.body.dimensions.corpus.reverified_hosts, 6);
+  });
+
+  await post("/v1/admin/control/hosts", { records: [{
+    ...hostRecords[1], stack: "ray", port: 8265,
+  }] });
+  const interrupted = await post("/v1/admin/control/reconcile", { limit: 2 });
+  const stillCurrent = await get("/v1/admin/control/aggregates");
+  await post("/v1/admin/control/hosts", { records: [{
+    ...hostRecords[0], country_code: "CA",
+  }] });
+  await post("/v1/admin/control/hosts", { records: [{
+    ...hostRecords[2], last_seen: "2026-09-02T00:00:00Z",
+  }] });
+  const restarted = await post("/v1/admin/control/reconcile", { limit: 2 });
+  let resumed = restarted;
+  for (let i = 0; i < 20 && !resumed.body.complete; i++) {
+    resumed = await post("/v1/admin/control/reconcile", { limit: 2 });
+  }
+  const afterRestart = await get("/v1/admin/control/aggregates");
+  await check("a mid-build host change keeps staging accurate without restarting", () => {
+    assert.equal(interrupted.body.complete, false);
+    assert.equal(stillCurrent.body.generation_id, freshAggregates.body.generation_id);
+    assert.equal(restarted.body.generation_id, interrupted.body.generation_id);
+    assert.equal(resumed.body.complete, true);
+    assert.equal(afterRestart.body.dimensions.stack.ray, 1);
+    assert.equal(afterRestart.body.dimensions.corpus.reverified_hosts, 6);
+    assert.equal(afterRestart.body.dimensions.country.CA, 1);
+    assert.equal(afterRestart.body.dimensions.country.US, 5);
+    assert.equal(afterRestart.body.last_reverified_at, "2026-09-02T00:00:00.000Z");
+  });
+
+  await post("/v1/admin/control/hosts", { records: [{
+    ...hostRecords[3], last_seen: "2026-09-03T00:00:00Z",
+  }] });
+  const capped = await post("/v1/admin/control/reconcile", {
+    limit: 2, maintenance_write_budget: resumed.body.maintenance_writes_used + 1,
+  });
+  const beforeContinuation = await get("/v1/admin/control/aggregates");
+  const deferredHealth = await get("/v1/admin/control/health");
+  await check("a maintenance budget stop keeps the page checkpoint and last complete publication", () => {
+    assert.equal(capped.body.maintenance_budget_exhausted, true);
+    assert.equal(capped.body.complete, false);
+    assert.equal(beforeContinuation.body.generation_id, afterRestart.body.generation_id);
+    assert.equal(deferredHealth.body.maintenance_deferred, true);
+  });
+  for (let i = 0; i < 20; i++) {
+    const step = await post("/v1/admin/control/reconcile", { limit: 2 });
+    if (step.body.complete) break;
+  }
+  const resumedHealth = await get("/v1/admin/control/health");
+  await check("a completed continuation releases the discovery preflight hold", () => {
+    assert.equal(resumedHealth.body.maintenance_deferred, false);
+  });
+
+  await post("/v1/admin/control/hosts", { records: [{
+    ip: "24.0.0.2", port: 8888, stack: "jupyter", source: "public_index:shodan",
+    first_seen: "2025-01-01T00:00:00Z", last_seen: "2025-01-01T00:00:00Z",
+  }] });
+  const retentionFirst = await post("/v1/admin/control/reconcile", { limit: 2 });
+  const afterRetention = await get("/v1/admin/control/hosts?limit=20");
+  await check("reconciliation drains overdue retention before scanning or reusing a generation", () => {
+    assert.equal(retentionFirst.body.complete, false);
+    assert.equal(retentionFirst.body.retention_pending, true);
+    assert.equal(afterRetention.body.records.some((row) => row.ip === "24.0.0.2"), false);
+  });
+  for (let i = 0; i < 20; i++) {
+    const step = await post("/v1/admin/control/reconcile", { limit: 2 });
+    if (step.body.complete) break;
+  }
 
   const approved = await post("/v1/admin/allowlist", {
     op: "approve", login: "researcher-one", aliases: ["researcher@example.test"],
@@ -537,6 +662,34 @@ try {
     assert.equal(JSON.stringify(approved.body).includes("researcher@example.test"), false);
   });
 
+  const dayOne = Date.parse("2026-10-03T12:00:00Z");
+  const dayTwo = Date.parse("2026-10-05T12:00:00Z");
+  const expiringFirst = await post("/v1/admin/control/hosts", { records: [{
+    ip: "1.0.0.1", port: 11434, stack: "ollama", source: "public_index:shodan",
+    first_seen: "2026-04-07T00:00:00Z", last_seen: "2026-04-07T00:00:00Z",
+  }] });
+  assert.equal(expiringFirst.body.accepted, 1);
+  const dayOnePage = await post("/v1/admin/control/reconcile", { limit: 2, now: dayOne });
+  const dayOneStop = await post("/v1/admin/control/reconcile", {
+    limit: 2, now: dayOne,
+    maintenance_write_budget: dayOnePage.body.maintenance_writes_used + 1,
+  });
+  const expiredDuringBuild = await post("/v1/admin/control/retention", { limit: 2, now: dayTwo });
+  let dayTwoPage;
+  for (let i = 0; i < 20; i++) {
+    dayTwoPage = await post("/v1/admin/control/reconcile", { limit: 2, now: dayTwo });
+    if (dayTwoPage.body.complete) break;
+  }
+  const afterMultiDay = await get("/v1/admin/control/aggregates");
+  await check("a deferred generation survives UTC rollover and a scanned host's expiry", () => {
+    assert.equal(dayOnePage.body.complete, false);
+    assert.equal(dayOneStop.body.maintenance_budget_exhausted, true);
+    assert.equal(expiredDuringBuild.body.deleted, 1);
+    assert.equal(dayTwoPage.body.complete, true);
+    assert.equal(dayTwoPage.body.generation_id, dayOnePage.body.generation_id);
+    assert.equal(afterMultiDay.body.dimensions.corpus.reverified_hosts, 6);
+  });
+
   const asnOptOut = await post("/v1/admin/control/exclusions", { entries: ["AS64555"] });
   const { lease: unverifiedAsnLease } = await leaseCandidate({
     ip: "64.6.65.8", asn: "AS64556",
@@ -546,6 +699,8 @@ try {
     assert.equal(unverifiedAsnLease.status, 503);
     assert.equal(unverifiedAsnLease.body.error, "independent_asn_verification_required");
   });
+
+
 } finally {
   child.kill("SIGTERM");
   await new Promise((resolve) => child.once("exit", resolve));

@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
+import { publicStatsPayload } from "../src/lib/stats.js";
 import { check, section, finish, makeKV } from "./_harness.mjs";
 
 const ctx = { waitUntil: (p) => p.catch(() => {}) };
@@ -141,6 +142,21 @@ section("[S3] production configuration provides the two isolation layers");
   await check("the stats limiter permits only two origin builds per minute", () => {
     assert.match(config, /name\s*=\s*"STATS_RATE_LIMITER"/);
     assert.match(config, /\[ratelimits\.simple\]\s+limit\s*=\s*2\s+period\s*=\s*60/);
+  });
+}
+
+section("[S4] a completed empty generation overrides stale compatibility counters");
+
+{
+  const env = productionEnv(limiter());
+  await env.KV.put("stats:corpus", JSON.stringify({ reverified_hosts: 99 }));
+  await env.KV.put("stats:by_country_stack", JSON.stringify({ "US|ollama": 99 }));
+  const stats = await publicStatsPayload(env, {}, {
+    authoritative: { dimensions: {}, last_reverified_at: null },
+  });
+  await check("empty authoritative counts publish zero instead of stale KV totals", () => {
+    assert.equal(stats.reverified.hosts, 0);
+    assert.deepEqual(stats.geography.by_country_stack, {});
   });
 }
 

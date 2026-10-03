@@ -16,6 +16,9 @@ const PERMIT_TTL_MS = 60_000;
 const HOST_RETENTION_MS = 180 * DAY_MS;
 const ATTEMPT_RETENTION_MS = 90 * DAY_MS;
 const MAX_PAGE = 500;
+// Reconciliation is only one contributor to the account-wide DO write quota.
+// Leave most of the free daily allowance for leases, exclusions and retention.
+const MAX_MAINTENANCE_DAILY_WRITES = 40_000;
 const UNKNOWN_ASN = "AS-UNKNOWN";
 const MAX_SOURCE_MONTHLY_UNITS = 1_000_000;
 
@@ -184,6 +187,7 @@ export class DiscoveryControlPlane {
     this.ctx = ctx;
     this.env = env;
     this.sql = ctx.storage.sql;
+    this.alarmScheduling = Promise.resolve();
     if (env.ENVIRONMENT === "production" && env.CONTROL_PLANE_READY === "true") {
       // Production cutover is complete and the single named object is already
       // migrated. Do not execute even no-op DDL here: Cloudflare charges those
@@ -380,6 +384,10 @@ export class DiscoveryControlPlane {
     ))?.n || 0;
     const migration = this.meta("migration_complete") === "true";
     const generation = this.meta("current_aggregate_generation");
+    const maintenanceDeferred = this.meta("maintenance_deferred") === "true" &&
+      !!one(this.sql.exec(
+        "SELECT 1 AS building FROM aggregate_generations WHERE status = 'building' LIMIT 1"
+      ));
     const schema = Number(this.meta("schema_version") || 2);
     return json({
       ok: true,
@@ -390,6 +398,7 @@ export class DiscoveryControlPlane {
       pending_purges: pendingPurges,
       migration_complete: migration,
       aggregate_generation: generation || null,
+      maintenance_deferred: maintenanceDeferred,
       ready: schema >= 3 && migration && !!generation && Number(pendingPurges) === 0,
     });
   }
@@ -571,6 +580,73 @@ export class DiscoveryControlPlane {
     return epoch;
   }
 
+  buildingAggregate() {
+    const generation = one(this.sql.exec(
+      "SELECT id, cursor FROM aggregate_generations WHERE status = 'building' ORDER BY started_at DESC LIMIT 1"
+    ));
+    return generation && Number(this.meta(`aggregate_epoch:${generation.id}`)) ===
+      Number(this.meta("corpus_epoch") || 0) ? generation : null;
+  }
+
+  aggregateBuckets(record) {
+    if (!record?.last_seen) return [];
+    const country = record.country_code || record.country || "ZZ";
+    const asn = record.asn || UNKNOWN_ASN;
+    const stacks = uniqStacks(record.stacks || [record.stack]);
+    return [
+      ["corpus", "reverified_hosts"], ["country", country], ["asn", asn],
+      ...stacks.map((stack) => ["stack", stack]),
+      ...stacks.map((stack) => ["country_stack", `${country}|${stack}`]),
+    ];
+  }
+
+  adjustBuildingAggregates(generation, changes) {
+    if (!generation) return;
+    const delta = new Map();
+    for (const { ip, before, after } of changes) {
+      if (ip > (generation.cursor || "")) continue;
+      for (const [record, change] of [[before, -1], [after, 1]]) {
+        for (const bucket of this.aggregateBuckets(record)) {
+          const key = JSON.stringify(bucket);
+          delta.set(key, (delta.get(key) || 0) + change);
+        }
+      }
+    }
+    for (const [key, change] of delta) {
+      if (!change) continue;
+      const [dimension, bucket] = JSON.parse(key);
+      if (change > 0) {
+        this.sql.exec(
+          `INSERT INTO aggregate_counts(generation_id, dimension, bucket, count)
+           VALUES (?, ?, ?, ?) ON CONFLICT(generation_id, dimension, bucket)
+           DO UPDATE SET count = count + excluded.count`,
+          generation.id, dimension, bucket, change
+        );
+      } else {
+        const existing = Number(one(this.sql.exec(
+          `SELECT count FROM aggregate_counts
+           WHERE generation_id = ? AND dimension = ? AND bucket = ?`,
+          generation.id, dimension, bucket
+        ))?.count || 0);
+        if (existing < -change) throw new Error("building_aggregate_bucket_underflow");
+        this.sql.exec(
+          `UPDATE aggregate_counts SET count = count + ?
+           WHERE generation_id = ? AND dimension = ? AND bucket = ?`,
+          change, generation.id, dimension, bucket
+        );
+        this.sql.exec(
+          `DELETE FROM aggregate_counts WHERE generation_id = ? AND dimension = ? AND bucket = ? AND count = 0`,
+          generation.id, dimension, bucket
+        );
+      }
+    }
+  }
+
+  bumpMaintainedCorpusEpoch(generation) {
+    const epoch = this.bumpCorpusEpoch();
+    if (generation) this.setMeta(`aggregate_epoch:${generation.id}`, epoch);
+  }
+
   activeExclusions() {
     return rows(this.sql.exec(
       "SELECT type, value, active FROM exclusions WHERE active = 1 ORDER BY type, value"
@@ -717,7 +793,10 @@ export class DiscoveryControlPlane {
     const now = authoritativeNow(this.env, body);
     const accepted = [];
     const rejected = [];
+    let changed = false;
     this.ctx.storage.transactionSync(() => {
+      const building = this.buildingAggregate();
+      const aggregateChanges = [];
       for (const input of records) {
         const normalized = normalizeHostRecord(input, now);
         if (normalized.error) {
@@ -729,7 +808,7 @@ export class DiscoveryControlPlane {
           continue;
         }
         const prior = one(this.sql.exec(
-          "SELECT record_json, first_seen_at, last_seen_at FROM hosts WHERE ip = ?",
+          "SELECT asn, country_code, record_json, first_seen_at, last_seen_at, expires_at FROM hosts WHERE ip = ?",
           normalized.ip
         ));
         let next = normalized;
@@ -767,6 +846,14 @@ export class DiscoveryControlPlane {
             expiresAt: (lastSeen ?? firstSeen) + HOST_RETENTION_MS,
           };
         }
+        const recordJson = JSON.stringify(next.record);
+        if (prior && prior.asn === next.asn && prior.country_code === next.countryCode &&
+            prior.record_json === recordJson && Number(prior.first_seen_at) === next.firstSeen &&
+            Number(prior.last_seen_at) === (next.lastSeen || 0) &&
+            Number(prior.expires_at) === next.expiresAt) {
+          accepted.push(next.ip);
+          continue;
+        }
         this.sql.exec(
           `INSERT INTO hosts(ip, asn, country_code, record_json, first_seen_at,
              last_seen_at, expires_at, updated_at)
@@ -782,18 +869,24 @@ export class DiscoveryControlPlane {
           next.ip,
           next.asn,
           next.countryCode,
-          JSON.stringify(next.record),
+          recordJson,
           next.firstSeen,
           next.lastSeen || 0,
           next.expiresAt,
           now
         );
+        aggregateChanges.push({ ip: next.ip,
+          before: prior ? JSON.parse(prior.record_json) : null, after: next.record });
+        changed = true;
         accepted.push(next.ip);
       }
-      if (accepted.length) this.bumpCorpusEpoch();
+      if (changed) {
+        this.adjustBuildingAggregates(building, aggregateChanges);
+        this.bumpMaintainedCorpusEpoch(building);
+      }
     });
-    if (accepted.length) this.scheduleRetentionAlarm();
-    return json({ ok: rejected.length === 0, accepted: accepted.length, rejected });
+    if (changed) this.scheduleRetentionAlarm();
+    return json({ ok: rejected.length === 0, accepted: accepted.length, changed, rejected });
   }
 
   retireHosts(body) {
@@ -806,9 +899,11 @@ export class DiscoveryControlPlane {
     const results = [];
     let changed = false;
     this.ctx.storage.transactionSync(() => {
+      const building = this.buildingAggregate();
+      const aggregateChanges = [];
       for (const ip of ips) {
         const host = one(this.sql.exec(
-          "SELECT last_seen_at FROM hosts WHERE ip = ?",
+          "SELECT last_seen_at, record_json FROM hosts WHERE ip = ?",
           ip
         ));
         if (!host) {
@@ -829,6 +924,7 @@ export class DiscoveryControlPlane {
           continue;
         }
         this.sql.exec("DELETE FROM hosts WHERE ip = ?", ip);
+        aggregateChanges.push({ ip, before: JSON.parse(host.record_json), after: null });
         this.setMeta(`retirement_receipt:${ip}:${now}`, JSON.stringify({
           ip,
           reason,
@@ -839,7 +935,10 @@ export class DiscoveryControlPlane {
         results.push({ ip, deleted: true, reason, outcome: attempt.outcome });
         changed = true;
       }
-      if (changed) this.bumpCorpusEpoch();
+      if (changed) {
+        this.adjustBuildingAggregates(building, aggregateChanges);
+        this.bumpMaintainedCorpusEpoch(building);
+      }
     });
     return json({
       ok: results.every((row) => row.deleted || row.reason === "not_found"),
@@ -980,6 +1079,11 @@ export class DiscoveryControlPlane {
   }
 
   resumePurge(body) {
+    // Host deletion, staged bucket deltas and the purge checkpoint commit together.
+    return this.ctx.storage.transactionSync(() => this.resumePurgeTransaction(body));
+  }
+
+  resumePurgeTransaction(body) {
     const id = String(body.id || "");
     const limit = Math.max(1, Math.min(Number(body.limit) || 200, MAX_PAGE));
     const job = one(this.sql.exec("SELECT * FROM purge_jobs WHERE id = ?", id));
@@ -992,10 +1096,12 @@ export class DiscoveryControlPlane {
     let matched = Number(job.matched || 0);
     let deleted = Number(job.deleted || 0);
     let changed = false;
+    const building = this.buildingAggregate();
+    const aggregateChanges = [];
 
     if (status === "hosts" || status === "verify_hosts") {
       const page = rows(this.sql.exec(
-        "SELECT ip, asn FROM hosts WHERE ip > ? ORDER BY ip LIMIT ?",
+        "SELECT ip, asn, record_json FROM hosts WHERE ip > ? ORDER BY ip LIMIT ?",
         hostCursor,
         limit
       ));
@@ -1007,6 +1113,7 @@ export class DiscoveryControlPlane {
       } else {
         for (const row of hits) {
           this.sql.exec("DELETE FROM hosts WHERE ip = ?", row.ip);
+          aggregateChanges.push({ ip: row.ip, before: JSON.parse(row.record_json), after: null });
           deleted++;
           changed = true;
         }
@@ -1050,7 +1157,10 @@ export class DiscoveryControlPlane {
     }
 
     const now = Date.now();
-    if (changed) this.bumpCorpusEpoch();
+    if (changed) {
+      this.adjustBuildingAggregates(building, aggregateChanges);
+      this.bumpMaintainedCorpusEpoch(building);
+    }
     this.sql.exec(
       `UPDATE purge_jobs SET status = ?, host_cursor = ?, attempt_cursor = ?,
        verification_pass = ?, matched = ?, deleted = ?, updated_at = ?, completed_at = ?
@@ -1074,6 +1184,10 @@ export class DiscoveryControlPlane {
         deleted,
         completed_at: new Date(now).toISOString(),
       }));
+      const remainingPurges = Number(one(this.sql.exec(
+        "SELECT COUNT(*) AS n FROM purge_jobs WHERE status != 'complete'"
+      ))?.n || 0);
+      if (!remainingPurges) this.scheduleReconciliationAlarm();
     }
     return this.purgeStatus(id);
   }
@@ -1082,16 +1196,26 @@ export class DiscoveryControlPlane {
     const now = authoritativeNow(this.env, body);
     const limit = Math.max(1, Math.min(Number(body.limit) || 200, MAX_PAGE));
     const due = rows(this.sql.exec(
-      "SELECT ip FROM hosts WHERE expires_at <= ? ORDER BY expires_at, ip LIMIT ?",
+      "SELECT ip, record_json FROM hosts WHERE expires_at <= ? ORDER BY expires_at, ip LIMIT ?",
       now,
       limit
     ));
-    for (const row of due) this.sql.exec("DELETE FROM hosts WHERE ip = ?", row.ip);
+    this.ctx.storage.transactionSync(() => {
+      const building = this.buildingAggregate();
+      const aggregateChanges = [];
+      for (const row of due) {
+        this.sql.exec("DELETE FROM hosts WHERE ip = ?", row.ip);
+        aggregateChanges.push({ ip: row.ip, before: JSON.parse(row.record_json), after: null });
+      }
+      if (due.length) {
+        this.adjustBuildingAggregates(building, aggregateChanges);
+        this.bumpMaintainedCorpusEpoch(building);
+      }
+    });
     const attemptsCutoff = now - ATTEMPT_RETENTION_MS;
     this.sql.exec("DELETE FROM permits WHERE expires_at < ?", now);
     this.sql.exec("DELETE FROM rate_events WHERE at < ?", now - DAY_MS);
     this.sql.exec("DELETE FROM attempts WHERE updated_at < ?", attemptsCutoff);
-    if (due.length) this.bumpCorpusEpoch();
     this.scheduleRetentionAlarm();
     const remaining = Number(one(this.sql.exec(
       "SELECT COUNT(*) AS n FROM hosts WHERE expires_at <= ?",
@@ -1104,17 +1228,83 @@ export class DiscoveryControlPlane {
     const next = Number(one(this.sql.exec(
       "SELECT MIN(expires_at) AS at FROM hosts"
     ))?.at || 0);
-    if (next > 0 && this.ctx.storage?.setAlarm) {
-      this.ctx.waitUntil(this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1_000)));
+    if (next > 0) this.scheduleEarliestAlarm(next);
+  }
+
+  scheduleEarliestAlarm(at) {
+    if (!this.ctx.storage?.setAlarm) return;
+    const requested = Math.max(at, Date.now() + 1_000);
+    const scheduled = this.alarmScheduling.catch(() => {}).then(async () => {
+      const existing = Number(await this.ctx.storage.getAlarm?.());
+      // A DO has one alarm. Preserve whichever pending deadline is earlier.
+      if (Number.isFinite(existing) && existing > Date.now() && existing <= requested) return;
+      await this.ctx.storage.setAlarm(requested);
+    });
+    this.alarmScheduling = scheduled;
+    this.ctx.waitUntil(scheduled);
+  }
+
+  maintenanceBudget(now = Date.now()) {
+    const day = new Date(now).toISOString().slice(0, 10);
+    let saved;
+    try { saved = JSON.parse(this.meta("maintenance_budget") || "null"); } catch { saved = null; }
+    return { day, used: saved?.day === day ? Math.max(0, Number(saved.used) || 0) : 0 };
+  }
+
+  maintenanceLimit(body = {}) {
+    if (this.env?.ENVIRONMENT === "test" &&
+        this.env?.CONTROL_PLANE_TEST_MAINTENANCE_BUDGET_ENABLED === "true" &&
+        Number.isInteger(body.maintenance_write_budget) && body.maintenance_write_budget > 0) {
+      return Math.min(body.maintenance_write_budget, MAX_MAINTENANCE_DAILY_WRITES);
     }
+    return MAX_MAINTENANCE_DAILY_WRITES;
+  }
+
+  maintenanceBudgetPending(used, limit) {
+    if (this.meta("maintenance_deferred") !== "true") {
+      this.setMeta("maintenance_deferred", "true");
+    }
+    const nextDay = new Date();
+    nextDay.setUTCHours(24, 5, 0, 0);
+    this.scheduleReconciliationAlarm(nextDay.getTime());
+    return json({ ok: true, complete: false, maintenance_budget_exhausted: true,
+      maintenance_writes_used: used, maintenance_write_limit: limit });
+  }
+
+  scheduleReconciliationAlarm(at = Date.now() + 60_000) {
+    this.scheduleEarliestAlarm(at);
   }
 
   async alarm() {
     this.runRetention({ limit: MAX_PAGE });
+    // Each alarm is bounded; unfinished generations checkpoint and request
+    // another alarm. A completed generation restores the next expiry alarm.
+    for (let page = 0; page < 20; page++) {
+      const result = await this.runReconciliation({ limit: MAX_PAGE }).json();
+      if (!result.ok || result.complete || result.maintenance_budget_exhausted) break;
+    }
   }
 
   runReconciliation(body = {}) {
     const limit = Math.max(1, Math.min(Number(body.limit) || 250, MAX_PAGE));
+    const maintenanceLimit = this.maintenanceLimit(body);
+    // A publication must not make an overdue or partially purged host visible.
+    const pendingPurges = Number(one(this.sql.exec(
+      "SELECT COUNT(*) AS n FROM purge_jobs WHERE status != 'complete'"
+    ))?.n || 0);
+    if (pendingPurges) return json({ ok: false, error: "purge_pending" }, 409);
+    const due = one(this.sql.exec(
+      "SELECT 1 AS due FROM hosts WHERE expires_at <= ? LIMIT 1", authoritativeNow(this.env, body)
+    ));
+    if (due) {
+      this.runRetention({ limit: MAX_PAGE, now: body.now });
+      this.scheduleReconciliationAlarm();
+      // The caller must return for a recount even if this page drained expiry.
+      return json({ ok: true, complete: false, retention_pending: true,
+        remaining: Number(one(this.sql.exec(
+          "SELECT COUNT(*) AS n FROM hosts WHERE expires_at <= ?", authoritativeNow(this.env, body)
+        ))?.n || 0) });
+    }
     let generation = one(this.sql.exec(
       "SELECT * FROM aggregate_generations WHERE status = 'building' ORDER BY started_at DESC LIMIT 1"
     ));
@@ -1122,9 +1312,34 @@ export class DiscoveryControlPlane {
     if (generation) {
       const startEpoch = Number(this.meta(`aggregate_epoch:${generation.id}`));
       if (startEpoch !== epoch) {
-        this.sql.exec("UPDATE aggregate_generations SET status = 'aborted' WHERE id = ?", generation.id);
-        this.sql.exec("DELETE FROM aggregate_counts WHERE generation_id = ?", generation.id);
+        const stagedCount = Number(one(this.sql.exec(
+          "SELECT COUNT(*) AS n FROM aggregate_counts WHERE generation_id = ?", generation.id
+        ))?.n || 0);
+        const budget = this.maintenanceBudget(authoritativeNow(this.env, body));
+        const cost = stagedCount + 8;
+        if (budget.used + cost > maintenanceLimit) {
+          return this.maintenanceBudgetPending(budget.used, maintenanceLimit);
+        }
+        this.ctx.storage.transactionSync(() => {
+          this.sql.exec("UPDATE aggregate_generations SET status = 'aborted' WHERE id = ?", generation.id);
+          this.sql.exec("DELETE FROM aggregate_counts WHERE generation_id = ?", generation.id);
+          this.setMeta("maintenance_budget", JSON.stringify({
+            day: budget.day, used: budget.used + cost,
+          }));
+        });
         generation = null;
+      }
+    }
+    const currentId = this.meta("current_aggregate_generation");
+    if (!generation && currentId) {
+      const current = one(this.sql.exec(
+        "SELECT status FROM aggregate_generations WHERE id = ?", currentId
+      ));
+      const completedEpoch = this.meta(`aggregate_epoch:${currentId}`);
+      if (current?.status === "complete" && completedEpoch !== null &&
+          Number(completedEpoch) === epoch) {
+        return json({ ok: true, complete: true, reused: true,
+          generation_id: currentId, scanned: 0, cursor: null });
       }
     }
     if (!generation) {
@@ -1144,58 +1359,79 @@ export class DiscoveryControlPlane {
       generation.cursor || "",
       limit
     ));
+    const bucketCounts = new Map();
+    let latestSeen = Number(this.meta(`aggregate_last_seen:${generation.id}`) || 0);
     for (const row of page) {
       const record = JSON.parse(row.record_json);
       // Passive index-only rows may be retained for migration bookkeeping, but
       // the public corpus/geo/stack figures explicitly mean "answered us".
       if (!record.last_seen) continue;
-      const country = record.country_code || record.country || "ZZ";
-      const asn = record.asn || UNKNOWN_ASN;
-      const stacks = uniqStacks(record.stacks || [record.stack]);
-      const buckets = [
-        ["corpus", "reverified_hosts"],
-        ["country", country],
-        ["asn", asn],
-        ...stacks.map((stack) => ["stack", stack]),
-        ...stacks.map((stack) => ["country_stack", `${country}|${stack}`]),
-      ];
-      for (const [dimension, bucket] of buckets) {
-        this.sql.exec(
-          `INSERT INTO aggregate_counts(generation_id, dimension, bucket, count)
-           VALUES (?, ?, ?, 1)
-           ON CONFLICT(generation_id, dimension, bucket)
-           DO UPDATE SET count = count + 1`,
-          generation.id,
-          dimension,
-          bucket
-        );
+      latestSeen = Math.max(latestSeen, Date.parse(record.last_seen) || 0);
+      for (const [dimension, bucket] of this.aggregateBuckets(record)) {
+        const key = JSON.stringify([dimension, bucket]);
+        bucketCounts.set(key, (bucketCounts.get(key) || 0) + 1);
       }
     }
     const cursor = page.at(-1)?.ip || generation.cursor || "";
-    this.sql.exec("UPDATE aggregate_generations SET cursor = ? WHERE id = ?", cursor, generation.id);
     const complete = page.length < limit;
-    if (complete) {
-      const finalEpoch = Number(this.meta("corpus_epoch") || 0);
-      const startEpoch = Number(this.meta(`aggregate_epoch:${generation.id}`));
-      if (finalEpoch !== startEpoch) {
-        this.sql.exec("UPDATE aggregate_generations SET status = 'aborted' WHERE id = ?", generation.id);
-        return json({ ok: true, complete: false, restarted: true, generation_id: generation.id });
+    const budget = this.maintenanceBudget(authoritativeNow(this.env, body));
+    // Conservative page allowance covers generation creation, checkpoint,
+    // freshness, publication, budget metadata and alarm. It only estimates
+    // this reconciliation path; other Durable Object traffic is separate.
+    const estimatedWrites = bucketCounts.size + 18;
+    if (budget.used + estimatedWrites > maintenanceLimit) {
+      return this.maintenanceBudgetPending(budget.used, maintenanceLimit);
+    }
+    // Counts and the checkpoint are one commit: replaying an interrupted page
+    // can neither lose a bucket nor count the page twice.
+    this.ctx.storage.transactionSync(() => {
+      for (const [key, count] of bucketCounts) {
+        const [dimension, bucket] = JSON.parse(key);
+        this.sql.exec(
+          `INSERT INTO aggregate_counts(generation_id, dimension, bucket, count)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(generation_id, dimension, bucket)
+           DO UPDATE SET count = count + excluded.count`,
+          generation.id, dimension, bucket, count
+        );
       }
-      const now = Date.now();
-      this.ctx.storage.transactionSync(() => {
+      if (cursor !== generation.cursor) {
+        this.sql.exec("UPDATE aggregate_generations SET cursor = ? WHERE id = ?", cursor, generation.id);
+      }
+      if (latestSeen > Number(this.meta(`aggregate_last_seen:${generation.id}`) || 0)) {
+        this.setMeta(`aggregate_last_seen:${generation.id}`, latestSeen);
+      }
+      if (complete) {
+        const now = Date.now();
+        // A scanned host may have been retired or expired while this generation
+        // was building. Recompute the latest answer at publication.
+        const finalSeen = Number(one(this.sql.exec(
+          "SELECT MAX(last_seen_at) AS at FROM hosts"
+        ))?.at || 0);
+        this.setMeta(`aggregate_last_seen:${generation.id}`, finalSeen);
         this.sql.exec(
           "UPDATE aggregate_generations SET status = 'complete', completed_at = ? WHERE id = ?",
           now,
           generation.id
         );
         this.setMeta("current_aggregate_generation", generation.id);
-      });
-    }
+        if (this.meta("maintenance_deferred") === "true") {
+          this.setMeta("maintenance_deferred", "false");
+        }
+      }
+      this.setMeta("maintenance_budget", JSON.stringify({
+        day: budget.day, used: budget.used + estimatedWrites,
+      }));
+    });
+    if (complete) this.scheduleRetentionAlarm();
+    else this.scheduleReconciliationAlarm();
     return json({
       ok: true,
       complete,
       generation_id: generation.id,
       scanned: page.length,
+      bucket_writes: bucketCounts.size,
+      maintenance_writes_used: budget.used + estimatedWrites,
       cursor: complete ? null : cursor,
     });
   }
@@ -1216,10 +1452,12 @@ export class DiscoveryControlPlane {
       "SELECT completed_at FROM aggregate_generations WHERE id = ? AND status = 'complete'",
       generation
     ));
+    const lastSeen = this.meta(`aggregate_last_seen:${generation}`);
     return json({
       ok: true,
       generation_id: generation,
       completed_at: info?.completed_at ? new Date(Number(info.completed_at)).toISOString() : null,
+      last_reverified_at: lastSeen ? new Date(Number(lastSeen)).toISOString() : null,
       dimensions,
     });
   }
