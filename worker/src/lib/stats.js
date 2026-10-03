@@ -110,8 +110,10 @@ export async function publicStatsPayload(env, live, { authoritative = null } = {
     by_asn: toSorted(dimensions.asn, "asn"),
     by_stack: toSorted(dimensions.stack, "stack"),
   } : legacyGeo;
-  const countryStack = dimensions?.country_stack || legacyCountryStack;
-  const reverifiedHosts = dimensions?.corpus?.reverified_hosts ?? corpus.reverified_hosts ?? 0;
+  const countryStack = dimensions ? dimensions.country_stack || {} : legacyCountryStack;
+  const reverifiedHosts = dimensions
+    ? dimensions.corpus?.reverified_hosts ?? 0
+    : corpus.reverified_hosts ?? 0;
   return {
     // Spec §4: three provenance-separated numbers, never summed. They answer
     // different questions — what an archive once listed, what an index lists
@@ -155,7 +157,8 @@ export async function publicStatsPayload(env, live, { authoritative = null } = {
       hosts: reverifiedHosts,
       window_days: RETENTION_DAYS,
       source: "read-only GET by us",
-      last_reverified_at: authoritative?.completed_at || corpus.last_reverified_at || null,
+      // Recount completion is maintenance, not a successful host check.
+      last_reverified_at: authoritative?.last_reverified_at || corpus.last_reverified_at || null,
       // Q-3 and Q-4 both bound this number; the card must carry them or the
       // reader takes it for the population.
       note:

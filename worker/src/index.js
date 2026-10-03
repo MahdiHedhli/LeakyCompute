@@ -324,12 +324,21 @@ export default {
           throw new Error(`durable retention failed: ${retention.body.error || retention.status}`);
         }
         let reconciliation;
-        do {
+        for (let page = 0; page < 20; page++) {
           reconciliation = await controlCall(env, "/reconcile/run", { body: { limit: 500 } });
           if (reconciliation.status !== 200 || reconciliation.body.ok === false) {
             throw new Error(`durable reconciliation failed: ${reconciliation.body.error || reconciliation.status}`);
           }
-        } while (!reconciliation.body.complete && !reconciliation.body.restarted);
+          if (reconciliation.body.complete) return;
+          if (reconciliation.body.maintenance_budget_exhausted) {
+            console.log("durable reconciliation deferred to next budget window");
+            return;
+          }
+        }
+        // The Durable Object has checkpointed the partial generation and
+        // scheduled a bounded continuation alarm. Keep the prior complete
+        // generation visible until that continuation commits.
+        console.log("durable reconciliation continuing from checkpoint");
       })().catch((err) => console.error("durable maintenance failed:", err?.message || err)));
       return;
     }
