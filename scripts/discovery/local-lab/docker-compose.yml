@@ -46,7 +46,7 @@ services:
   # Reproduces the jupyter-no-token-auth finding: GET /tree renders the file
   # browser with no redirect to /login.
   jupyter-open:
-    image: quay.io/jupyter/base-notebook:latest@sha256:23fbe16371af3c0fdc833fa0962b42fd07811e152b821ff51d19a8d6e9cc86cf
+    image: quay.io/jupyter/base-notebook:latest@sha256:963ec09d64bfe909efe60423c390356d12bb92b6966b3da844cbede7df9454f4
     ports: ["127.0.0.1:8888:8888"]
     command: >
       start-notebook.py
@@ -60,7 +60,7 @@ services:
   # Also the case to check /api/status auth behaviour on — it varies across
   # jupyter_server releases and our confirm step depends on it.
   jupyter-token:
-    image: quay.io/jupyter/base-notebook:latest@sha256:23fbe16371af3c0fdc833fa0962b42fd07811e152b821ff51d19a8d6e9cc86cf
+    image: quay.io/jupyter/base-notebook:latest@sha256:963ec09d64bfe909efe60423c390356d12bb92b6966b3da844cbede7df9454f4
     ports: ["127.0.0.1:8889:8888"]
     command: >
       start-notebook.py
