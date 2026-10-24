@@ -33,7 +33,7 @@ services:
   # Serves no favicon by default. Here for fingerprint validation:
   # GET /api/version, GET /api/tags, GET / ("Ollama is running").
   ollama:
-    image: ollama/ollama:latest@sha256:57d60e686821ea81a7748a3ec8141308c8b8f95b27105713954abf7a6529e700
+    image: ollama/ollama:latest@sha256:020e4134285e2ef4d8fd801234176de3b4faadc992a3eb06c8e66a2f9d4c4ba2
     ports: ["127.0.0.1:11434:11434"]
     volumes: ["ollama:/root/.ollama"]
     restart: "no"
